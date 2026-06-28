@@ -123,6 +123,7 @@ function App() {
   // 音频初始化与事件监听 (仅在挂载时运行一次，保持 Audio 实例唯一性)
   useEffect(() => {
     const audio = new Audio();
+    audio.crossOrigin = "anonymous"; // 解决 Web Audio 跨域安全机制导致的静音输出 Bug
     audioRef.current = audio;
     audio.volume = volume;
 
@@ -857,45 +858,45 @@ function App() {
             </div>
           )}
         </div>
-      </div>
-
-      {/* 沉浸式全屏歌词浮层 */}
-      {isLyricsOverlayOpen && playingSong && (
-        <div className="lyrics-overlay">
-          <button className="lyrics-overlay-close" onClick={() => setIsLyricsOverlayOpen(false)}>
-            <X size={24} />
-          </button>
-          
-          <div className="lyrics-overlay-title">{playingSong.title}</div>
-          <div className="lyrics-overlay-artist">{playingSong.artist || "未知歌手"}</div>
-          
-          <div className="lyrics-scroll-box">
-            {lyricsLines.map((line, idx) => {
-              const isActive = idx === activeLyricsIndex;
-              return (
-                <div 
-                  key={idx} 
-                  ref={isActive ? activeLineRef : null}
-                  className={isActive ? "lyrics-line-active" : "lyrics-line-inactive"}
-                >
-                  {line}
-                </div>
-              );
-            })}
+        
+        {/* 沉浸式全屏歌词浮层 - 移动至 main-content 内部，避免遮挡侧边栏和播放栏，且支持模糊模糊滤镜 */}
+        {isLyricsOverlayOpen && playingSong && (
+          <div className="lyrics-overlay">
+            <button className="lyrics-overlay-close" onClick={() => setIsLyricsOverlayOpen(false)}>
+              <X size={20} />
+            </button>
+            
+            <div className="lyrics-overlay-title">{playingSong.title}</div>
+            <div className="lyrics-overlay-artist">{playingSong.artist || "未知歌手"}</div>
+            
+            <div className="lyrics-scroll-box">
+              {lyricsLines.map((line, idx) => {
+                const isActive = idx === activeLyricsIndex;
+                return (
+                  <div 
+                    key={idx} 
+                    ref={isActive ? activeLineRef : null}
+                    className={isActive ? "lyrics-line-active" : "lyrics-line-inactive"}
+                  >
+                    {line}
+                  </div>
+                );
+              })}
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* 底部播放控制栏 - 全新重构 */}
       <div className="playbar">
-        {/* 最上边缘的无感进度条 */}
+        {/* 最上边缘的无感进度条 - 统一进度条与音量条样式 */}
         <div className="playbar-progress-container" onClick={handleSeek}>
           <div 
-            className="playbar-progress-fill" 
+            className="slider-fill" 
             style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
           ></div>
           <div 
-            className="playbar-progress-handle" 
+            className="slider-handle" 
             style={{ left: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
           ></div>
         </div>
@@ -966,6 +967,7 @@ function App() {
           </button>
           
           <Volume2 size={16} color="var(--text-sub)" />
+          <span className="volume-pct-label">{Math.round(volume * 100)}%</span>
           <div className="volume-slider" onClick={handleVolumeChange}>
             <div className="slider-fill" style={{ width: `${volume * 100}%` }}></div>
             <div className="slider-handle" style={{ left: `${volume * 100}%` }}></div>

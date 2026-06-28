@@ -5,6 +5,7 @@
   --bg-panel: rgba(15, 23, 42, 0.65);
   --bg-hover: rgba(255, 255, 255, 0.06);
   --border: rgba(255, 255, 255, 0.08);
+  --slider-track: rgba(255, 255, 255, 0.15);
   --text-main: #f8fafc;
   --text-sub: #94a3b8;
   --accent: #3b82f6;
@@ -20,6 +21,7 @@
   --bg-panel: rgba(255, 255, 255, 0.75);
   --bg-hover: rgba(15, 23, 42, 0.06);
   --border: rgba(15, 23, 42, 0.08);
+  --slider-track: rgba(15, 23, 42, 0.12);
   --text-main: #0f172a;
   --text-sub: #64748b;
   --accent: #2563eb;
@@ -35,6 +37,7 @@
   --bg-panel: rgba(255, 255, 255, 0.75);
   --bg-hover: rgba(244, 63, 94, 0.08);
   --border: rgba(244, 63, 94, 0.15);
+  --slider-track: rgba(244, 63, 94, 0.15);
   --text-main: #881337;
   --text-sub: #db2777;
   --accent: #f43f5e;
@@ -729,6 +732,7 @@ body {
   justify-content: space-between;
   position: relative;
   background: var(--bg-panel);
+  z-index: 110; /* Ensure playbar is ALWAYS above the lyrics modal */
 }
 
 /* Spanning 100% progress container at the very top of playbar */
@@ -738,7 +742,7 @@ body {
   left: 0;
   right: 0;
   height: 4px;
-  background: var(--border);
+  background: var(--slider-track);
   cursor: pointer;
   transition: height 0.15s ease;
   z-index: 10;
@@ -746,31 +750,6 @@ body {
 
 .playbar-progress-container:hover {
   height: 6px;
-}
-
-.playbar-progress-fill {
-  height: 100%;
-  background: linear-gradient(90deg, var(--accent) 0%, var(--accent-hover) 100%);
-  position: absolute;
-  left: 0;
-  top: 0;
-}
-
-.playbar-progress-handle {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: var(--text-main);
-  position: absolute;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  box-shadow: 0 2px 4px var(--shadow);
-  opacity: 0;
-  transition: opacity 0.15s ease;
-}
-
-.playbar-progress-container:hover .playbar-progress-handle {
-  opacity: 1;
 }
 
 .playbar-track-info {
@@ -880,9 +859,18 @@ body {
   width: 80px;
   height: 4px;
   border-radius: 2px;
-  background: var(--border);
+  background: var(--slider-track);
   position: relative;
   cursor: pointer;
+}
+
+.volume-pct-label {
+  font-size: 0.75rem;
+  color: var(--text-sub);
+  width: 32px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  margin-right: 4px;
 }
 
 /* Background Waveform Visualization */
@@ -897,7 +885,37 @@ body {
   pointer-events: none;
 }
 
-/* Beautiful Floating Full-Screen Lyrics Overlay */
+/* Unified Slider Styling */
+.slider-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+  position: absolute;
+  left: 0;
+  top: 0;
+  transition: background 0.3s ease;
+}
+
+.slider-handle {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--text-main);
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 2px 4px var(--shadow);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  pointer-events: none;
+}
+
+.playbar-progress-container:hover .slider-handle,
+.volume-slider:hover .slider-handle {
+  opacity: 1;
+}
+
+/* Beautiful Floating Lyrics Overlay - Placed INSIDE main-content to avoid blocking sidebar and playbar */
 .lyrics-overlay {
   position: absolute;
   top: 0;
@@ -905,82 +923,85 @@ body {
   right: 0;
   bottom: 0;
   z-index: 80;
-  background: rgba(10, 10, 18, 0.85);
-  backdrop-filter: blur(40px);
-  -webkit-backdrop-filter: blur(40px);
+  background: var(--bg-panel);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   padding: 40px;
   transition: all 0.3s ease;
-  border-radius: 12px;
+  border-radius: inherit; /* Matches main-content rounded corners */
 }
 
 .lyrics-overlay-close {
   position: absolute;
-  top: 24px;
-  right: 24px;
-  background: rgba(255, 255, 255, 0.05);
+  top: 20px;
+  right: 20px;
+  background: var(--bg-hover);
   border: 1px solid var(--border);
   color: var(--text-main);
   padding: 8px;
   border-radius: 50%;
   cursor: pointer;
   transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .lyrics-overlay-close:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--border);
   transform: scale(1.05);
 }
 
 .lyrics-overlay-title {
-  font-size: 1.8rem;
+  font-size: 1.6rem;
   font-weight: 800;
-  color: white;
+  color: var(--text-main);
   margin-bottom: 6px;
   text-align: center;
 }
 
 .lyrics-overlay-artist {
-  font-size: 1.1rem;
+  font-size: 1rem;
   color: var(--text-sub);
-  margin-bottom: 32px;
+  margin-bottom: 24px;
   text-align: center;
 }
 
 .lyrics-scroll-box {
   flex: 1;
   width: 100%;
-  max-width: 600px;
+  max-width: 500px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 20px;
-  padding: 40px 0;
+  gap: 16px;
+  padding: 20px 0;
   align-items: center;
 }
 
 .lyrics-line-active {
-  font-size: 1.3rem;
+  font-size: 1.25rem;
   font-weight: 700;
   color: var(--accent);
   text-align: center;
-  text-shadow: 0 0 15px var(--accent-glow);
-  transform: scale(1.03);
+  text-shadow: 0 0 12px var(--accent-glow);
+  transform: scale(1.02);
   transition: all 0.3s ease;
-  line-height: 1.6;
+  line-height: 1.5;
 }
 
 .lyrics-line-inactive {
-  font-size: 1.05rem;
+  font-size: 1.0rem;
   font-weight: 500;
   color: var(--text-sub);
-  opacity: 0.55;
+  opacity: 0.5;
   text-align: center;
   transition: all 0.3s ease;
-  line-height: 1.6;
+  line-height: 1.5;
 }
 
 /* Modal Styling */
