@@ -579,3 +579,45 @@ pub fn get_playlist_songs(playlist_id: String) -> Result<Vec<String>, String> {
     Ok(song_ids)
 }
 
+fn scan_directory(dir: &Path, files: &mut Vec<std::path::PathBuf>) -> std::io::Result<()> {
+    if dir.is_dir() {
+        for entry in fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                scan_directory(&path, files)?;
+            } else if path.is_file() {
+                if let Some(ext) = path.extension() {
+                    let ext_str = ext.to_string_lossy().to_lowercase();
+                    if ["mp3", "wav", "flac", "m4a", "ogg", "aac"].contains(&ext_str.as_str()) {
+                        files.push(path);
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn import_audio_files(dir_path: String) -> Result<i32, String> {
+    let path = Path::new(&dir_path);
+    if !path.is_dir() {
+        return Err("Not a directory".to_string());
+    }
+
+    let mut files = Vec::new();
+    scan_directory(path, &mut files).map_err(|e| e.to_string())?;
+
+    let mut import_count = 0;
+    for file in files {
+        let path_str = file.to_string_lossy().to_string();
+        match import_song(path_str) {
+            Ok(_) => import_count += 1,
+            Err(e) => println!("Failed to import {}: {}", file.display(), e),
+        }
+    }
+    Ok(import_count)
+}
+
+

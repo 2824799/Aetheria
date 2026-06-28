@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { X, Search, FolderPlus } from "lucide-react";
+import { X, Search, FolderPlus, Folder, FileAudio } from "lucide-react";
 
 import Sidebar from "./components/Sidebar";
 import TagFilter from "./components/TagFilter";
@@ -126,11 +126,12 @@ function App() {
   const [isLyricsOverlayOpen, setIsLyricsOverlayOpen] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState("");
+  const [showImportDropdown, setShowImportDropdown] = useState(false);
   
   // 标签新建属性
   const [newTagName, setNewTagName] = useState("");
   const [newTagColor, setNewTagColor] = useState(PRESET_COLORS[0]);
-  const newTagCategory = "自定义";
+  const [newTagCategory, setNewTagCategory] = useState("自定义");
 
   // 主题状态切换逻辑
   const [theme, setTheme] = useState<"dark" | "light" | "pink">(() => {
@@ -232,8 +233,14 @@ function App() {
     };
     document.addEventListener("contextmenu", handleContextMenu);
 
+    const handleWindowClick = () => {
+      setShowImportDropdown(false);
+    };
+    window.addEventListener("click", handleWindowClick);
+
     return () => {
       document.removeEventListener("contextmenu", handleContextMenu);
+      window.removeEventListener("click", handleWindowClick);
     };
   }, []);
 
@@ -447,8 +454,8 @@ function App() {
     }
   };
 
-  // 1. 导入音频文件逻辑
-  const handleImportSongs = async () => {
+  // 1. 导入音频文件夹（递归扫描导入）
+  const handleImportFolder = async () => {
     setIsImporting(true);
     setImportProgress("正在选择文件夹...");
     try {
@@ -461,6 +468,41 @@ function App() {
       setImportProgress("正在扫描并解析音频元数据...");
       const count = await invoke<number>("import_audio_files", { dirPath: selectedDir });
       setImportProgress(`成功导入了 ${count} 首歌曲！`);
+      
+      setTimeout(() => {
+        setIsImporting(false);
+        loadLibrary();
+      }, 1500);
+    } catch (err) {
+      console.error(err);
+      setImportProgress("导入出错: " + err);
+      setTimeout(() => setIsImporting(false), 3000);
+    }
+  };
+
+  // 1.2 导入单个或多个音频文件
+  const handleImportFiles = async () => {
+    setIsImporting(true);
+    setImportProgress("正在选择音频文件...");
+    try {
+      const selectedFiles = await invoke<string[]>("select_audio_files");
+      if (selectedFiles.length === 0) {
+        setIsImporting(false);
+        return;
+      }
+
+      setImportProgress(`正在导入 ${selectedFiles.length} 首歌曲...`);
+      let successCount = 0;
+      for (const filepath of selectedFiles) {
+        try {
+          await invoke("import_song", { filepath });
+          successCount++;
+        } catch (e) {
+          console.error(`Failed to import ${filepath}:`, e);
+        }
+      }
+      
+      setImportProgress(`成功导入了 ${successCount} 首歌曲！`);
       
       setTimeout(() => {
         setIsImporting(false);
@@ -647,6 +689,16 @@ function App() {
   };
 
   const handleDeletePlaylist = async (id: string) => {
+    const pl = playlists.find(p => p.id === id);
+    const plName = pl ? pl.name : "该歌单";
+
+    const confirm1 = confirm(`确定要删除歌单 [${plName}] 吗？`);
+    if (!confirm1) return;
+    const confirm2 = confirm(`此操作将永久移除歌单 [${plName}]，您确定真的是要删除它吗？`);
+    if (!confirm2) return;
+    const confirm3 = confirm(`最后一次确认：您将从数据库中永久失去歌单 [${plName}]，真的真的真的要删除吗？`);
+    if (!confirm3) return;
+
     try {
       await invoke("delete_playlist", { id });
       await fetchPlaylists();
@@ -823,9 +875,36 @@ function App() {
               onChange={e => setSearchQuery(e.target.value)}
             />
           </div>
-          <button className="import-btn" style={{ position: "absolute", right: 0 }} onClick={handleImportSongs} title="导入本地音乐">
-            <FolderPlus size={16} /> 导入歌曲
-          </button>
+          <div style={{ position: "absolute", right: 0 }}>
+            <button 
+              className="import-btn" 
+              onClick={(e) => { e.stopPropagation(); setShowImportDropdown(!showImportDropdown); }} 
+              title="导入本地音乐"
+            >
+              <FolderPlus size={16} /> 导入歌曲
+            </button>
+            {showImportDropdown && (
+              <div 
+                className="context-menu glass-panel" 
+                style={{ 
+                  position: "absolute", 
+                  right: 0, 
+                  top: "100%", 
+                  marginTop: "6px", 
+                  width: "160px",
+                  zIndex: 1002 
+                }}
+                onClick={() => setShowImportDropdown(false)}
+              >
+                <div className="context-menu-item" onClick={handleImportFolder}>
+                  <Folder size={14} /> 导入整个文件夹
+                </div>
+                <div className="context-menu-item" onClick={handleImportFiles}>
+                  <FileAudio size={14} /> 导入多个音源文件
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* 2. 标签多维条件过滤器 - 自定义解耦组件 */}
@@ -943,6 +1022,8 @@ function App() {
         setNewTagName={setNewTagName}
         newTagColor={newTagColor}
         setNewTagColor={setNewTagColor}
+        newTagCategory={newTagCategory}
+        setNewTagCategory={setNewTagCategory}
         presetColors={PRESET_COLORS}
         onCreateTag={handleCreateTag}
         onDeleteTag={handleDeleteTag}
@@ -954,7 +1035,7 @@ function App() {
         theme={theme}
         setTheme={setTheme}
         libraryPath={libraryPath}
-        onImportSongs={handleImportSongs}
+        onImportSongs={handleImportFolder}
       />
 
       {isImporting && (

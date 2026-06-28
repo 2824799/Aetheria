@@ -137,20 +137,27 @@ export default function Sidebar({
             })}
           </div>
 
-          {/* 新建歌单输入表单 */}
+          {/* 新建歌单输入表单 - 新增右边可以用鼠标点击确定的勾号小按钮 */}
           {isCreating ? (
-            <form onSubmit={handleCreateSubmit} className="sidebar-new-playlist-form" style={{ marginTop: "8px" }}>
+            <form onSubmit={handleCreateSubmit} className="sidebar-new-playlist-form" style={{ display: "flex", gap: "4px", alignItems: "center", marginTop: "8px" }}>
               <input 
                 type="text" 
                 placeholder="歌单名称..." 
                 autoFocus
                 className="text-input-sm"
+                style={{ flex: 1 }}
                 value={newPlaylistName}
                 onChange={e => setNewPlaylistName(e.target.value)}
                 onBlur={() => {
-                  if (!newPlaylistName.trim()) setIsCreating(false);
+                  // 稍微延时以允许勾号按钮的 onClick 事件被先捕获执行
+                  setTimeout(() => {
+                    if (!newPlaylistName.trim()) setIsCreating(false);
+                  }, 200);
                 }}
               />
+              <button type="submit" className="ctrl-btn-xs" style={{ padding: "4px", color: "var(--accent)" }} title="确定创建">
+                <Check size={14} />
+              </button>
             </form>
           ) : (
             <button className="sidebar-add-playlist-btn" onClick={() => setIsCreating(true)}>

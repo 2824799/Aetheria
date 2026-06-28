@@ -20,6 +20,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::get_songs,
             commands::import_song,
+            commands::import_audio_files,
             commands::export_song,
             commands::update_version_status,
             commands::get_tags,

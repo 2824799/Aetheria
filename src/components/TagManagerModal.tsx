@@ -16,6 +16,8 @@ interface TagManagerModalProps {
   setNewTagName: (val: string) => void;
   newTagColor: string;
   setNewTagColor: (val: string) => void;
+  newTagCategory: string;
+  setNewTagCategory: (val: string) => void;
   presetColors: string[];
   onCreateTag: () => void;
   onDeleteTag: (id: number) => void;
@@ -29,6 +31,8 @@ export default function TagManagerModal({
   setNewTagName,
   newTagColor,
   setNewTagColor,
+  newTagCategory,
+  setNewTagCategory,
   presetColors,
   onCreateTag,
   onDeleteTag,
@@ -54,6 +58,19 @@ export default function TagManagerModal({
               value={newTagName}
               onChange={e => setNewTagName(e.target.value)}
             />
+            {/* 新增类别选择下拉菜单，让用户自由定义标签组 */}
+            <select
+              className="text-input"
+              style={{ width: "90px", fontSize: "0.85rem", padding: "4px 8px" }}
+              value={newTagCategory}
+              onChange={e => setNewTagCategory(e.target.value)}
+            >
+              <option value="流派">流派</option>
+              <option value="语言">语言</option>
+              <option value="情绪">情绪</option>
+              <option value="场景">场景</option>
+              <option value="自定义">自定义</option>
+            </select>
             <button className="btn-primary" onClick={onCreateTag}>
               <Plus size={16} /> 创建
             </button>
