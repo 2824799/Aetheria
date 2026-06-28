@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { 
   Play, Pause, SkipForward, SkipBack, Tag as TagIcon, Plus, Trash2, 
-  FolderPlus, Download, Volume2, Search, X, Music, List, CheckSquare, Square
+  FolderPlus, Download, Volume2, Search, X, Music, List, CheckSquare, Square, Settings
 } from "lucide-react";
 import "./App.css";
 
@@ -74,6 +74,7 @@ function App() {
   // UI 模态框及 Loading 状态
   const [isTagModalOpen, setIsTagModalOpen] = useState(false);
   const [isTagManagerOpen, setIsTagManagerOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState("");
   
@@ -81,6 +82,17 @@ function App() {
   const [newTagName, setNewTagName] = useState("");
   const [newTagColor, setNewTagColor] = useState(PRESET_COLORS[0]);
   const [newTagCategory, setNewTagCategory] = useState("自定义");
+
+  // 主题状态切换逻辑
+  const [theme, setTheme] = useState<"dark" | "light" | "pink">(() => {
+    return (localStorage.getItem("aetheria-theme") as any) || "dark";
+  });
+
+  useEffect(() => {
+    document.documentElement.className = "";
+    document.documentElement.classList.add(`theme-${theme}`);
+    localStorage.setItem("aetheria-theme", theme);
+  }, [theme]);
 
   // 播放器 DOM 引用
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -505,10 +517,16 @@ function App() {
           </div>
         </div>
 
-        <button className="import-btn" onClick={handleImportSongs}>
-          <FolderPlus size={18} />
-          导入本地音乐
-        </button>
+        <div className="sidebar-bottom">
+          <div className="menu-item" onClick={() => setIsSettingsOpen(true)}>
+            <Settings size={18} />
+            系统设置
+          </div>
+          <button className="import-btn" onClick={handleImportSongs}>
+            <FolderPlus size={18} />
+            导入本地音乐
+          </button>
+        </div>
       </div>
 
       {/* 中间栏：歌曲列表与标签过滤池 */}
@@ -946,6 +964,70 @@ function App() {
 
             <div className="modal-footer">
               <button className="btn-secondary" style={{ width: "100%" }} onClick={() => setIsTagManagerOpen(false)}>关闭</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal 3: 系统设置弹框 */}
+      {isSettingsOpen && (
+        <div className="modal-overlay" onClick={() => setIsSettingsOpen(false)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <span className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Settings size={20} /> 系统设置
+              </span>
+              <button className="ctrl-btn" onClick={() => setIsSettingsOpen(false)}><X size={18} /></button>
+            </div>
+            
+            <div className="form-group">
+              <label>切换界面主题风格</label>
+              <div className="theme-selector-grid">
+                <div 
+                  className={`theme-card ${theme === "dark" ? "active" : ""}`}
+                  onClick={() => setTheme("dark")}
+                >
+                  <div className="theme-preview dark"></div>
+                  <div className="theme-name">深邃暗色</div>
+                </div>
+                <div 
+                  className={`theme-card ${theme === "light" ? "active" : ""}`}
+                  onClick={() => setTheme("light")}
+                >
+                  <div className="theme-preview light"></div>
+                  <div className="theme-name">纯净亮色</div>
+                </div>
+                <div 
+                  className={`theme-card ${theme === "pink" ? "active" : ""}`}
+                  onClick={() => setTheme("pink")}
+                >
+                  <div className="theme-preview pink"></div>
+                  <div className="theme-name">温润粉樱</div>
+                </div>
+              </div>
+            </div>
+
+            <div className="form-group" style={{ marginTop: '8px' }}>
+              <label>本地托管音乐库路径</label>
+              <div 
+                className="text-input" 
+                style={{ fontSize: '0.8rem', wordBreak: 'break-all', opacity: 0.8, background: 'var(--bg-hover)' }}
+              >
+                {libraryPath}
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label>关于 Aetheria</label>
+              <div style={{ fontSize: '0.8rem', opacity: 0.7, lineHeight: 1.5 }}>
+                软件版本: v0.1.0 (Portable)<br />
+                数据引擎: SQLite 3 & Symphonia/Lofty (Rust)<br />
+                界面渲染: React 19 & Tauri 2.0
+              </div>
+            </div>
+
+            <div className="modal-footer">
+              <button className="btn-primary" style={{ width: "100%" }} onClick={() => setIsSettingsOpen(false)}>保存并关闭</button>
             </div>
           </div>
         </div>
