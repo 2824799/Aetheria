@@ -1,32 +1,31 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { 
   Play, Pause, SkipForward, SkipBack, Tag as TagIcon, Plus, Trash2, 
-  FolderPlus, Download, Volume2, Search, X, Music, List, CheckSquare, Square, Settings
+  FolderPlus, Download, Volume2, Search, X, Music, List, CheckSquare, Square, Settings,
+  ChevronDown, ChevronRight, Repeat, Repeat1, Shuffle, LayoutList, FileAudio
 } from "lucide-react";
 import "./App.css";
 
-// 接口定义，与 Rust 后端模型严格匹配
-interface Tag {
-  id: number;
-  name: String;
-  color?: string;
-  category?: string;
-}
-
 interface AudioVersion {
   id: string;
-  song_id: string;
   filepath: string;
-  original_name: string;
-  format?: string;
+  filename: string;
+  format: string;
   bitrate?: number;
-  sample_rate?: number;
-  duration: number;
-  file_size: number;
-  is_enabled: boolean;
+  duration?: number;
+  filesize?: number;
   is_primary: boolean;
+  is_active: boolean;
+}
+
+interface Tag {
+  id: number;
+  name: string;
+  color: string;
+  category?: string;
+  created_at: string;
 }
 
 interface Song {
@@ -58,9 +57,11 @@ function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedTags, setSelectedTags] = useState<number[]>([]);
   const [filterMode, setFilterMode] = useState<"AND" | "OR">("AND");
+  const [isTagsExpanded, setIsTagsExpanded] = useState(true);
   
   // 当前聚焦歌曲及 Tab 状态
   const [activeSong, setActiveSong] = useState<Song | null>(null);
+  const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"versions" | "tags" | "lyrics">("versions");
   
   // 播放器核心状态
@@ -70,34 +71,30 @@ function App() {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(0.8);
+  const [playMode, setPlayMode] = useState<"list" | "single" | "shuffle">("list");
   
   // UI 模态框及 Loading 状态
-  const [isTagModalOpen, setIsTagModalOpen] = useState(false);
   const [isTagManagerOpen, setIsTagManagerOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isLyricsOverlayOpen, setIsLyricsOverlayOpen] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState("");
   
   // 标签新建属性
   const [newTagName, setNewTagName] = useState("");
   const [newTagColor, setNewTagColor] = useState(PRESET_COLORS[0]);
-  const [newTagCategory, setNewTagCategory] = useState("自定义");
+  const newTagCategory = "自定义";
 
   // 主题状态切换逻辑
   const [theme, setTheme] = useState<"dark" | "light" | "pink">(() => {
     return (localStorage.getItem("aetheria-theme") as any) || "dark";
   });
 
-  useEffect(() => {
-    document.documentElement.className = "";
-    document.documentElement.classList.add(`theme-${theme}`);
-    localStorage.setItem("aetheria-theme", theme);
-  }, [theme]);
-
   // 播放器 DOM 引用
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animationRef = useRef<number | null>(null);
+  const activeLineRef = useRef<HTMLDivElement | null>(null);
   
   // Web Audio API 动效相关
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -123,7 +120,7 @@ function App() {
     loadLibrary();
   }, []);
 
-  // 音频初始化与事件监听
+  // 音频初始化与事件监听 (仅在挂载时运行一次，保持 Audio 实例唯一性)
   useEffect(() => {
     const audio = new Audio();
     audioRef.current = audio;
@@ -131,7 +128,7 @@ function App() {
 
     const onTimeUpdate = () => setCurrentTime(audio.currentTime);
     const onLoadedMetadata = () => setDuration(audio.duration);
-    const onEnded = () => handleNext();
+    const onEnded = () => handleEnded();
 
     audio.addEventListener("timeupdate", onTimeUpdate);
     audio.addEventListener("loadedmetadata", onLoadedMetadata);
@@ -143,23 +140,68 @@ function App() {
       audio.removeEventListener("ended", onEnded);
       audio.pause();
     };
-  }, [songs, playingVersion]); // 歌曲库更新时更新下一首逻辑
+  }, []);
 
-  // 音波图绘制逻辑
+  // 同步音量状态到播放器 DOM
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.volume = volume;
+    }
+  }, [volume]);
+
+  // 全局主题变化
+  useEffect(() => {
+    document.documentElement.className = "";
+    document.documentElement.classList.add(`theme-${theme}`);
+    localStorage.setItem("aetheria-theme", theme);
+  }, [theme]);
+
+  // 解析并高亮滚动当前播放歌词
+  const lyricsLines = useMemo(() => {
+    if (playingSong && playingSong.lyrics) {
+      return playingSong.lyrics.split("\n").map(l => l.trim()).filter(l => l.length > 0);
+    }
+    return ["暂无歌词内容"];
+  }, [playingSong]);
+
+  const activeLyricsIndex = useMemo(() => {
+    if (!playingSong || !playingSong.lyrics || duration === 0) return -1;
+    const index = Math.floor((currentTime / duration) * lyricsLines.length);
+    return Math.min(index, lyricsLines.length - 1);
+  }, [currentTime, duration, lyricsLines]);
+
+  // 歌词行自动滚动进中央
+  useEffect(() => {
+    if (activeLineRef.current) {
+      activeLineRef.current.scrollIntoView({
+        behavior: "smooth",
+        block: "center"
+      });
+    }
+  }, [activeLyricsIndex]);
+
+  // 音频柱状图绘制逻辑
   useEffect(() => {
     if (!canvasRef.current) return;
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
+    
+    let bufferLength = 0;
+    let dataArray = new Uint8Array(0);
+    if (analyserRef.current) {
+      bufferLength = analyserRef.current.frequencyBinCount;
+      dataArray = new Uint8Array(bufferLength);
+    }
 
     const draw = () => {
       animationRef.current = requestAnimationFrame(draw);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       
       if (!analyserRef.current || !isPlaying) {
-        // 静止时的波形（绘制微弱的平滑横线波纹）
+        // 静止时的波纹横线
         ctx.beginPath();
-        ctx.strokeStyle = "rgba(99, 102, 241, 0.15)";
+        ctx.strokeStyle = theme === "light" ? "rgba(37, 99, 235, 0.15)" : "rgba(99, 102, 241, 0.18)";
         ctx.lineWidth = 2;
         const width = canvas.width;
         const height = canvas.height;
@@ -172,27 +214,23 @@ function App() {
         return;
       }
 
-      const analyser = analyserRef.current;
-      const bufferLength = analyser.frequencyBinCount;
-      const dataArray = new Uint8Array(bufferLength);
-      analyser.getByteFrequencyData(dataArray);
-
+      analyserRef.current.getByteFrequencyData(dataArray);
+      
       const width = canvas.width;
       const height = canvas.height;
       const barWidth = (width / bufferLength) * 2.5;
       let x = 0;
 
       for (let i = 0; i < bufferLength; i++) {
-        const barHeight = (dataArray[i] / 255) * height * 0.8;
+        const barHeight = (dataArray[i] / 255) * height * 0.85;
         
-        // 渐变填充
-        const gradient = ctx.createLinearGradient(0, height, 0, height - barHeight);
-        gradient.addColorStop(0, "rgba(99, 102, 241, 0.05)");
-        gradient.addColorStop(1, "rgba(168, 85, 247, 0.4)");
-
-        ctx.fillStyle = gradient;
-        ctx.fillRect(x, height - barHeight, barWidth - 2, barHeight);
-
+        ctx.fillStyle = theme === "pink" 
+          ? `rgba(244, 63, 94, ${0.15 + barHeight / height})`
+          : theme === "light"
+          ? `rgba(37, 99, 235, ${0.15 + barHeight / height})`
+          : `rgba(59, 130, 246, ${0.15 + barHeight / height})`;
+          
+        ctx.fillRect(x, height - barHeight, barWidth - 1, barHeight);
         x += barWidth;
       }
     };
@@ -204,7 +242,7 @@ function App() {
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [isPlaying]);
+  }, [isPlaying, theme]);
 
   // 初始化 Web Audio API 上下文，处理安全策略下的动态激活
   const initAudioAnalyzer = () => {
@@ -214,7 +252,7 @@ function App() {
       const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
       const context = new AudioContextClass();
       const analyser = context.createAnalyser();
-      analyser.fftSize = 64; // 低频分辨率，以实现流畅的大条形块
+      analyser.fftSize = 64; 
 
       const source = context.createMediaElementSource(audioRef.current);
       source.connect(analyser);
@@ -228,259 +266,271 @@ function App() {
     }
   };
 
-  // 播放版本控制核心
-  const playVersion = (song: Song, version: AudioVersion) => {
-    if (!audioRef.current) return;
-    
-    // 初始化 Web Audio (首次点击激活)
-    initAudioAnalyzer();
-    if (audioContextRef.current && audioContextRef.current.state === "suspended") {
-      audioContextRef.current.resume();
-    }
-
-    const isSameVersion = playingVersion && playingVersion.id === version.id;
-
-    if (isSameVersion) {
-      if (isPlaying) {
-        audioRef.current.pause();
-        setIsPlaying(false);
-      } else {
-        audioRef.current.play().catch(e => console.error(e));
-        setIsPlaying(true);
-      }
-      return;
-    }
-
-    // 通过 Tauri asset 协议将本地相对路径的托管音频载入前端
-    const absolutePath = libraryPath + "/" + version.filepath;
-    const assetUrl = convertFileSrc(absolutePath);
-
-    audioRef.current.src = assetUrl;
-    audioRef.current.play()
-      .then(() => {
-        setPlayingSong(song);
-        setPlayingVersion(version);
-        setIsPlaying(true);
-      })
-      .catch((err) => {
-        console.error("播放失败:", err);
-        alert("无法播放此音频版本，该文件可能损坏或已被移除！");
-      });
-  };
-
-  // 播放首选/主版本
-  const playSong = (song: Song) => {
-    // 优先播放 Primary，其次寻找首个启用版本，再次选第一个版本
-    let version = song.versions.find(v => v.is_primary && v.is_enabled);
-    if (!version) version = song.versions.find(v => v.is_enabled);
-    if (!version) version = song.versions[0];
-
-    if (!version) {
-      alert("这首歌没有任何可播放的音频版本！");
-      return;
-    }
-    playVersion(song, version);
-  };
-
-  // 播放器常规按钮控制
-  const handlePlayPause = () => {
-    if (!audioRef.current) return;
-    if (playingVersion) {
-      if (isPlaying) {
-        audioRef.current.pause();
-        setIsPlaying(false);
-      } else {
-        audioRef.current.play().catch(e => console.error(e));
-        setIsPlaying(true);
-      }
-    } else if (filteredSongs.length > 0) {
-      playSong(filteredSongs[0]);
-    }
-  };
-
-  // 获取下一首歌曲
-  const handleNext = () => {
-    if (filteredSongs.length === 0) return;
-    let nextIndex = 0;
-    if (playingSong) {
-      const idx = filteredSongs.findIndex(s => s.id === playingSong.id);
-      if (idx !== -1 && idx < filteredSongs.length - 1) {
-        nextIndex = idx + 1;
-      }
-    }
-    playSong(filteredSongs[nextIndex]);
-  };
-
-  // 获取上一首歌曲
-  const handlePrev = () => {
-    if (filteredSongs.length === 0) return;
-    let prevIndex = filteredSongs.length - 1;
-    if (playingSong) {
-      const idx = filteredSongs.findIndex(s => s.id === playingSong.id);
-      if (idx > 0) {
-        prevIndex = idx - 1;
-      }
-    }
-    playSong(filteredSongs[prevIndex]);
-  };
-
-  // 拖动播放进度条
-  const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!audioRef.current || duration === 0) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const pct = x / rect.width;
-    audioRef.current.currentTime = pct * duration;
-    setCurrentTime(pct * duration);
-  };
-
-  // 控制音量
-  const handleVolumeChange = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!audioRef.current) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const pct = Math.max(0, Math.min(1, x / rect.width));
-    audioRef.current.volume = pct;
-    setVolume(pct);
-  };
-
-  // 歌曲导入逻辑
+  // 1. 导入音频文件逻辑（调用系统目录选取）
   const handleImportSongs = async () => {
+    setIsImporting(true);
+    setImportProgress("正在选择文件夹...");
     try {
-      const paths: string[] = await invoke("select_audio_files");
-      if (paths.length === 0) return;
-
-      setIsImporting(true);
-      for (let i = 0; i < paths.length; i++) {
-        const path = paths[i];
-        const filename = path.replace(/^.*[\\/]/, "");
-        setImportProgress(`正在导入 (${i + 1}/${paths.length}): ${filename}`);
-        await invoke("import_song", { filepath: path });
+      const selectedDir = await invoke<string | null>("select_directory");
+      if (!selectedDir) {
+        setIsImporting(false);
+        return;
       }
+
+      setImportProgress("正在扫描并解析音频元数据...");
+      // 调用后台分析导入
+      const count = await invoke<number>("import_audio_files", { dirPath: selectedDir });
+      setImportProgress(`成功导入了 ${count} 首歌曲！`);
       
-      await loadLibrary();
-      // 如果有正选中的歌，更新它的引用以载入最新导入的版本
-      if (activeSong) {
-        const updatedSongs: Song[] = await invoke("get_songs");
-        const found = updatedSongs.find(s => s.id === activeSong.id);
-        if (found) setActiveSong(found);
-      }
-    } catch (err) {
-      alert("导入音频失败: " + err);
-    } finally {
-      setIsImporting(false);
-      setImportProgress("");
-    }
-  };
-
-  // 版本导出逻辑
-  const handleExportVersion = async (version: AudioVersion) => {
-    try {
-      const dir: string | null = await invoke("select_export_directory");
-      if (!dir) return;
-
-      setImportProgress("正在导出音频...");
-      setIsImporting(true);
-      const destPath = await invoke("export_song", { versionId: version.id, exportDir: dir });
-      alert(`音频成功导出到:\n${destPath}`);
-    } catch (err) {
-      alert("导出失败: " + err);
-    } finally {
-      setIsImporting(false);
-      setImportProgress("");
-    }
-  };
-
-  // 版本启用与主播放状态控制
-  const handleVersionStatusChange = async (versionId: string, enabled: boolean, primary: boolean) => {
-    try {
-      await invoke("update_version_status", { versionId, isEnabled: enabled, isPrimary: primary });
-      // 重新载入数据并同步视图
-      const loadedSongs: Song[] = await invoke("get_songs");
-      setSongs(loadedSongs);
-      
-      if (activeSong) {
-        const found = loadedSongs.find(s => s.id === activeSong.id);
-        if (found) setActiveSong(found);
-      }
-
-      // 如果当前播放的版本被修改，同步状态
-      if (playingVersion && playingVersion.id === versionId) {
-        const foundVer = loadedSongs.flatMap(s => s.versions).find(v => v.id === versionId);
-        if (foundVer) setPlayingVersion(foundVer);
-      }
+      setTimeout(() => {
+        setIsImporting(false);
+        loadLibrary();
+      }, 1500);
     } catch (err) {
       console.error(err);
+      setImportProgress("导入出错: " + err);
+      setTimeout(() => setIsImporting(false), 3000);
     }
   };
 
-  // 创建自定义标签
+  // 2. 标签管理逻辑
   const handleCreateTag = async () => {
     if (!newTagName.trim()) return;
     try {
       await invoke("add_tag", { 
-        name: newTagName, 
+        name: newTagName.trim(), 
         color: newTagColor, 
         category: newTagCategory 
       });
       setNewTagName("");
-      setIsTagModalOpen(false);
-      await loadLibrary();
+      loadLibrary();
     } catch (err) {
-      alert("创建标签失败: " + err);
+      console.error("创建标签失败:", err);
     }
   };
 
-  // 删除自定义标签
   const handleDeleteTag = async (tagId: number) => {
-    if (!confirm("您确定要永久删除这个标签吗？这将同时解除它与所有关联歌曲的绑定状态。")) return;
     try {
       await invoke("delete_tag", { tagId });
-      setSelectedTags(selectedTags.filter(id => id !== tagId));
-      await loadLibrary();
+      loadLibrary();
     } catch (err) {
-      alert("删除标签失败: " + err);
+      console.error("删除标签失败:", err);
     }
   };
 
-  // 绑定与解绑标签
-  const toggleSongTag = async (songId: string, tagId: number, isBound: boolean) => {
+  const handleBindTag = async (songId: string, tagId: number) => {
     try {
-      await invoke("tag_song", { songId, tagId, bind: !isBound });
-      
-      // 更新库并刷新活跃歌曲引用
-      const loadedSongs: Song[] = await invoke("get_songs");
-      setSongs(loadedSongs);
+      await invoke("tag_song", { songId, tagId });
+      loadLibrary();
+      // 同步更新聚焦状态
       if (activeSong && activeSong.id === songId) {
-        const found = loadedSongs.find(s => s.id === songId);
-        if (found) setActiveSong(found);
+        const updated = songs.find(s => s.id === songId);
+        if (updated) setActiveSong(updated);
       }
     } catch (err) {
       console.error(err);
     }
   };
 
-  // 标签多维条件动态过滤引擎
-  const filteredSongs = songs.filter(song => {
-    // 1. 搜索关键词匹配
-    const matchesSearch = searchQuery === "" || 
-      song.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (song.artist && song.artist.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (song.album && song.album.toLowerCase().includes(searchQuery.toLowerCase()));
-
-    if (!matchesSearch) return false;
-
-    // 2. 标签池过滤
-    if (selectedTags.length === 0) return true;
-
-    if (filterMode === "AND") {
-      // 必须包含全部选中的标签
-      return selectedTags.every(tagId => song.tags.some(t => t.id === tagId));
-    } else {
-      // 包含任意一个选中的标签
-      return selectedTags.some(tagId => song.tags.some(t => t.id === tagId));
+  const handleUnbindTag = async (songId: string, tagId: number) => {
+    try {
+      await invoke("untag_song", { songId, tagId });
+      loadLibrary();
+      // 同步更新聚焦状态
+      if (activeSong && activeSong.id === songId) {
+        const updated = songs.find(s => s.id === songId);
+        if (updated) setActiveSong(updated);
+      }
+    } catch (err) {
+      console.error(err);
     }
-  });
+  };
+
+  // 3. 版本精细化控制逻辑
+  const handleSetPrimaryVersion = async (versionId: string) => {
+    if (!activeSong) return;
+    try {
+      await invoke("set_primary_version", { songId: activeSong.id, versionId });
+      await loadLibrary();
+      
+      const updated = songs.find(s => s.id === activeSong.id);
+      if (updated) {
+        setActiveSong(updated);
+        // 如果当前播放的就是这首歌，更新播放版本
+        if (playingSong && playingSong.id === activeSong.id) {
+          const newPrimary = updated.versions.find(v => v.id === versionId);
+          if (newPrimary) setPlayingVersion(newPrimary);
+        }
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleToggleVersionStatus = async (versionId: string, active: boolean) => {
+    if (!activeSong) return;
+    try {
+      await invoke("update_version_status", { versionId, active });
+      await loadLibrary();
+      const updated = songs.find(s => s.id === activeSong.id);
+      if (updated) setActiveSong(updated);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleExportVersion = async (versionId: string) => {
+    try {
+      const destPath = await invoke<string | null>("select_save_file");
+      if (!destPath) return;
+      await invoke("export_audio_file", { versionId, destPath });
+      alert("音频导出还原成功！");
+    } catch (err) {
+      alert("导出失败: " + err);
+    }
+  };
+
+  // 4. 播放器核心触发事件
+  const handlePlaySong = (song: Song) => {
+    // 寻找主版本，若无则挑选第一个启用的版本
+    let targetVersion = song.versions.find(v => v.is_primary && v.is_active);
+    if (!targetVersion) {
+      targetVersion = song.versions.find(v => v.is_active);
+    }
+    
+    if (!targetVersion) {
+      alert("该歌曲暂无可用的启用音频版本！请先启用至少一个版本。");
+      return;
+    }
+    handlePlayVersion(song, targetVersion);
+  };
+
+  const handlePlayVersion = async (song: Song, version: AudioVersion) => {
+    try {
+      initAudioAnalyzer();
+      
+      // 替换 Windows 下的反斜杠，将其规范化为前端网络路径斜杠，防止 Webview2 解析 CORS 或路径破损
+      const normalizedPath = (libraryPath + "/" + version.filepath).replace(/\\/g, "/");
+      const assetUrl = convertFileSrc(normalizedPath);
+      
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.src = assetUrl;
+        audioRef.current.load();
+        
+        setPlayingSong(song);
+        setPlayingVersion(version);
+        setIsPlaying(true);
+        
+        await audioRef.current.play();
+        
+        if (audioContextRef.current && audioContextRef.current.state === "suspended") {
+          await audioContextRef.current.resume();
+        }
+      }
+    } catch (err) {
+      console.error("播放音频失败:", err);
+    }
+  };
+
+  const handlePlayPause = () => {
+    if (!audioRef.current || !playingVersion) return;
+    if (isPlaying) {
+      audioRef.current.pause();
+      setIsPlaying(false);
+    } else {
+      audioRef.current.play().then(() => {
+        setIsPlaying(true);
+      }).catch(err => {
+        console.error("恢复播放失败:", err);
+      });
+    }
+  };
+
+  // 标签多维条件动态过滤引擎
+  const filteredSongs = useMemo(() => {
+    return songs.filter(song => {
+      // 1. 搜索关键词匹配
+      const matchesSearch = searchQuery === "" || 
+        song.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (song.artist && song.artist.toLowerCase().includes(searchQuery.toLowerCase())) ||
+        (song.album && song.album.toLowerCase().includes(searchQuery.toLowerCase()));
+      
+      if (!matchesSearch) return false;
+
+      // 2. 多维标签规则匹配
+      if (selectedTags.length === 0) return true;
+
+      const songTagIds = song.tags.map(t => t.id);
+      if (filterMode === "AND") {
+        return selectedTags.every(id => songTagIds.includes(id));
+      } else {
+        return selectedTags.some(id => songTagIds.includes(id));
+      }
+    });
+  }, [songs, searchQuery, selectedTags, filterMode]);
+
+  const handlePlaybackModeCycle = () => {
+    if (playMode === "list") setPlayMode("shuffle");
+    else if (playMode === "shuffle") setPlayMode("single");
+    else setPlayMode("list");
+  };
+
+  const handleNext = () => {
+    if (filteredSongs.length === 0) return;
+    let nextIndex = 0;
+    
+    if (playMode === "shuffle") {
+      nextIndex = Math.floor(Math.random() * filteredSongs.length);
+    } else {
+      const currentIndex = filteredSongs.findIndex(s => s.id === playingSong?.id);
+      nextIndex = (currentIndex + 1) % filteredSongs.length;
+    }
+    
+    handlePlaySong(filteredSongs[nextIndex]);
+  };
+
+  const handlePrev = () => {
+    if (filteredSongs.length === 0) return;
+    let prevIndex = 0;
+    
+    if (playMode === "shuffle") {
+      prevIndex = Math.floor(Math.random() * filteredSongs.length);
+    } else {
+      const currentIndex = filteredSongs.findIndex(s => s.id === playingSong?.id);
+      prevIndex = currentIndex <= 0 ? filteredSongs.length - 1 : currentIndex - 1;
+    }
+    
+    handlePlaySong(filteredSongs[prevIndex]);
+  };
+
+  const handleEnded = () => {
+    if (playMode === "single") {
+      if (audioRef.current) {
+        audioRef.current.currentTime = 0;
+        audioRef.current.play().catch(err => console.log(err));
+      }
+    } else {
+      handleNext();
+    }
+  };
+
+  const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!audioRef.current || duration === 0) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const pct = clickX / rect.width;
+    const seekTime = pct * duration;
+    audioRef.current.currentTime = seekTime;
+    setCurrentTime(seekTime);
+  };
+
+  const handleVolumeChange = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const pct = Math.max(0, Math.min(1, clickX / rect.width));
+    setVolume(pct);
+  };
 
   // 辅助转换时长格式
   const formatTime = (secs: number) => {
@@ -496,24 +546,26 @@ function App() {
       <div className="ambient-glow glow-1"></div>
       <div className="ambient-glow glow-2"></div>
 
-      {/* 左侧边栏：Aetheria 导航 */}
+      {/* 左侧边栏：Aetheria 极简导航 */}
       <div className="glass-panel sidebar">
-        <div className="logo-section">
-          <div className="logo-icon">
-            <Music size={24} color="white" />
+        <div>
+          <div className="logo-section">
+            <div className="logo-icon">
+              <Music size={22} color="white" />
+            </div>
+            <span className="logo-text">AETHERIA</span>
           </div>
-          <span className="logo-text">AETHERIA</span>
-        </div>
 
-        <div className="menu-group">
-          <div className="menu-title">导航中心</div>
-          <div className="menu-item active">
-            <List size={18} />
-            全部歌曲 ({songs.length})
-          </div>
-          <div className="menu-item" onClick={() => setIsTagManagerOpen(true)}>
-            <TagIcon size={18} />
-            标签管理器
+          <div className="menu-group">
+            <div className="menu-title">导航中心</div>
+            <div className="menu-item active">
+              <List size={18} />
+              全部歌曲 ({songs.length})
+            </div>
+            <div className="menu-item" onClick={() => setIsTagManagerOpen(true)}>
+              <TagIcon size={18} />
+              标签管理器
+            </div>
           </div>
         </div>
 
@@ -522,17 +574,13 @@ function App() {
             <Settings size={18} />
             系统设置
           </div>
-          <button className="import-btn" onClick={handleImportSongs}>
-            <FolderPlus size={18} />
-            导入本地音乐
-          </button>
         </div>
       </div>
 
-      {/* 中间栏：歌曲列表与标签过滤池 */}
+      {/* 中间主要功能区：歌曲列表与标签过滤池 */}
       <div className="glass-panel main-content">
         <div className="header-row">
-          <h2 style={{ margin: 0, fontWeight: 700 }}>曲库大厅</h2>
+          <h2 style={{ margin: 0, fontWeight: 800, fontSize: "1.6rem" }}>曲库大厅</h2>
           <div className="search-container">
             <Search className="search-icon" size={18} />
             <input 
@@ -545,89 +593,91 @@ function App() {
           </div>
         </div>
 
-        {/* 标签磁贴筛选池 */}
+        {/* 可收起的标签过滤器 */}
         <div className="tag-matrix-panel">
-          <div className="tag-matrix-header">
-            <span className="tag-matrix-title">
-              <TagIcon size={16} /> 标签多维过滤器
+          <div className="tag-matrix-header" onClick={() => setIsTagsExpanded(!isTagsExpanded)}>
+            <span className="tag-matrix-title-wrapper">
+              <TagIcon size={16} /> 
+              标签多维过滤器
+              {isTagsExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
             </span>
-            <div className="filter-toggle-container">
+            <div className="filter-toggle-container" onClick={e => e.stopPropagation()}>
               <div 
                 className={`filter-toggle-btn ${filterMode === "AND" ? "active" : ""}`}
                 onClick={() => setFilterMode("AND")}
-                title="歌曲需满足全部选中的标签"
               >
                 交集 (AND)
               </div>
               <div 
                 className={`filter-toggle-btn ${filterMode === "OR" ? "active" : ""}`}
                 onClick={() => setFilterMode("OR")}
-                title="歌曲只需满足任意一个选中的标签"
               >
                 并集 (OR)
               </div>
             </div>
           </div>
           
-          <div className="tag-pool">
-            {tags.map(tag => {
-              const isSelected = selectedTags.includes(tag.id);
-              return (
-                <div 
-                  key={tag.id}
-                  className={`tag-chip ${isSelected ? "selected" : ""}`}
-                  style={{ color: tag.color || "#cbd5e1" }}
-                  onClick={() => {
-                    if (isSelected) {
-                      setSelectedTags(selectedTags.filter(id => id !== tag.id));
-                    } else {
-                      setSelectedTags([...selectedTags, tag.id]);
-                    }
-                  }}
-                >
-                  <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', backgroundColor: tag.color || "#cbd5e1" }}></span>
-                  {tag.name}
-                </div>
-              );
-            })}
-            
-            <div className="tag-chip" style={{ color: "#a855f7", borderStyle: "dashed" }} onClick={() => setIsTagModalOpen(true)}>
-              <Plus size={14} /> 新建标签
+          <div className={`tag-matrix-content-wrapper ${isTagsExpanded ? "" : "collapsed"}`}>
+            <div className="tag-pool">
+              {tags.map(tag => {
+                const isSelected = selectedTags.includes(tag.id);
+                return (
+                  <div 
+                    key={tag.id}
+                    className={`tag-chip ${isSelected ? "selected" : ""}`}
+                    style={{ color: tag.color || "#cbd5e1" }}
+                    onClick={() => {
+                      if (isSelected) {
+                        setSelectedTags(selectedTags.filter(id => id !== tag.id));
+                      } else {
+                        setSelectedTags([...selectedTags, tag.id]);
+                      }
+                    }}
+                  >
+                    <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', backgroundColor: tag.color || "#cbd5e1" }}></span>
+                    {tag.name}
+                  </div>
+                );
+              })}
+              {tags.length === 0 && (
+                <div style={{ color: "var(--text-sub)", fontSize: "0.85rem" }}>暂无预设标签，可点击左侧标签管理器新建</div>
+              )}
             </div>
           </div>
         </div>
 
-        {/* 歌曲信息列表 */}
+        {/* 歌曲主列表 - 优化表头和防中文折行 */}
         <div className="song-list-container">
           <table className="song-table">
             <thead>
               <tr>
-                <th style={{ width: "40px" }}></th>
+                <th></th>
                 <th>歌曲名称</th>
                 <th>歌手</th>
                 <th>绑定的自定义标签</th>
-                <th>版本数</th>
-                <th>默认音质</th>
+                <th style={{ textAlign: "center" }}>版本数</th>
+                <th style={{ textAlign: "center" }}>默认音质</th>
               </tr>
             </thead>
             <tbody>
               {filteredSongs.map(song => {
-                // 找出用于显示的默认音质格式
-                let primaryVer = song.versions.find(v => v.is_primary && v.is_enabled);
-                if (!primaryVer) primaryVer = song.versions.find(v => v.is_enabled) || song.versions[0];
-                const activeFormat = primaryVer ? primaryVer.format?.toUpperCase() : "无";
-                const isThisPlaying = playingSong?.id === song.id;
-
+                const isCurrentlyPlaying = playingSong?.id === song.id;
+                const primaryVersion = song.versions.find(v => v.is_primary);
+                const activeFormat = primaryVersion?.format.toUpperCase() || "未知";
+                
                 return (
                   <tr 
                     key={song.id} 
-                    className={`song-row ${activeSong?.id === song.id ? "active" : ""} ${isThisPlaying ? "playing" : ""}`}
-                    onClick={() => setActiveSong(song)}
-                    onDoubleClick={() => playSong(song)}
+                    className={`song-row ${isCurrentlyPlaying ? "playing" : ""} ${activeSong?.id === song.id ? "active" : ""}`}
+                    onClick={() => {
+                      setActiveSong(song);
+                      setIsDetailOpen(true);
+                    }}
+                    onDoubleClick={() => handlePlaySong(song)}
                   >
                     <td>
-                      <div className="play-row-btn" onClick={(e) => { e.stopPropagation(); playSong(song); }}>
-                        {isThisPlaying && isPlaying ? <Pause size={16} /> : <Play size={16} />}
+                      <div className="play-row-btn">
+                        {isCurrentlyPlaying && isPlaying ? <Pause size={14} /> : <Play size={14} />}
                       </div>
                     </td>
                     <td>
@@ -635,36 +685,34 @@ function App() {
                         <span className="song-title-text">{song.title}</span>
                       </div>
                     </td>
-                    <td><span className="song-artist-text">{song.artist || "未知歌手"}</span></td>
+                    <td>
+                      <span className="song-artist-text">{song.artist || "未知歌手"}</span>
+                    </td>
                     <td>
                       <div className="badge-container">
-                        {song.tags.slice(0, 3).map(tag => (
+                        {song.tags.map(t => (
                           <span 
-                            key={tag.id} 
-                            className="tag-pill"
-                            style={{ color: tag.color, border: `1px solid ${tag.color}33`, backgroundColor: `${tag.color}11` }}
+                            key={t.id} 
+                            className="tag-pill" 
+                            style={{ borderLeft: `3px solid ${t.color}`, color: t.color }}
                           >
-                            {tag.name}
+                            {t.name}
                           </span>
                         ))}
-                        {song.tags.length > 3 && <span className="tag-pill" style={{ color: "#64748b" }}>+{song.tags.length - 3}</span>}
                       </div>
                     </td>
-                    <td style={{ color: "#94a3b8", fontWeight: 600 }}>{song.versions.length}</td>
-                    <td>
-                      {activeFormat && (
-                        <span className={`format-badge ${activeFormat.toLowerCase()}`}>
-                          {activeFormat}
-                        </span>
-                      )}
+                    <td style={{ textAlign: "center", fontWeight: 600 }}>{song.versions.length}</td>
+                    <td style={{ textAlign: "center" }}>
+                      <span className={`format-badge ${activeFormat.toLowerCase()}`}>
+                        {activeFormat}
+                      </span>
                     </td>
                   </tr>
                 );
               })}
-              
               {filteredSongs.length === 0 && (
                 <tr>
-                  <td colSpan={6} style={{ textAlign: "center", padding: "40px", color: "#64748b" }}>
+                  <td colSpan={6} style={{ textAlign: "center", padding: "40px", color: "var(--text-sub)" }}>
                     没有找到符合条件的歌曲，请导入或调整过滤器
                   </td>
                 </tr>
@@ -672,77 +720,73 @@ function App() {
             </tbody>
           </table>
         </div>
-      </div>
 
-      {/* 右侧面板：当前选中歌曲的详细属性与多版本版本挂载 */}
-      <div className="glass-panel detail-pane">
-        {activeSong ? (
-          <>
-            <div className="detail-header">
-              <div className="cover-container">
-                <div className="cover-glow"></div>
-                <Music size={52} color="rgba(255,255,255,0.7)" />
+        {/* 侧滑出来的歌曲详情 / 版本控制抽屉 */}
+        <div className={`glass-panel detail-pane ${isDetailOpen ? "open" : ""}`}>
+          <button className="detail-close-btn" onClick={() => setIsDetailOpen(false)}>
+            <X size={20} />
+          </button>
+          
+          {activeSong ? (
+            <>
+              <div className="detail-header">
+                <div className="cover-container">
+                  <div className="cover-glow"></div>
+                  <Music size={44} />
+                </div>
+                <div className="detail-title">{activeSong.title}</div>
+                <div className="detail-artist">{activeSong.artist || "未知歌手"}</div>
               </div>
-              <div className="detail-title">{activeSong.title}</div>
-              <div className="detail-artist">{activeSong.artist || "未知歌手"}</div>
-            </div>
 
-            <div className="detail-tabs-container">
-              <div 
-                className={`detail-tab ${activeTab === "versions" ? "active" : ""}`}
-                onClick={() => setActiveTab("versions")}
-              >
-                音频版本 ({activeSong.versions.length})
+              <div className="detail-tabs-container">
+                <div 
+                  className={`detail-tab ${activeTab === "versions" ? "active" : ""}`}
+                  onClick={() => setActiveTab("versions")}
+                >
+                  音频版本 ({activeSong.versions.length})
+                </div>
+                <div 
+                  className={`detail-tab ${activeTab === "tags" ? "active" : ""}`}
+                  onClick={() => setActiveTab("tags")}
+                >
+                  标签绑定 ({activeSong.tags.length})
+                </div>
+                <div 
+                  className={`detail-tab ${activeTab === "lyrics" ? "active" : ""}`}
+                  onClick={() => setActiveTab("lyrics")}
+                >
+                  歌词与信息
+                </div>
               </div>
-              <div 
-                className={`detail-tab ${activeTab === "tags" ? "active" : ""}`}
-                onClick={() => setActiveTab("tags")}
-              >
-                标签绑定 ({activeSong.tags.length})
-              </div>
-              <div 
-                className={`detail-tab ${activeTab === "lyrics" ? "active" : ""}`}
-                onClick={() => setActiveTab("lyrics")}
-              >
-                歌词与信息
-              </div>
-            </div>
 
-            <div className="detail-section">
-              {/* Tab 1: 音频多版本挂载面板 */}
-              {activeTab === "versions" && (
-                <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                  {activeSong.versions.map(ver => {
-                    const isVerPlaying = playingVersion?.id === ver.id;
-                    const formatText = ver.format?.toUpperCase();
-                    const sizeMB = (ver.file_size / (1024 * 1024)).toFixed(2) + " MB";
-                    const bitrateText = ver.bitrate ? `${ver.bitrate}kbps` : "未知码率";
-
-                    return (
-                      <div key={ver.id} className="version-item">
+              <div className="detail-section">
+                {/* 1. 音频版本控制 */}
+                {activeTab === "versions" && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                    {activeSong.versions.map(v => (
+                      <div key={v.id} className="version-item">
                         <div className="version-row">
                           <div className="version-meta">
-                            <span className="version-filename" title={ver.original_name}>{ver.original_name}</span>
+                            <span className="version-filename" title={v.filename}>{v.filename}</span>
                             <span className="version-specs">
-                              {formatText} • {bitrateText} • {sizeMB} • {formatTime(ver.duration)}
+                              {v.format.toUpperCase()} · {v.bitrate ? `${Math.round(v.bitrate / 1000)}kbps` : "未知码率"} · {v.filesize ? `${(v.filesize / 1024 / 1024).toFixed(2)} MB` : ""} · {formatTime(v.duration || 0)}
                             </span>
                           </div>
-                          
                           <button 
-                            className="ctrl-btn"
-                            style={{ color: isVerPlaying && isPlaying ? "#10b981" : "#6366f1" }}
-                            onClick={() => playVersion(activeSong, ver)}
+                            className="ctrl-btn" 
+                            style={{ color: playingVersion?.id === v.id && isPlaying ? "#10b981" : "var(--accent)" }}
+                            onClick={() => handlePlayVersion(activeSong, v)}
                           >
-                            {isVerPlaying && isPlaying ? <Pause size={18} /> : <Play size={18} />}
+                            {playingVersion?.id === v.id && isPlaying ? <Pause size={18} /> : <Play size={18} />}
                           </button>
                         </div>
 
-                        <div className="version-row" style={{ marginTop: 4 }}>
+                        <div className="version-actions">
                           <label className="checkbox-label">
                             <input 
                               type="checkbox" 
-                              checked={ver.is_enabled}
-                              onChange={(e) => handleVersionStatusChange(ver.id, e.target.checked, ver.is_primary)}
+                              checked={v.is_active} 
+                              onChange={(e) => handleToggleVersionStatus(v.id, e.target.checked)}
                             />
                             启用该版本
                           </label>
@@ -750,194 +794,189 @@ function App() {
                           <label className="radio-label">
                             <input 
                               type="radio" 
-                              name={`primary-version-${activeSong.id}`}
-                              checked={ver.is_primary}
-                              onChange={() => handleVersionStatusChange(ver.id, ver.is_enabled, true)}
+                              name={`primary-${activeSong.id}`} 
+                              checked={v.is_primary}
+                              disabled={!v.is_active}
+                              onChange={() => handleSetPrimaryVersion(v.id)}
                             />
                             设为主播放版本
                           </label>
                         </div>
-
-                        <div className="version-actions">
-                          <button className="action-btn-sm" onClick={() => handleExportVersion(ver)}>
+                        
+                        <div style={{ borderTop: "1px dashed var(--border)", paddingTop: "6px", display: "flex", justifyContent: "flex-end" }}>
+                          <button className="action-btn-sm" onClick={() => handleExportVersion(v.id)}>
                             <Download size={12} /> 导出还原音频
                           </button>
                         </div>
                       </div>
-                    );
-                  })}
-                  
-                  <div style={{ fontSize: "0.8rem", color: "#64748b", padding: "4px 8px" }}>
-                    💡 绑定多个版本时，软件会在您双击歌曲时默认播放标为“主版本”的音频。
+                    ))}
+                    <div style={{ fontSize: "0.78rem", color: "var(--text-sub)", marginTop: "6px" }}>
+                      💡 绑定多个版本时，软件会在您双击歌曲时默认播放标为“主版本”的音频。
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
 
-              {/* Tab 2: 标签绑定面板 */}
-              {activeTab === "tags" && (
-                <div className="tag-list-checkboxes">
-                  {tags.map(tag => {
-                    const isBound = activeSong.tags.some(t => t.id === tag.id);
-                    return (
-                      <div 
-                        key={tag.id} 
-                        className="tag-bind-item"
-                        style={{ color: tag.color }}
-                        onClick={() => toggleSongTag(activeSong.id, tag.id, isBound)}
-                      >
-                        <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', backgroundColor: tag.color }}></span>
-                          {tag.name}
-                        </span>
-                        {isBound ? <CheckSquare size={16} /> : <Square size={16} />}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* Tab 3: 歌词与信息 */}
-              {activeTab === "lyrics" && (
-                <div className="lyrics-container">
-                  <div style={{ marginBottom: "16px", paddingBottom: "16px", borderBottom: "1px solid rgba(255,255,255,0.04)", fontSize: "0.85rem", color: "#64748b", textAlign: "left" }}>
-                    <strong>所属专辑</strong>: {activeSong.album || "未知专辑"}<br />
-                    <strong>生成日期</strong>: {new Date(activeSong.created_at).toLocaleDateString()}
+                {/* 2. 标签多对多绑定 */}
+                {activeTab === "tags" && (
+                  <div className="tag-list-checkboxes">
+                    {tags.map(t => {
+                      const isBound = activeSong.tags.some(tag => tag.id === t.id);
+                      return (
+                        <div 
+                          key={t.id} 
+                          className="tag-bind-item"
+                          onClick={() => {
+                            if (isBound) handleUnbindTag(activeSong.id, t.id);
+                            else handleBindTag(activeSong.id, t.id);
+                          }}
+                        >
+                          <span style={{ color: t.color, fontWeight: 600 }}>{t.name}</span>
+                          {isBound ? <CheckSquare size={16} color={t.color} /> : <Square size={16} color="var(--text-sub)" />}
+                        </div>
+                      );
+                    })}
+                    {tags.length === 0 && (
+                      <div style={{ color: "var(--text-sub)", padding: "10px", textAlign: "center" }}>暂无可选标签，请先去管理器添加</div>
+                    )}
                   </div>
-                  {activeSong.lyrics ? activeSong.lyrics : "暂无歌词信息，您可以通过导入带有歌词元数据的音频自动识别。"}
-                </div>
-              )}
-            </div>
-          </>
-        ) : (
-          <div className="empty-detail">
-            <Music size={48} />
-            <div>
-              <strong>未选择歌曲</strong>
-              <p style={{ margin: "4px 0 0 0", fontSize: "0.85rem" }}>在左侧选择一首歌曲以管理它的多个音频文件和属性。</p>
-            </div>
-          </div>
-        )}
-      </div>
+                )}
 
-      {/* 底部播放条 */}
-      <div className="glass-panel playbar">
-        {/* 音频波形实时画布 */}
-        <canvas ref={canvasRef} className="visualizer-canvas" width={800} height={40} />
-
-        {/* 歌曲基础信息 */}
-        <div className="playbar-track-info">
-          <div className="playbar-cover">
-            <Music size={24} color="rgba(255,255,255,0.6)" />
-          </div>
-          {playingSong && playingVersion ? (
-            <div className="playbar-meta">
-              <div className="playbar-title" title={playingSong.title}>{playingSong.title}</div>
-              <div className="playbar-artist">
-                {playingSong.artist || "未知歌手"} • 
-                <span style={{ marginLeft: 6 }} className="format-badge">{playingVersion.format?.toUpperCase()}</span>
+                {/* 3. 歌词与信息 */}
+                {activeTab === "lyrics" && (
+                  <div className="lyrics-container">
+                    {activeSong.lyrics ? activeSong.lyrics : "暂无歌词内容"}
+                  </div>
+                )}
               </div>
-            </div>
+            </>
           ) : (
-            <div className="playbar-meta">
-              <div className="playbar-title">未开始播放</div>
-              <div className="playbar-artist">Aetheria 音乐库</div>
+            <div className="empty-detail">
+              <Music size={48} style={{ opacity: 0.5 }} />
+              <div>未选择歌曲</div>
+              <div style={{ fontSize: "0.8rem", maxWidth: "200px" }}>在左侧选择一首歌曲以管理它的多个音频文件和属性。</div>
             </div>
           )}
         </div>
+      </div>
 
-        {/* 播放控制与进度条 */}
-        <div className="playbar-controls">
-          <div className="control-buttons">
-            <button className="ctrl-btn" onClick={handlePrev} title="上一首">
-              <SkipBack size={20} />
-            </button>
-            <button className="ctrl-btn play-pause" onClick={handlePlayPause}>
-              {isPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" />}
-            </button>
-            <button className="ctrl-btn" onClick={handleNext} title="下一首">
-              <SkipForward size={20} />
-            </button>
+      {/* 沉浸式全屏歌词浮层 */}
+      {isLyricsOverlayOpen && playingSong && (
+        <div className="lyrics-overlay">
+          <button className="lyrics-overlay-close" onClick={() => setIsLyricsOverlayOpen(false)}>
+            <X size={24} />
+          </button>
+          
+          <div className="lyrics-overlay-title">{playingSong.title}</div>
+          <div className="lyrics-overlay-artist">{playingSong.artist || "未知歌手"}</div>
+          
+          <div className="lyrics-scroll-box">
+            {lyricsLines.map((line, idx) => {
+              const isActive = idx === activeLyricsIndex;
+              return (
+                <div 
+                  key={idx} 
+                  ref={isActive ? activeLineRef : null}
+                  className={isActive ? "lyrics-line-active" : "lyrics-line-inactive"}
+                >
+                  {line}
+                </div>
+              );
+            })}
           </div>
+        </div>
+      )}
 
-          <div className="progress-bar-container">
-            <span className="time-stamp">{formatTime(currentTime)}</span>
-            <div className="slider-track" onClick={handleSeek}>
-              <div 
-                className="slider-fill" 
-                style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
-              ></div>
-              <div 
-                className="slider-handle" 
-                style={{ left: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
-              ></div>
-            </div>
-            <span className="time-stamp">{formatTime(duration)}</span>
+      {/* 底部播放控制栏 - 全新重构 */}
+      <div className="playbar">
+        {/* 最上边缘的无感进度条 */}
+        <div className="playbar-progress-container" onClick={handleSeek}>
+          <div 
+            className="playbar-progress-fill" 
+            style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
+          ></div>
+          <div 
+            className="playbar-progress-handle" 
+            style={{ left: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
+          ></div>
+        </div>
+
+        {/* 1. 当前曲目卡片 */}
+        <div className="playbar-track-info">
+          <div className="playbar-cover" onClick={() => setIsLyricsOverlayOpen(true)} style={{ cursor: "pointer" }} title="点击打开歌词">
+            {playingSong ? <FileAudio size={22} color="var(--accent)" /> : <Music size={22} />}
+          </div>
+          <div className="playbar-meta">
+            <span className="playbar-title" title={playingSong?.title || "未开始播放"}>
+              {playingSong?.title || "未开始播放"}
+            </span>
+            <span className="playbar-artist">
+              {playingSong ? `${playingSong.artist || "未知歌手"} · ${playingVersion?.format.toUpperCase() || ""}` : "Aetheria 音乐库"}
+            </span>
           </div>
         </div>
 
-        {/* 音量控制 */}
+        {/* 2. 播放动作控制与循环模式 */}
+        <div className="playbar-controls">
+          <div className="control-buttons">
+            <button 
+              className={`ctrl-btn ${playMode === "shuffle" ? "active" : ""}`} 
+              onClick={handlePlaybackModeCycle} 
+              title="切换到随机播放"
+            >
+              <Shuffle size={18} />
+            </button>
+            
+            <button className="ctrl-btn" onClick={handlePrev} title="上一首">
+              <SkipBack size={20} />
+            </button>
+            
+            <button className="ctrl-btn play-pause" onClick={handlePlayPause}>
+              {isPlaying ? <Pause size={20} /> : <Play size={20} style={{ transform: "translateX(1px)" }} />}
+            </button>
+            
+            <button className="ctrl-btn" onClick={handleNext} title="下一首">
+              <SkipForward size={20} />
+            </button>
+
+            <button 
+              className="ctrl-btn" 
+              onClick={handlePlaybackModeCycle} 
+              title={playMode === "single" ? "单曲循环" : "列表循环"}
+            >
+              {playMode === "single" ? <Repeat1 size={18} className="active" /> : <Repeat size={18} />}
+            </button>
+          </div>
+
+          <div style={{ fontSize: "0.75rem", color: "var(--text-sub)", display: "flex", gap: "8px" }}>
+            <span>{formatTime(currentTime)}</span>
+            <span>/</span>
+            <span>{formatTime(duration)}</span>
+          </div>
+        </div>
+
+        {/* 3. 音量控制器与歌词开关 */}
         <div className="playbar-volume">
-          <Volume2 size={16} color="#64748b" />
+          <button 
+            className={`ctrl-btn ${isLyricsOverlayOpen ? "active" : ""}`} 
+            style={{ marginRight: 10 }}
+            onClick={() => setIsLyricsOverlayOpen(!isLyricsOverlayOpen)} 
+            title="歌词面板"
+          >
+            <LayoutList size={18} />
+          </button>
+          
+          <Volume2 size={16} color="var(--text-sub)" />
           <div className="volume-slider" onClick={handleVolumeChange}>
             <div className="slider-fill" style={{ width: `${volume * 100}%` }}></div>
             <div className="slider-handle" style={{ left: `${volume * 100}%` }}></div>
           </div>
         </div>
+
+        {/* 动画频谱 Canvas */}
+        <canvas ref={canvasRef} className="visualizer-canvas" width={1000} height={36} />
       </div>
 
-      {/* Modal 1: 新建自定义标签弹框 */}
-      {isTagModalOpen && (
-        <div className="modal-overlay" onClick={() => setIsTagModalOpen(false)}>
-          <div className="modal-content" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <span className="modal-title">新建标签</span>
-              <button className="ctrl-btn" onClick={() => setIsTagModalOpen(false)}><X size={18} /></button>
-            </div>
-            
-            <div className="form-group">
-              <label>标签名称</label>
-              <input 
-                type="text" 
-                className="text-input" 
-                placeholder="请输入标签名..." 
-                value={newTagName}
-                onChange={e => setNewTagName(e.target.value)}
-              />
-            </div>
-
-            <div className="form-group">
-              <label>标签分类</label>
-              <select className="text-input" value={newTagCategory} onChange={e => setNewTagCategory(e.target.value)}>
-                <option value="语言">语言</option>
-                <option value="流派">流派</option>
-                <option value="情绪">情绪</option>
-                <option value="自定义">自定义</option>
-              </select>
-            </div>
-
-            <div className="form-group">
-              <label>标签背景颜色</label>
-              <div className="color-picker-grid">
-                {PRESET_COLORS.map(color => (
-                  <div 
-                    key={color}
-                    className={`color-option ${newTagColor === color ? "selected" : ""}`}
-                    style={{ backgroundColor: color }}
-                    onClick={() => setNewTagColor(color)}
-                  ></div>
-                ))}
-              </div>
-            </div>
-
-            <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setIsTagModalOpen(false)}>取消</button>
-              <button className="btn-primary" onClick={handleCreateTag}>创建</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal 2: 标签管理器弹框 */}
+      {/* Modal 1: 标签管理器弹框 */}
       {isTagManagerOpen && (
         <div className="modal-overlay" onClick={() => setIsTagManagerOpen(false)}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>
@@ -946,6 +985,34 @@ function App() {
               <button className="ctrl-btn" onClick={() => setIsTagManagerOpen(false)}><X size={18} /></button>
             </div>
             
+            {/* 新建标签表单直接移入管理器，释放外部布局压力 */}
+            <div className="form-group" style={{ background: "var(--bg-hover)", padding: "12px", borderRadius: "10px" }}>
+              <label>新建自定义标签</label>
+              <div style={{ display: "flex", gap: "8px", marginBottom: "8px" }}>
+                <input 
+                  type="text" 
+                  placeholder="标签名, 如: 抒情" 
+                  className="text-input"
+                  style={{ flex: 1 }}
+                  value={newTagName}
+                  onChange={e => setNewTagName(e.target.value)}
+                />
+                <button className="btn-primary" onClick={handleCreateTag}>
+                  <Plus size={16} /> 创建
+                </button>
+              </div>
+              <div className="color-picker-grid">
+                {PRESET_COLORS.map(c => (
+                  <div 
+                    key={c}
+                    className={`color-option ${newTagColor === c ? "selected" : ""}`}
+                    style={{ backgroundColor: c }}
+                    onClick={() => setNewTagColor(c)}
+                  />
+                ))}
+              </div>
+            </div>
+
             <div className="tag-list-manager">
               {tags.map(tag => (
                 <div key={tag.id} className="manager-tag-row">
@@ -969,7 +1036,7 @@ function App() {
         </div>
       )}
 
-      {/* Modal 3: 系统设置弹框 */}
+      {/* Modal 2: 系统设置弹框 */}
       {isSettingsOpen && (
         <div className="modal-overlay" onClick={() => setIsSettingsOpen(false)}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>
@@ -1007,7 +1074,15 @@ function App() {
               </div>
             </div>
 
-            <div className="form-group" style={{ marginTop: '8px' }}>
+            {/* 导入功能收归至设置中 */}
+            <div className="form-group" style={{ borderTop: "1px solid var(--border)", paddingTop: "12px" }}>
+              <label>导入本地音频数据</label>
+              <button className="import-btn" style={{ width: "100%", display: "flex", gap: "8px", justifyContent: "center", alignItems: "center" }} onClick={handleImportSongs}>
+                <FolderPlus size={16} /> 扫描导入本地音频文件夹
+              </button>
+            </div>
+
+            <div className="form-group">
               <label>本地托管音乐库路径</label>
               <div 
                 className="text-input" 
