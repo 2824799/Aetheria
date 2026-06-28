@@ -58,3 +58,11 @@ npm run tauri build -- --no-bundle
 ```
 编译成功后，您可以在本地找到最新的免安装可执行程序：
 👉 `D:\python\app\src-tauri\target\release\Aetheria.exe`
+
+---
+
+## 📄 开源许可协议
+
+本项目采用 **GNU Affero General Public License v3 (AGPL-3.0)** 协议进行开源。
+- **使用约束**：任何人均可免费使用、修改和二次分发本软件。但如果您对本项目代码进行了修改并在网络上分发或通过网络提供服务（SaaS），您**必须**将修改后的全部源代码以相同的 AGPLv3 协议对外公开发布。
+
