@@ -11,13 +11,13 @@ import "./App.css";
 interface AudioVersion {
   id: string;
   filepath: string;
-  filename: string;
+  original_name: string;
   format: string;
   bitrate?: number;
   duration?: number;
-  filesize?: number;
+  file_size?: number;
   is_primary: boolean;
-  is_active: boolean;
+  is_enabled: boolean;
 }
 
 interface Tag {
@@ -90,6 +90,24 @@ function App() {
     return (localStorage.getItem("aetheria-theme") as any) || "dark";
   });
 
+  useEffect(() => {
+    document.documentElement.className = "";
+    document.documentElement.classList.add(`theme-${theme}`);
+    localStorage.setItem("aetheria-theme", theme);
+  }, [theme]);
+
+  // 全局精美自定义 Toast 提示框状态
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
+  const showToast = (message: string, type: "success" | "error" | "info" = "info") => {
+    setToast({ message, type });
+  };
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
+
   // 播放器 DOM 引用
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -111,8 +129,10 @@ function App() {
       setSongs(loadedSongs);
       setTags(loadedTags);
       setLibraryPath(libPath);
+      return loadedSongs;
     } catch (err) {
       console.error("加载音乐库失败:", err);
+      return [];
     }
   };
 
@@ -149,13 +169,6 @@ function App() {
       audioRef.current.volume = volume;
     }
   }, [volume]);
-
-  // 全局主题变化
-  useEffect(() => {
-    document.documentElement.className = "";
-    document.documentElement.classList.add(`theme-${theme}`);
-    localStorage.setItem("aetheria-theme", theme);
-  }, [theme]);
 
   // 解析并高亮滚动当前播放歌词
   const lyricsLines = useMemo(() => {
@@ -322,10 +335,10 @@ function App() {
   const handleBindTag = async (songId: string, tagId: number) => {
     try {
       await invoke("tag_song", { songId, tagId });
-      loadLibrary();
+      const freshSongs = await loadLibrary();
       // 同步更新聚焦状态
       if (activeSong && activeSong.id === songId) {
-        const updated = songs.find(s => s.id === songId);
+        const updated = freshSongs.find(s => s.id === songId);
         if (updated) setActiveSong(updated);
       }
     } catch (err) {
@@ -336,10 +349,10 @@ function App() {
   const handleUnbindTag = async (songId: string, tagId: number) => {
     try {
       await invoke("untag_song", { songId, tagId });
-      loadLibrary();
+      const freshSongs = await loadLibrary();
       // 同步更新聚焦状态
       if (activeSong && activeSong.id === songId) {
-        const updated = songs.find(s => s.id === songId);
+        const updated = freshSongs.find(s => s.id === songId);
         if (updated) setActiveSong(updated);
       }
     } catch (err) {
@@ -352,9 +365,9 @@ function App() {
     if (!activeSong) return;
     try {
       await invoke("set_primary_version", { songId: activeSong.id, versionId });
-      await loadLibrary();
+      const freshSongs = await loadLibrary();
       
-      const updated = songs.find(s => s.id === activeSong.id);
+      const updated = freshSongs.find(s => s.id === activeSong.id);
       if (updated) {
         setActiveSong(updated);
         // 如果当前播放的就是这首歌，更新播放版本
@@ -372,8 +385,8 @@ function App() {
     if (!activeSong) return;
     try {
       await invoke("update_version_status", { versionId, active });
-      await loadLibrary();
-      const updated = songs.find(s => s.id === activeSong.id);
+      const freshSongs = await loadLibrary();
+      const updated = freshSongs.find(s => s.id === activeSong.id);
       if (updated) setActiveSong(updated);
     } catch (err) {
       console.error(err);
@@ -385,22 +398,22 @@ function App() {
       const destPath = await invoke<string | null>("select_save_file");
       if (!destPath) return;
       await invoke("export_audio_file", { versionId, destPath });
-      alert("音频导出还原成功！");
+      showToast("音频导出还原成功！", "success");
     } catch (err) {
-      alert("导出失败: " + err);
+      showToast("导出失败: " + err, "error");
     }
   };
 
   // 4. 播放器核心触发事件
   const handlePlaySong = (song: Song) => {
     // 寻找主版本，若无则挑选第一个启用的版本
-    let targetVersion = song.versions.find(v => v.is_primary && v.is_active);
+    let targetVersion = song.versions.find(v => v.is_primary && v.is_enabled);
     if (!targetVersion) {
-      targetVersion = song.versions.find(v => v.is_active);
+      targetVersion = song.versions.find(v => v.is_enabled);
     }
     
     if (!targetVersion) {
-      alert("该歌曲暂无可用的启用音频版本！请先启用至少一个版本。");
+      showToast("该歌曲暂无可用的启用音频版本！请先启用至少一个版本。", "error");
       return;
     }
     handlePlayVersion(song, targetVersion);
@@ -578,7 +591,7 @@ function App() {
         </div>
       </div>
 
-      {/* 中间主要功能区：歌曲列表与标签过滤池 */}
+      {/* 中中间主要功能区：歌曲列表与标签过滤池 */}
       <div className="glass-panel main-content">
         <div className="header-row">
           <h2 style={{ margin: 0, fontWeight: 800, fontSize: "1.6rem" }}>曲库大厅</h2>
@@ -722,6 +735,11 @@ function App() {
           </table>
         </div>
 
+        {/* 点击抽屉外部空白区域自动关闭抽屉的遮罩层 */}
+        {isDetailOpen && (
+          <div className="drawer-overlay" onClick={() => setIsDetailOpen(false)} />
+        )}
+
         {/* 侧滑出来的歌曲详情 / 版本控制抽屉 */}
         <div className={`glass-panel detail-pane ${isDetailOpen ? "open" : ""}`}>
           <button className="detail-close-btn" onClick={() => setIsDetailOpen(false)}>
@@ -768,9 +786,9 @@ function App() {
                       <div key={v.id} className="version-item">
                         <div className="version-row">
                           <div className="version-meta">
-                            <span className="version-filename" title={v.filename}>{v.filename}</span>
+                            <span className="version-filename" title={v.original_name}>{v.original_name}</span>
                             <span className="version-specs">
-                              {v.format.toUpperCase()} · {v.bitrate ? `${Math.round(v.bitrate / 1000)}kbps` : "未知码率"} · {v.filesize ? `${(v.filesize / 1024 / 1024).toFixed(2)} MB` : ""} · {formatTime(v.duration || 0)}
+                              {v.format.toUpperCase()} · {v.bitrate ? `${Math.round(v.bitrate / 1000)}kbps` : "未知码率"} · {v.file_size ? `${(v.file_size / 1024 / 1024).toFixed(2)} MB` : ""} · {formatTime(v.duration || 0)}
                             </span>
                           </div>
                           <button 
@@ -786,7 +804,7 @@ function App() {
                           <label className="checkbox-label">
                             <input 
                               type="checkbox" 
-                              checked={v.is_active} 
+                              checked={v.is_enabled} 
                               onChange={(e) => handleToggleVersionStatus(v.id, e.target.checked)}
                             />
                             启用该版本
@@ -797,7 +815,7 @@ function App() {
                               type="radio" 
                               name={`primary-${activeSong.id}`} 
                               checked={v.is_primary}
-                              disabled={!v.is_active}
+                              disabled={!v.is_enabled}
                               onChange={() => handleSetPrimaryVersion(v.id)}
                             />
                             设为主播放版本
@@ -1115,6 +1133,13 @@ function App() {
         <div className="loader-overlay">
           <div className="spinner"></div>
           <span style={{ fontSize: "1.1rem", fontWeight: 600 }}>{importProgress}</span>
+        </div>
+      )}
+
+      {/* 自定义高颜值毛玻璃 Toast 提示框 */}
+      {toast && (
+        <div className={`toast-container ${toast.type}`}>
+          {toast.message}
         </div>
       )}
     </div>

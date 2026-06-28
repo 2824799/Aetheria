@@ -922,7 +922,7 @@ body {
   left: 0;
   right: 0;
   bottom: 0;
-  z-index: 80;
+  z-index: 95; /* Higher than detail-pane (90) to cover it */
   background: var(--bg-panel);
   backdrop-filter: blur(40px) saturate(180%);
   -webkit-backdrop-filter: blur(40px) saturate(180%);
@@ -1223,4 +1223,58 @@ body {
 @keyframes spin {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
+}
+
+/* Click-away Drawer Overlay */
+.drawer-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 85; /* Just below detail-pane (90) */
+  background: rgba(0, 0, 0, 0.03);
+  backdrop-filter: blur(1.5px);
+  -webkit-backdrop-filter: blur(1.5px);
+  transition: all 0.25s ease;
+  border-radius: inherit;
+}
+
+/* Beautiful Custom Toast Notifications */
+.toast-container {
+  position: fixed;
+  top: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-panel);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--border);
+  padding: 12px 24px;
+  border-radius: 12px;
+  box-shadow: 0 10px 30px var(--shadow);
+  z-index: 1000;
+  font-weight: 600;
+  font-size: 0.9rem;
+  animation: slideDown 0.3s cubic-bezier(0.18, 0.89, 0.32, 1.28) forwards;
+}
+
+.toast-container.success {
+  border-color: rgba(16, 185, 129, 0.4);
+  color: #10b981;
+}
+
+.toast-container.error {
+  border-color: rgba(239, 68, 68, 0.4);
+  color: #ef4444;
+}
+
+.toast-container.info {
+  border-color: rgba(59, 130, 246, 0.4);
+  color: var(--accent);
+}
+
+@keyframes slideDown {
+  from { transform: translate(-50%, -20px); opacity: 0; }
+  to { transform: translate(-50%, 0); opacity: 1; }
 }
