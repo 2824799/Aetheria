@@ -440,3 +440,25 @@ pub fn select_export_directory() -> Result<Option<String>, String> {
     }
 }
 
+#[tauri::command]
+pub fn select_directory() -> Result<Option<String>, String> {
+    let dir = rfd::FileDialog::new()
+        .pick_folder();
+        
+    match dir {
+        Some(path) => Ok(Some(path.to_string_lossy().to_string())),
+        None => Ok(None)
+    }
+}
+
+#[tauri::command]
+pub fn select_save_file() -> Result<Option<String>, String> {
+    let file = rfd::FileDialog::new()
+        .save_file();
+        
+    match file {
+        Some(path) => Ok(Some(path.to_string_lossy().to_string())),
+        None => Ok(None)
+    }
+}
+

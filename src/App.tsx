@@ -53,10 +53,16 @@ function App() {
   const [tags, setTags] = useState<Tag[]>([]);
   const [libraryPath, setLibraryPath] = useState<string>("");
   
-  // 过滤与搜索状态
+  // 从 localStorage 恢复基础配置状态
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedTags, setSelectedTags] = useState<number[]>([]);
-  const [filterMode, setFilterMode] = useState<"AND" | "OR">("AND");
+  const [selectedTags, setSelectedTags] = useState<number[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("aetheria-selected-tags") || "[]");
+    } catch { return []; }
+  });
+  const [filterMode, setFilterMode] = useState<"AND" | "OR">(() => {
+    return (localStorage.getItem("aetheria-filter-mode") as any) || "AND";
+  });
   const [isTagsExpanded, setIsTagsExpanded] = useState(true);
   
   // 当前聚焦歌曲及 Tab 状态
@@ -64,14 +70,19 @@ function App() {
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"versions" | "tags" | "lyrics">("versions");
   
-  // 播放器核心状态
+  // 播放器核心状态（恢复上次播放状态）
   const [playingSong, setPlayingSong] = useState<Song | null>(null);
   const [playingVersion, setPlayingVersion] = useState<AudioVersion | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [volume, setVolume] = useState(0.8);
-  const [playMode, setPlayMode] = useState<"list" | "single" | "shuffle">("list");
+  const [volume, setVolume] = useState<number>(() => {
+    const val = localStorage.getItem("aetheria-volume");
+    return val ? parseFloat(val) : 0.8;
+  });
+  const [playMode, setPlayMode] = useState<"list" | "single" | "shuffle">(() => {
+    return (localStorage.getItem("aetheria-play-mode") as any) || "list";
+  });
   
   // UI 模态框及 Loading 状态
   const [isTagManagerOpen, setIsTagManagerOpen] = useState(false);
@@ -90,11 +101,20 @@ function App() {
     return (localStorage.getItem("aetheria-theme") as any) || "dark";
   });
 
-  useEffect(() => {
-    document.documentElement.className = "";
-    document.documentElement.classList.add(`theme-${theme}`);
-    localStorage.setItem("aetheria-theme", theme);
-  }, [theme]);
+  // 播放器 DOM 引用
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const animationRef = useRef<number | null>(null);
+  const activeLineRef = useRef<HTMLDivElement | null>(null);
+  
+  // Web Audio API 动效相关
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const sourceRef = useRef<MediaElementAudioSourceNode | null>(null);
+
+  // 拖动状态 Ref
+  const isDraggingVolumeRef = useRef(false);
+  const isDraggingProgressRef = useRef(false);
 
   // 全局精美自定义 Toast 提示框状态
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
@@ -108,17 +128,6 @@ function App() {
     }
   }, [toast]);
 
-  // 播放器 DOM 引用
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const animationRef = useRef<number | null>(null);
-  const activeLineRef = useRef<HTMLDivElement | null>(null);
-  
-  // Web Audio API 动效相关
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const sourceRef = useRef<MediaElementAudioSourceNode | null>(null);
-
   // 初始化加载数据
   const loadLibrary = async () => {
     try {
@@ -129,15 +138,57 @@ function App() {
       setSongs(loadedSongs);
       setTags(loadedTags);
       setLibraryPath(libPath);
-      return loadedSongs;
+      return { loadedSongs, libPath };
     } catch (err) {
       console.error("加载音乐库失败:", err);
-      return [];
+      return { loadedSongs: [], libPath: "" };
     }
   };
 
+  // 挂载时加载库，并恢复历史播放位置
   useEffect(() => {
-    loadLibrary();
+    loadLibrary().then(({ loadedSongs, libPath }) => {
+      // 恢复上次播放的歌曲及进度
+      const savedSongId = localStorage.getItem("aetheria-playing-song-id");
+      const savedVersionId = localStorage.getItem("aetheria-playing-version-id");
+      const savedTimeStr = localStorage.getItem("aetheria-current-time");
+      
+      if (savedSongId && savedVersionId && loadedSongs.length > 0) {
+        const song = loadedSongs.find(s => s.id === savedSongId);
+        if (song) {
+          const version = song.versions.find(v => v.id === savedVersionId);
+          if (version) {
+            setPlayingSong(song);
+            setPlayingVersion(version);
+            
+            if (audioRef.current) {
+              const normalizedPath = (libPath + "/" + version.filepath).replace(/\\/g, "/");
+              const assetUrl = convertFileSrc(normalizedPath);
+              audioRef.current.src = assetUrl;
+              audioRef.current.load();
+              
+              if (savedTimeStr) {
+                const savedTime = parseFloat(savedTimeStr);
+                if (!isNaN(savedTime)) {
+                  audioRef.current.currentTime = savedTime;
+                  setCurrentTime(savedTime);
+                }
+              }
+            }
+          }
+        }
+      }
+    });
+
+    // 禁用默认的浏览器右键菜单以提升客户端原生感
+    const handleContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+    };
+    document.addEventListener("contextmenu", handleContextMenu);
+
+    return () => {
+      document.removeEventListener("contextmenu", handleContextMenu);
+    };
   }, []);
 
   // 音频初始化与事件监听 (仅在挂载时运行一次，保持 Audio 实例唯一性)
@@ -147,7 +198,11 @@ function App() {
     audioRef.current = audio;
     audio.volume = volume;
 
-    const onTimeUpdate = () => setCurrentTime(audio.currentTime);
+    const onTimeUpdate = () => {
+      setCurrentTime(audio.currentTime);
+      // 实时的播放进度写入本地缓存，确保崩溃或退出后可完美追溯
+      localStorage.setItem("aetheria-current-time", audio.currentTime.toString());
+    };
     const onLoadedMetadata = () => setDuration(audio.duration);
     const onEnded = () => handleEnded();
 
@@ -163,12 +218,49 @@ function App() {
     };
   }, []);
 
-  // 同步音量状态到播放器 DOM
+  // 同步音量状态到播放器 DOM 并保存本地状态
   useEffect(() => {
     if (audioRef.current) {
       audioRef.current.volume = volume;
     }
+    localStorage.setItem("aetheria-volume", volume.toString());
   }, [volume]);
+
+  // 监听并自动保存过滤与播放配置
+  useEffect(() => {
+    localStorage.setItem("aetheria-selected-tags", JSON.stringify(selectedTags));
+  }, [selectedTags]);
+
+  useEffect(() => {
+    localStorage.setItem("aetheria-filter-mode", filterMode);
+  }, [filterMode]);
+
+  useEffect(() => {
+    localStorage.setItem("aetheria-play-mode", playMode);
+  }, [playMode]);
+
+  useEffect(() => {
+    if (playingSong) {
+      localStorage.setItem("aetheria-playing-song-id", playingSong.id);
+    } else {
+      localStorage.removeItem("aetheria-playing-song-id");
+    }
+  }, [playingSong]);
+
+  useEffect(() => {
+    if (playingVersion) {
+      localStorage.setItem("aetheria-playing-version-id", playingVersion.id);
+    } else {
+      localStorage.removeItem("aetheria-playing-version-id");
+    }
+  }, [playingVersion]);
+
+  // 全局主题变化
+  useEffect(() => {
+    document.documentElement.className = "";
+    document.documentElement.classList.add(`theme-${theme}`);
+    localStorage.setItem("aetheria-theme", theme);
+  }, [theme]);
 
   // 解析并高亮滚动当前播放歌词
   const lyricsLines = useMemo(() => {
@@ -335,7 +427,7 @@ function App() {
   const handleBindTag = async (songId: string, tagId: number) => {
     try {
       await invoke("tag_song", { songId, tagId });
-      const freshSongs = await loadLibrary();
+      const { loadedSongs: freshSongs } = await loadLibrary();
       // 同步更新聚焦状态
       if (activeSong && activeSong.id === songId) {
         const updated = freshSongs.find(s => s.id === songId);
@@ -349,7 +441,7 @@ function App() {
   const handleUnbindTag = async (songId: string, tagId: number) => {
     try {
       await invoke("untag_song", { songId, tagId });
-      const freshSongs = await loadLibrary();
+      const { loadedSongs: freshSongs } = await loadLibrary();
       // 同步更新聚焦状态
       if (activeSong && activeSong.id === songId) {
         const updated = freshSongs.find(s => s.id === songId);
@@ -365,7 +457,7 @@ function App() {
     if (!activeSong) return;
     try {
       await invoke("set_primary_version", { songId: activeSong.id, versionId });
-      const freshSongs = await loadLibrary();
+      const { loadedSongs: freshSongs } = await loadLibrary();
       
       const updated = freshSongs.find(s => s.id === activeSong.id);
       if (updated) {
@@ -385,7 +477,7 @@ function App() {
     if (!activeSong) return;
     try {
       await invoke("update_version_status", { versionId, active });
-      const freshSongs = await loadLibrary();
+      const { loadedSongs: freshSongs } = await loadLibrary();
       const updated = freshSongs.find(s => s.id === activeSong.id);
       if (updated) setActiveSong(updated);
     } catch (err) {
@@ -529,21 +621,66 @@ function App() {
     }
   };
 
-  const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!audioRef.current || duration === 0) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const clickX = e.clientX - rect.left;
-    const pct = clickX / rect.width;
-    const seekTime = pct * duration;
-    audioRef.current.currentTime = seekTime;
-    setCurrentTime(seekTime);
+  // 音量进度条拖拽事件核心控制
+  const handleVolumeMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    isDraggingVolumeRef.current = true;
+    updateVolumeFromEvent(e);
+    
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      if (isDraggingVolumeRef.current) {
+        updateVolumeFromEvent(moveEvent);
+      }
+    };
+    
+    const handleMouseUp = () => {
+      isDraggingVolumeRef.current = false;
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+    
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
   };
 
-  const handleVolumeChange = (e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
+  const updateVolumeFromEvent = (e: React.MouseEvent<HTMLDivElement> | MouseEvent) => {
+    const slider = document.querySelector(".volume-slider");
+    if (!slider) return;
+    const rect = slider.getBoundingClientRect();
     const clickX = e.clientX - rect.left;
     const pct = Math.max(0, Math.min(1, clickX / rect.width));
     setVolume(pct);
+  };
+
+  // 播放进度条拖拽事件控制
+  const handleProgressMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    isDraggingProgressRef.current = true;
+    updateProgressFromEvent(e);
+    
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      if (isDraggingProgressRef.current) {
+        updateProgressFromEvent(moveEvent);
+      }
+    };
+    
+    const handleMouseUp = () => {
+      isDraggingProgressRef.current = false;
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+    
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+  };
+
+  const updateProgressFromEvent = (e: React.MouseEvent<HTMLDivElement> | MouseEvent) => {
+    const track = document.querySelector(".playbar-progress-container");
+    if (!track || !audioRef.current || duration === 0) return;
+    const rect = track.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const pct = Math.max(0, Math.min(1, clickX / rect.width));
+    const seekTime = pct * duration;
+    audioRef.current.currentTime = seekTime;
+    setCurrentTime(seekTime);
   };
 
   // 辅助转换时长格式
@@ -591,11 +728,11 @@ function App() {
         </div>
       </div>
 
-      {/* 中中间主要功能区：歌曲列表与标签过滤池 */}
+      {/* 中间主要功能区：歌曲列表与标签过滤池 */}
       <div className="glass-panel main-content">
-        <div className="header-row">
-          <h2 style={{ margin: 0, fontWeight: 800, fontSize: "1.6rem" }}>曲库大厅</h2>
-          <div className="search-container">
+        {/* 顶部工具栏：去掉大标题，搜索居中，导入歌曲按钮挂载在右侧 */}
+        <div className="header-row" style={{ justifyContent: 'center', gap: '12px', width: '100%', marginBottom: '6px' }}>
+          <div className="search-container" style={{ width: '400px' }}>
             <Search className="search-icon" size={18} />
             <input 
               type="text" 
@@ -605,6 +742,9 @@ function App() {
               onChange={e => setSearchQuery(e.target.value)}
             />
           </div>
+          <button className="import-btn" style={{ padding: '8px 16px', borderRadius: '20px', fontSize: '0.85rem', whiteSpace: 'nowrap' }} onClick={handleImportSongs} title="导入本地音乐">
+            <FolderPlus size={16} /> 导入歌曲
+          </button>
         </div>
 
         {/* 可收起的标签过滤器 */}
@@ -689,7 +829,15 @@ function App() {
                     }}
                     onDoubleClick={() => handlePlaySong(song)}
                   >
-                    <td>
+                    {/* 点击最左侧播放按钮单元格直接触发播放/暂停，阻止冒泡到展开详情页，以提升交互体验 */}
+                    <td onClick={(e) => {
+                      e.stopPropagation();
+                      if (isCurrentlyPlaying) {
+                        handlePlayPause();
+                      } else {
+                        handlePlaySong(song);
+                      }
+                    }}>
                       <div className="play-row-btn">
                         {isCurrentlyPlaying && isPlaying ? <Pause size={14} /> : <Play size={14} />}
                       </div>
@@ -907,8 +1055,8 @@ function App() {
 
       {/* 底部播放控制栏 - 全新重构 */}
       <div className="playbar">
-        {/* 最上边缘的无感进度条 - 统一进度条与音量条样式 */}
-        <div className="playbar-progress-container" onClick={handleSeek}>
+        {/* 最上边缘的无感进度条 - 统一进度条与音量条样式，支持点击和流畅鼠标移动拖曳 */}
+        <div className="playbar-progress-container" onMouseDown={handleProgressMouseDown}>
           <div 
             className="slider-fill" 
             style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
@@ -986,7 +1134,7 @@ function App() {
           
           <Volume2 size={16} color="var(--text-sub)" />
           <span className="volume-pct-label">{Math.round(volume * 100)}%</span>
-          <div className="volume-slider" onClick={handleVolumeChange}>
+          <div className="volume-slider" onMouseDown={handleVolumeMouseDown}>
             <div className="slider-fill" style={{ width: `${volume * 100}%` }}></div>
             <div className="slider-handle" style={{ left: `${volume * 100}%` }}></div>
           </div>
@@ -1056,7 +1204,7 @@ function App() {
         </div>
       )}
 
-      {/* Modal 2: 系统设置弹框 */}
+      {/* Modal 2: 系统设置弹框 - 去除多余无用的底端确认退出按钮 */}
       {isSettingsOpen && (
         <div className="modal-overlay" onClick={() => setIsSettingsOpen(false)}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>
@@ -1119,10 +1267,6 @@ function App() {
                 数据引擎: SQLite 3 & Symphonia/Lofty (Rust)<br />
                 界面渲染: React 19 & Tauri 2.0
               </div>
-            </div>
-
-            <div className="modal-footer">
-              <button className="btn-primary" style={{ width: "100%" }} onClick={() => setIsSettingsOpen(false)}>保存并关闭</button>
             </div>
           </div>
         </div>

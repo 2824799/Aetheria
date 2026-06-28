@@ -28,7 +28,9 @@ pub fn run() {
             commands::tag_song,
             commands::get_library_path,
             commands::select_audio_files,
-            commands::select_export_directory
+            commands::select_export_directory,
+            commands::select_directory,
+            commands::select_save_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
