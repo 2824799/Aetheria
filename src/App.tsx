@@ -1,11 +1,17 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { 
-  Play, Pause, SkipForward, SkipBack, Tag as TagIcon, Plus, Trash2, 
-  FolderPlus, Download, Volume2, Search, X, Music, List, CheckSquare, Square, Settings,
-  ChevronDown, ChevronRight, Repeat, Repeat1, Shuffle, LayoutList, FileAudio
-} from "lucide-react";
+import { X, Search, FolderPlus } from "lucide-react";
+
+import Sidebar from "./components/Sidebar";
+import TagFilter from "./components/TagFilter";
+import SongTable from "./components/SongTable";
+import DetailPane from "./components/DetailPane";
+import PlayBar from "./components/PlayBar";
+import Toast from "./components/Toast";
+import TagManagerModal from "./components/TagManagerModal";
+import SettingsModal from "./components/SettingsModal";
+
 import "./App.css";
 
 interface AudioVersion {
@@ -41,6 +47,19 @@ interface Song {
   tags: Tag[];
 }
 
+interface Playlist {
+  id: string;
+  name: string;
+  description?: string;
+  created_at: string;
+}
+
+interface Clipboard {
+  type: "copy" | "cut";
+  songIds: string[];
+  sourcePlaylistId: string | null;
+}
+
 const PRESET_COLORS = [
   "#ef4444", "#f97316", "#f59e0b", "#10b981", "#06b6d4", 
   "#3b82f6", "#6366f1", "#8b5cf6", "#d946ef", "#ec4899",
@@ -51,9 +70,16 @@ function App() {
   // 数据源状态
   const [songs, setSongs] = useState<Song[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
+  const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [libraryPath, setLibraryPath] = useState<string>("");
   
-  // 从 localStorage 恢复基础配置状态
+  // 当前活动歌单
+  const [activePlaylistId, setActivePlaylistId] = useState<string | null>(() => {
+    return localStorage.getItem("aetheria-active-playlist-id") || null;
+  });
+  const [playlistSongIds, setPlaylistSongIds] = useState<string[]>([]);
+  
+  // 过滤与搜索状态
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedTags, setSelectedTags] = useState<number[]>(() => {
     try {
@@ -70,7 +96,17 @@ function App() {
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"versions" | "tags" | "lyrics">("versions");
   
-  // 播放器核心状态（恢复上次播放状态）
+  // 选中的歌曲
+  const [selectedSongIds, setSelectedSongIds] = useState<string[]>([]);
+  // 剪贴板
+  const [clipboard, setClipboard] = useState<Clipboard | null>(() => {
+    try {
+      const saved = localStorage.getItem("aetheria-clipboard");
+      return saved ? JSON.parse(saved) : null;
+    } catch { return null; }
+  });
+
+  // 播放器核心状态
   const [playingSong, setPlayingSong] = useState<Song | null>(null);
   const [playingVersion, setPlayingVersion] = useState<AudioVersion | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -112,9 +148,8 @@ function App() {
   const analyserRef = useRef<AnalyserNode | null>(null);
   const sourceRef = useRef<MediaElementAudioSourceNode | null>(null);
 
-  // 拖动状态 Ref
-  const isDraggingVolumeRef = useRef(false);
-  const isDraggingProgressRef = useRef(false);
+  // 待恢复的播放进度时间 Ref (用于解决 HTML5 Audio src 赋值时立刻设置 currentTime 无效的 bug)
+  const pendingRestoreTimeRef = useRef<number | null>(null);
 
   // 全局精美自定义 Toast 提示框状态
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
@@ -145,6 +180,15 @@ function App() {
     }
   };
 
+  const fetchPlaylists = async () => {
+    try {
+      const list = await invoke<Playlist[]>("get_playlists");
+      setPlaylists(list);
+    } catch (err) {
+      console.error("加载歌单合集失败:", err);
+    }
+  };
+
   // 挂载时加载库，并恢复历史播放位置
   useEffect(() => {
     loadLibrary().then(({ loadedSongs, libPath }) => {
@@ -170,7 +214,7 @@ function App() {
               if (savedTimeStr) {
                 const savedTime = parseFloat(savedTimeStr);
                 if (!isNaN(savedTime)) {
-                  audioRef.current.currentTime = savedTime;
+                  pendingRestoreTimeRef.current = savedTime;
                   setCurrentTime(savedTime);
                 }
               }
@@ -179,6 +223,8 @@ function App() {
         }
       }
     });
+
+    fetchPlaylists();
 
     // 禁用默认的浏览器右键菜单以提升客户端原生感
     const handleContextMenu = (e: MouseEvent) => {
@@ -191,19 +237,25 @@ function App() {
     };
   }, []);
 
-  // 音频初始化与事件监听 (仅在挂载时运行一次，保持 Audio 实例唯一性)
+  // 音频初始化与事件监听
   useEffect(() => {
     const audio = new Audio();
-    audio.crossOrigin = "anonymous"; // 解决 Web Audio 跨域安全机制导致的静音输出 Bug
+    audio.crossOrigin = "anonymous";
     audioRef.current = audio;
     audio.volume = volume;
 
     const onTimeUpdate = () => {
       setCurrentTime(audio.currentTime);
-      // 实时的播放进度写入本地缓存，确保崩溃或退出后可完美追溯
       localStorage.setItem("aetheria-current-time", audio.currentTime.toString());
     };
-    const onLoadedMetadata = () => setDuration(audio.duration);
+    const onLoadedMetadata = () => {
+      setDuration(audio.duration);
+      if (pendingRestoreTimeRef.current !== null) {
+        audio.currentTime = pendingRestoreTimeRef.current;
+        setCurrentTime(pendingRestoreTimeRef.current);
+        pendingRestoreTimeRef.current = null;
+      }
+    };
     const onEnded = () => handleEnded();
 
     audio.addEventListener("timeupdate", onTimeUpdate);
@@ -225,6 +277,21 @@ function App() {
     }
     localStorage.setItem("aetheria-volume", volume.toString());
   }, [volume]);
+
+  // 监听歌单 ID 改变加载该歌单内的所有歌曲 ID 排列
+  useEffect(() => {
+    if (activePlaylistId) {
+      localStorage.setItem("aetheria-active-playlist-id", activePlaylistId);
+      invoke<string[]>("get_playlist_songs", { playlistId: activePlaylistId })
+        .then(ids => setPlaylistSongIds(ids))
+        .catch(err => console.error("加载歌单歌曲失败:", err));
+    } else {
+      localStorage.removeItem("aetheria-active-playlist-id");
+      setPlaylistSongIds([]);
+    }
+    // 切换歌单时清空选中歌曲
+    setSelectedSongIds([]);
+  }, [activePlaylistId]);
 
   // 监听并自动保存过滤与播放配置
   useEffect(() => {
@@ -254,6 +321,14 @@ function App() {
       localStorage.removeItem("aetheria-playing-version-id");
     }
   }, [playingVersion]);
+
+  useEffect(() => {
+    if (clipboard) {
+      localStorage.setItem("aetheria-clipboard", JSON.stringify(clipboard));
+    } else {
+      localStorage.removeItem("aetheria-clipboard");
+    }
+  }, [clipboard]);
 
   // 全局主题变化
   useEffect(() => {
@@ -372,7 +447,7 @@ function App() {
     }
   };
 
-  // 1. 导入音频文件逻辑（调用系统目录选取）
+  // 1. 导入音频文件逻辑
   const handleImportSongs = async () => {
     setIsImporting(true);
     setImportProgress("正在选择文件夹...");
@@ -384,7 +459,6 @@ function App() {
       }
 
       setImportProgress("正在扫描并解析音频元数据...");
-      // 调用后台分析导入
       const count = await invoke<number>("import_audio_files", { dirPath: selectedDir });
       setImportProgress(`成功导入了 ${count} 首歌曲！`);
       
@@ -410,6 +484,7 @@ function App() {
       });
       setNewTagName("");
       loadLibrary();
+      showToast("标签新建成功", "success");
     } catch (err) {
       console.error("创建标签失败:", err);
     }
@@ -419,6 +494,7 @@ function App() {
     try {
       await invoke("delete_tag", { tagId });
       loadLibrary();
+      showToast("标签已删除", "info");
     } catch (err) {
       console.error("删除标签失败:", err);
     }
@@ -428,7 +504,6 @@ function App() {
     try {
       await invoke("tag_song", { songId, tagId });
       const { loadedSongs: freshSongs } = await loadLibrary();
-      // 同步更新聚焦状态
       if (activeSong && activeSong.id === songId) {
         const updated = freshSongs.find(s => s.id === songId);
         if (updated) setActiveSong(updated);
@@ -442,7 +517,6 @@ function App() {
     try {
       await invoke("untag_song", { songId, tagId });
       const { loadedSongs: freshSongs } = await loadLibrary();
-      // 同步更新聚焦状态
       if (activeSong && activeSong.id === songId) {
         const updated = freshSongs.find(s => s.id === songId);
         if (updated) setActiveSong(updated);
@@ -462,12 +536,12 @@ function App() {
       const updated = freshSongs.find(s => s.id === activeSong.id);
       if (updated) {
         setActiveSong(updated);
-        // 如果当前播放的就是这首歌，更新播放版本
         if (playingSong && playingSong.id === activeSong.id) {
           const newPrimary = updated.versions.find(v => v.id === versionId);
           if (newPrimary) setPlayingVersion(newPrimary);
         }
       }
+      showToast("默认主版本设置成功", "success");
     } catch (err) {
       console.error(err);
     }
@@ -498,7 +572,6 @@ function App() {
 
   // 4. 播放器核心触发事件
   const handlePlaySong = (song: Song) => {
-    // 寻找主版本，若无则挑选第一个启用的版本
     let targetVersion = song.versions.find(v => v.is_primary && v.is_enabled);
     if (!targetVersion) {
       targetVersion = song.versions.find(v => v.is_enabled);
@@ -515,7 +588,6 @@ function App() {
     try {
       initAudioAnalyzer();
       
-      // 替换 Windows 下的反斜杠，将其规范化为前端网络路径斜杠，防止 Webview2 解析 CORS 或路径破损
       const normalizedPath = (libraryPath + "/" + version.filepath).replace(/\\/g, "/");
       const assetUrl = convertFileSrc(normalizedPath);
       
@@ -553,10 +625,93 @@ function App() {
     }
   };
 
-  // 标签多维条件动态过滤引擎
-  const filteredSongs = useMemo(() => {
-    return songs.filter(song => {
-      // 1. 搜索关键词匹配
+  // 5. 歌单合集底层指令封装
+  const handleCreatePlaylist = async (name: string) => {
+    try {
+      await invoke("create_playlist", { name });
+      await fetchPlaylists();
+      showToast("歌单合集新建成功", "success");
+    } catch (err) {
+      showToast("创建歌单失败: " + err, "error");
+    }
+  };
+
+  const handleRenamePlaylist = async (id: string, name: string) => {
+    try {
+      await invoke("rename_playlist", { id, name });
+      await fetchPlaylists();
+      showToast("歌单已成功重命名", "success");
+    } catch (err) {
+      showToast("重命名失败: " + err, "error");
+    }
+  };
+
+  const handleDeletePlaylist = async (id: string) => {
+    try {
+      await invoke("delete_playlist", { id });
+      await fetchPlaylists();
+      if (activePlaylistId === id) {
+        setActivePlaylistId(null);
+      }
+      showToast("歌单已删除", "info");
+    } catch (err) {
+      showToast("删除歌单失败: " + err, "error");
+    }
+  };
+
+  const handleAddSongsToPlaylist = async (playlistId: string, songIds: string[]) => {
+    try {
+      await invoke("add_songs_to_playlist", { playlistId, songIds });
+      if (activePlaylistId === playlistId) {
+        const ids = await invoke<string[]>("get_playlist_songs", { playlistId });
+        setPlaylistSongIds(ids);
+      }
+      showToast(`成功添加 ${songIds.length} 首歌曲到歌单`, "success");
+    } catch (err) {
+      showToast("添加失败: " + err, "error");
+    }
+  };
+
+  const handleRemoveSongsFromPlaylist = async (playlistId: string, songIds: string[]) => {
+    try {
+      await invoke("remove_songs_from_playlist", { playlistId, songIds });
+      const ids = await invoke<string[]>("get_playlist_songs", { playlistId });
+      setPlaylistSongIds(ids);
+      showToast("已从该歌单中移除所选歌曲", "info");
+    } catch (err) {
+      showToast("移除失败: " + err, "error");
+    }
+  };
+
+  const handlePasteSongs = async (playlistId: string) => {
+    if (!clipboard) return;
+    try {
+      await invoke("add_songs_to_playlist", { playlistId, songIds: clipboard.songIds });
+      if (clipboard.type === "cut" && clipboard.sourcePlaylistId) {
+        await invoke("remove_songs_from_playlist", { playlistId: clipboard.sourcePlaylistId, songIds: clipboard.songIds });
+      }
+      const ids = await invoke<string[]>("get_playlist_songs", { playlistId });
+      setPlaylistSongIds(ids);
+      setClipboard(null);
+      showToast("已成功粘贴剪贴板内的歌曲", "success");
+    } catch (err) {
+      showToast("粘贴失败: " + err, "error");
+    }
+  };
+
+  // 歌单与标签组合过滤引擎
+  const displaySongs = useMemo(() => {
+    let list = songs;
+    
+    // 如果当前选中了某歌单，首先按照歌单中保存的 sort_order 排列过滤
+    if (activePlaylistId) {
+      list = playlistSongIds
+        .map(id => songs.find(s => s.id === id))
+        .filter((s): s is Song => !!s);
+    }
+    
+    // 接着在列表基础上过滤搜索关键词和选中的多维标签
+    return list.filter(song => {
       const matchesSearch = searchQuery === "" || 
         song.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
         (song.artist && song.artist.toLowerCase().includes(searchQuery.toLowerCase())) ||
@@ -564,7 +719,6 @@ function App() {
       
       if (!matchesSearch) return false;
 
-      // 2. 多维标签规则匹配
       if (selectedTags.length === 0) return true;
 
       const songTagIds = song.tags.map(t => t.id);
@@ -574,7 +728,7 @@ function App() {
         return selectedTags.some(id => songTagIds.includes(id));
       }
     });
-  }, [songs, searchQuery, selectedTags, filterMode]);
+  }, [songs, activePlaylistId, playlistSongIds, searchQuery, selectedTags, filterMode]);
 
   const handlePlaybackModeCycle = () => {
     if (playMode === "list") setPlayMode("shuffle");
@@ -583,31 +737,31 @@ function App() {
   };
 
   const handleNext = () => {
-    if (filteredSongs.length === 0) return;
+    if (displaySongs.length === 0) return;
     let nextIndex = 0;
     
     if (playMode === "shuffle") {
-      nextIndex = Math.floor(Math.random() * filteredSongs.length);
+      nextIndex = Math.floor(Math.random() * displaySongs.length);
     } else {
-      const currentIndex = filteredSongs.findIndex(s => s.id === playingSong?.id);
-      nextIndex = (currentIndex + 1) % filteredSongs.length;
+      const currentIndex = displaySongs.findIndex(s => s.id === playingSong?.id);
+      nextIndex = (currentIndex + 1) % displaySongs.length;
     }
     
-    handlePlaySong(filteredSongs[nextIndex]);
+    handlePlaySong(displaySongs[nextIndex]);
   };
 
   const handlePrev = () => {
-    if (filteredSongs.length === 0) return;
+    if (displaySongs.length === 0) return;
     let prevIndex = 0;
     
     if (playMode === "shuffle") {
-      prevIndex = Math.floor(Math.random() * filteredSongs.length);
+      prevIndex = Math.floor(Math.random() * displaySongs.length);
     } else {
-      const currentIndex = filteredSongs.findIndex(s => s.id === playingSong?.id);
-      prevIndex = currentIndex <= 0 ? filteredSongs.length - 1 : currentIndex - 1;
+      const currentIndex = displaySongs.findIndex(s => s.id === playingSong?.id);
+      prevIndex = currentIndex <= 0 ? displaySongs.length - 1 : currentIndex - 1;
     }
     
-    handlePlaySong(filteredSongs[prevIndex]);
+    handlePlaySong(displaySongs[prevIndex]);
   };
 
   const handleEnded = () => {
@@ -621,118 +775,45 @@ function App() {
     }
   };
 
-  // 音量进度条拖拽事件核心控制
-  const handleVolumeMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
-    isDraggingVolumeRef.current = true;
-    updateVolumeFromEvent(e);
-    
-    const handleMouseMove = (moveEvent: MouseEvent) => {
-      if (isDraggingVolumeRef.current) {
-        updateVolumeFromEvent(moveEvent);
-      }
-    };
-    
-    const handleMouseUp = () => {
-      isDraggingVolumeRef.current = false;
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
-    };
-    
-    window.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("mouseup", handleMouseUp);
+  const handleSeek = (seekTime: number) => {
+    if (audioRef.current) {
+      audioRef.current.currentTime = seekTime;
+      setCurrentTime(seekTime);
+    }
   };
 
-  const updateVolumeFromEvent = (e: React.MouseEvent<HTMLDivElement> | MouseEvent) => {
-    const slider = document.querySelector(".volume-slider");
-    if (!slider) return;
-    const rect = slider.getBoundingClientRect();
-    const clickX = e.clientX - rect.left;
-    const pct = Math.max(0, Math.min(1, clickX / rect.width));
-    setVolume(pct);
-  };
-
-  // 播放进度条拖拽事件控制
-  const handleProgressMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
-    isDraggingProgressRef.current = true;
-    updateProgressFromEvent(e);
-    
-    const handleMouseMove = (moveEvent: MouseEvent) => {
-      if (isDraggingProgressRef.current) {
-        updateProgressFromEvent(moveEvent);
-      }
-    };
-    
-    const handleMouseUp = () => {
-      isDraggingProgressRef.current = false;
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
-    };
-    
-    window.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("mouseup", handleMouseUp);
-  };
-
-  const updateProgressFromEvent = (e: React.MouseEvent<HTMLDivElement> | MouseEvent) => {
-    const track = document.querySelector(".playbar-progress-container");
-    if (!track || !audioRef.current || duration === 0) return;
-    const rect = track.getBoundingClientRect();
-    const clickX = e.clientX - rect.left;
-    const pct = Math.max(0, Math.min(1, clickX / rect.width));
-    const seekTime = pct * duration;
-    audioRef.current.currentTime = seekTime;
-    setCurrentTime(seekTime);
-  };
-
-  // 辅助转换时长格式
-  const formatTime = (secs: number) => {
-    if (isNaN(secs)) return "0:00";
-    const m = Math.floor(secs / 60);
-    const s = Math.floor(secs % 60);
-    return `${m}:${s < 10 ? "0" : ""}${s}`;
+  const handleToggleTag = (tagId: number) => {
+    if (selectedTags.includes(tagId)) {
+      setSelectedTags(selectedTags.filter(id => id !== tagId));
+    } else {
+      setSelectedTags([...selectedTags, tagId]);
+    }
   };
 
   return (
     <div className="app-container">
-      {/* 炫酷磨砂发光斑点 */}
+      {/* 炫酷磨砂发光背景 */}
       <div className="ambient-glow glow-1"></div>
       <div className="ambient-glow glow-2"></div>
 
-      {/* 左侧边栏：Aetheria 极简导航 */}
-      <div className="glass-panel sidebar">
-        <div>
-          <div className="logo-section">
-            <div className="logo-icon">
-              <Music size={22} color="white" />
-            </div>
-            <span className="logo-text">AETHERIA</span>
-          </div>
+      {/* 1. 左侧边栏 - 自定义解耦组件 */}
+      <Sidebar 
+        playlists={playlists}
+        activePlaylistId={activePlaylistId}
+        onSelectPlaylist={setActivePlaylistId}
+        onCreatePlaylist={handleCreatePlaylist}
+        onRenamePlaylist={handleRenamePlaylist}
+        onDeletePlaylist={handleDeletePlaylist}
+        allSongsCount={songs.length}
+        onOpenSettings={() => setIsSettingsOpen(true)}
+      />
 
-          <div className="menu-group">
-            <div className="menu-title">导航中心</div>
-            <div className="menu-item active">
-              <List size={18} />
-              全部歌曲 ({songs.length})
-            </div>
-            <div className="menu-item" onClick={() => setIsTagManagerOpen(true)}>
-              <TagIcon size={18} />
-              标签管理器
-            </div>
-          </div>
-        </div>
-
-        <div className="sidebar-bottom">
-          <div className="menu-item" onClick={() => setIsSettingsOpen(true)}>
-            <Settings size={18} />
-            系统设置
-          </div>
-        </div>
-      </div>
-
-      {/* 中间主要功能区：歌曲列表与标签过滤池 */}
+      {/* 中间主要功能区 */}
       <div className="glass-panel main-content">
-        {/* 顶部工具栏：去掉大标题，搜索居中，导入歌曲按钮挂载在右侧 */}
-        <div className="header-row" style={{ justifyContent: 'center', gap: '12px', width: '100%', marginBottom: '6px' }}>
-          <div className="search-container" style={{ width: '400px' }}>
+        
+        {/* 顶部居中搜索框 + 最右侧导入按钮 */}
+        <div className="header-row" style={{ marginBottom: '12px' }}>
+          <div className="search-container" style={{ width: '450px' }}>
             <Search className="search-icon" size={18} />
             <input 
               type="text" 
@@ -742,290 +823,70 @@ function App() {
               onChange={e => setSearchQuery(e.target.value)}
             />
           </div>
-          <button className="import-btn" style={{ padding: '8px 16px', borderRadius: '20px', fontSize: '0.85rem', whiteSpace: 'nowrap' }} onClick={handleImportSongs} title="导入本地音乐">
+          <button className="import-btn" style={{ position: "absolute", right: 0 }} onClick={handleImportSongs} title="导入本地音乐">
             <FolderPlus size={16} /> 导入歌曲
           </button>
         </div>
 
-        {/* 可收起的标签过滤器 */}
-        <div className="tag-matrix-panel">
-          <div className="tag-matrix-header" onClick={() => setIsTagsExpanded(!isTagsExpanded)}>
-            <span className="tag-matrix-title-wrapper">
-              <TagIcon size={16} /> 
-              标签多维过滤器
-              {isTagsExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-            </span>
-            <div className="filter-toggle-container" onClick={e => e.stopPropagation()}>
-              <div 
-                className={`filter-toggle-btn ${filterMode === "AND" ? "active" : ""}`}
-                onClick={() => setFilterMode("AND")}
-              >
-                交集 (AND)
-              </div>
-              <div 
-                className={`filter-toggle-btn ${filterMode === "OR" ? "active" : ""}`}
-                onClick={() => setFilterMode("OR")}
-              >
-                并集 (OR)
-              </div>
-            </div>
-          </div>
-          
-          <div className={`tag-matrix-content-wrapper ${isTagsExpanded ? "" : "collapsed"}`}>
-            <div className="tag-pool">
-              {tags.map(tag => {
-                const isSelected = selectedTags.includes(tag.id);
-                return (
-                  <div 
-                    key={tag.id}
-                    className={`tag-chip ${isSelected ? "selected" : ""}`}
-                    style={{ color: tag.color || "#cbd5e1" }}
-                    onClick={() => {
-                      if (isSelected) {
-                        setSelectedTags(selectedTags.filter(id => id !== tag.id));
-                      } else {
-                        setSelectedTags([...selectedTags, tag.id]);
-                      }
-                    }}
-                  >
-                    <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', backgroundColor: tag.color || "#cbd5e1" }}></span>
-                    {tag.name}
-                  </div>
-                );
-              })}
-              {tags.length === 0 && (
-                <div style={{ color: "var(--text-sub)", fontSize: "0.85rem" }}>暂无预设标签，可点击左侧标签管理器新建</div>
-              )}
-            </div>
-          </div>
-        </div>
+        {/* 2. 标签多维条件过滤器 - 自定义解耦组件 */}
+        <TagFilter 
+          tags={tags}
+          selectedTags={selectedTags}
+          onToggleTag={handleToggleTag}
+          filterMode={filterMode}
+          onSetFilterMode={setFilterMode}
+          isTagsExpanded={isTagsExpanded}
+          onSetTagsExpanded={setIsTagsExpanded}
+          onOpenTagManager={() => setIsTagManagerOpen(true)}
+        />
 
-        {/* 歌曲主列表 - 优化表头和防中文折行 */}
-        <div className="song-list-container">
-          <table className="song-table">
-            <thead>
-              <tr>
-                <th></th>
-                <th>歌曲名称</th>
-                <th>歌手</th>
-                <th>绑定的自定义标签</th>
-                <th style={{ textAlign: "center" }}>版本数</th>
-                <th style={{ textAlign: "center" }}>默认音质</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredSongs.map(song => {
-                const isCurrentlyPlaying = playingSong?.id === song.id;
-                const primaryVersion = song.versions.find(v => v.is_primary);
-                const activeFormat = primaryVersion?.format.toUpperCase() || "未知";
-                
-                return (
-                  <tr 
-                    key={song.id} 
-                    className={`song-row ${isCurrentlyPlaying ? "playing" : ""} ${activeSong?.id === song.id ? "active" : ""}`}
-                    onClick={() => {
-                      setActiveSong(song);
-                      setIsDetailOpen(true);
-                    }}
-                    onDoubleClick={() => handlePlaySong(song)}
-                  >
-                    {/* 点击最左侧播放按钮单元格直接触发播放/暂停，阻止冒泡到展开详情页，以提升交互体验 */}
-                    <td onClick={(e) => {
-                      e.stopPropagation();
-                      if (isCurrentlyPlaying) {
-                        handlePlayPause();
-                      } else {
-                        handlePlaySong(song);
-                      }
-                    }}>
-                      <div className="play-row-btn">
-                        {isCurrentlyPlaying && isPlaying ? <Pause size={14} /> : <Play size={14} />}
-                      </div>
-                    </td>
-                    <td>
-                      <div className="song-title-cell">
-                        <span className="song-title-text">{song.title}</span>
-                      </div>
-                    </td>
-                    <td>
-                      <span className="song-artist-text">{song.artist || "未知歌手"}</span>
-                    </td>
-                    <td>
-                      <div className="badge-container">
-                        {song.tags.map(t => (
-                          <span 
-                            key={t.id} 
-                            className="tag-pill" 
-                            style={{ borderLeft: `3px solid ${t.color}`, color: t.color }}
-                          >
-                            {t.name}
-                          </span>
-                        ))}
-                      </div>
-                    </td>
-                    <td style={{ textAlign: "center", fontWeight: 600 }}>{song.versions.length}</td>
-                    <td style={{ textAlign: "center" }}>
-                      <span className={`format-badge ${activeFormat.toLowerCase()}`}>
-                        {activeFormat}
-                      </span>
-                    </td>
-                  </tr>
-                );
-              })}
-              {filteredSongs.length === 0 && (
-                <tr>
-                  <td colSpan={6} style={{ textAlign: "center", padding: "40px", color: "var(--text-sub)" }}>
-                    没有找到符合条件的歌曲，请导入或调整过滤器
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+        {/* 3. 歌曲表格列表 - 支持拖拽多选与右键上下文 */}
+        <SongTable 
+          songs={displaySongs}
+          activeSong={activeSong}
+          onSelectSong={(song) => {
+            setActiveSong(song);
+            setIsDetailOpen(true);
+          }}
+          playingSong={playingSong}
+          isPlaying={isPlaying}
+          onPlaySong={handlePlaySong}
+          onPlayPause={handlePlayPause}
+          selectedSongIds={selectedSongIds}
+          onSetSelectedSongIds={setSelectedSongIds}
+          playlists={playlists}
+          activePlaylistId={activePlaylistId}
+          onAddSongsToPlaylist={handleAddSongsToPlaylist}
+          onRemoveSongsFromPlaylist={handleRemoveSongsFromPlaylist}
+          clipboard={clipboard}
+          onSetClipboard={setClipboard}
+          onPasteSongs={handlePasteSongs}
+        />
 
-        {/* 点击抽屉外部空白区域自动关闭抽屉的遮罩层 */}
+        {/* 点击详情外部遮罩层自动收起 */}
         {isDetailOpen && (
           <div className="drawer-overlay" onClick={() => setIsDetailOpen(false)} />
         )}
 
-        {/* 侧滑出来的歌曲详情 / 版本控制抽屉 */}
-        <div className={`glass-panel detail-pane ${isDetailOpen ? "open" : ""}`}>
-          <button className="detail-close-btn" onClick={() => setIsDetailOpen(false)}>
-            <X size={20} />
-          </button>
-          
-          {activeSong ? (
-            <>
-              <div className="detail-header">
-                <div className="cover-container">
-                  <div className="cover-glow"></div>
-                  <Music size={44} />
-                </div>
-                <div className="detail-title">{activeSong.title}</div>
-                <div className="detail-artist">{activeSong.artist || "未知歌手"}</div>
-              </div>
-
-              <div className="detail-tabs-container">
-                <div 
-                  className={`detail-tab ${activeTab === "versions" ? "active" : ""}`}
-                  onClick={() => setActiveTab("versions")}
-                >
-                  音频版本 ({activeSong.versions.length})
-                </div>
-                <div 
-                  className={`detail-tab ${activeTab === "tags" ? "active" : ""}`}
-                  onClick={() => setActiveTab("tags")}
-                >
-                  标签绑定 ({activeSong.tags.length})
-                </div>
-                <div 
-                  className={`detail-tab ${activeTab === "lyrics" ? "active" : ""}`}
-                  onClick={() => setActiveTab("lyrics")}
-                >
-                  歌词与信息
-                </div>
-              </div>
-
-              <div className="detail-section">
-                {/* 1. 音频版本控制 */}
-                {activeTab === "versions" && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                    {activeSong.versions.map(v => (
-                      <div key={v.id} className="version-item">
-                        <div className="version-row">
-                          <div className="version-meta">
-                            <span className="version-filename" title={v.original_name}>{v.original_name}</span>
-                            <span className="version-specs">
-                              {v.format.toUpperCase()} · {v.bitrate ? `${Math.round(v.bitrate / 1000)}kbps` : "未知码率"} · {v.file_size ? `${(v.file_size / 1024 / 1024).toFixed(2)} MB` : ""} · {formatTime(v.duration || 0)}
-                            </span>
-                          </div>
-                          <button 
-                            className="ctrl-btn" 
-                            style={{ color: playingVersion?.id === v.id && isPlaying ? "#10b981" : "var(--accent)" }}
-                            onClick={() => handlePlayVersion(activeSong, v)}
-                          >
-                            {playingVersion?.id === v.id && isPlaying ? <Pause size={18} /> : <Play size={18} />}
-                          </button>
-                        </div>
-
-                        <div className="version-actions">
-                          <label className="checkbox-label">
-                            <input 
-                              type="checkbox" 
-                              checked={v.is_enabled} 
-                              onChange={(e) => handleToggleVersionStatus(v.id, e.target.checked)}
-                            />
-                            启用该版本
-                          </label>
-
-                          <label className="radio-label">
-                            <input 
-                              type="radio" 
-                              name={`primary-${activeSong.id}`} 
-                              checked={v.is_primary}
-                              disabled={!v.is_enabled}
-                              onChange={() => handleSetPrimaryVersion(v.id)}
-                            />
-                            设为主播放版本
-                          </label>
-                        </div>
-                        
-                        <div style={{ borderTop: "1px dashed var(--border)", paddingTop: "6px", display: "flex", justifyContent: "flex-end" }}>
-                          <button className="action-btn-sm" onClick={() => handleExportVersion(v.id)}>
-                            <Download size={12} /> 导出还原音频
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                    <div style={{ fontSize: "0.78rem", color: "var(--text-sub)", marginTop: "6px" }}>
-                      💡 绑定多个版本时，软件会在您双击歌曲时默认播放标为“主版本”的音频。
-                    </div>
-                  </div>
-                )}
-
-                {/* 2. 标签多对多绑定 */}
-                {activeTab === "tags" && (
-                  <div className="tag-list-checkboxes">
-                    {tags.map(t => {
-                      const isBound = activeSong.tags.some(tag => tag.id === t.id);
-                      return (
-                        <div 
-                          key={t.id} 
-                          className="tag-bind-item"
-                          onClick={() => {
-                            if (isBound) handleUnbindTag(activeSong.id, t.id);
-                            else handleBindTag(activeSong.id, t.id);
-                          }}
-                        >
-                          <span style={{ color: t.color, fontWeight: 600 }}>{t.name}</span>
-                          {isBound ? <CheckSquare size={16} color={t.color} /> : <Square size={16} color="var(--text-sub)" />}
-                        </div>
-                      );
-                    })}
-                    {tags.length === 0 && (
-                      <div style={{ color: "var(--text-sub)", padding: "10px", textAlign: "center" }}>暂无可选标签，请先去管理器添加</div>
-                    )}
-                  </div>
-                )}
-
-                {/* 3. 歌词与信息 */}
-                {activeTab === "lyrics" && (
-                  <div className="lyrics-container">
-                    {activeSong.lyrics ? activeSong.lyrics : "暂无歌词内容"}
-                  </div>
-                )}
-              </div>
-            </>
-          ) : (
-            <div className="empty-detail">
-              <Music size={48} style={{ opacity: 0.5 }} />
-              <div>未选择歌曲</div>
-              <div style={{ fontSize: "0.8rem", maxWidth: "200px" }}>在左侧选择一首歌曲以管理它的多个音频文件和属性。</div>
-            </div>
-          )}
-        </div>
+        {/* 4. 侧滑详情抽屉 - 自定义解耦组件 */}
+        <DetailPane 
+          isOpen={isDetailOpen}
+          onClose={() => setIsDetailOpen(false)}
+          activeSong={activeSong}
+          activeTab={activeTab}
+          onSetActiveTab={setActiveTab}
+          playingVersion={playingVersion}
+          isPlaying={isPlaying}
+          onPlayVersion={handlePlayVersion}
+          allTags={tags}
+          onBindTag={handleBindTag}
+          onUnbindTag={handleUnbindTag}
+          onSetPrimaryVersion={handleSetPrimaryVersion}
+          onToggleVersionStatus={handleToggleVersionStatus}
+          onExportVersion={handleExportVersion}
+        />
         
-        {/* 沉浸式全屏歌词浮层 - 移动至 main-content 内部，避免遮挡侧边栏和播放栏，且支持模糊模糊滤镜 */}
+        {/* 全屏滚动歌词浮层 */}
         {isLyricsOverlayOpen && playingSong && (
           <div className="lyrics-overlay">
             <button className="lyrics-overlay-close" onClick={() => setIsLyricsOverlayOpen(false)}>
@@ -1053,226 +914,49 @@ function App() {
         )}
       </div>
 
-      {/* 底部播放控制栏 - 全新重构 */}
-      <div className="playbar">
-        {/* 最上边缘的无感进度条 - 统一进度条与音量条样式，支持点击和流畅鼠标移动拖曳 */}
-        <div className="playbar-progress-container" onMouseDown={handleProgressMouseDown}>
-          <div 
-            className="slider-fill" 
-            style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
-          ></div>
-          <div 
-            className="slider-handle" 
-            style={{ left: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
-          ></div>
-        </div>
+      {/* 5. 底部播放器控制栏 - 自定义解耦组件 */}
+      <PlayBar 
+        canvasRef={canvasRef}
+        playingSong={playingSong}
+        playingVersion={playingVersion}
+        isPlaying={isPlaying}
+        currentTime={currentTime}
+        duration={duration}
+        volume={volume}
+        playMode={playMode}
+        isLyricsOverlayOpen={isLyricsOverlayOpen}
+        onSetLyricsOverlayOpen={setIsLyricsOverlayOpen}
+        onPlayPause={handlePlayPause}
+        onPrev={handlePrev}
+        onNext={handleNext}
+        onPlaybackModeCycle={handlePlaybackModeCycle}
+        onSeek={handleSeek}
+        onVolumeChange={setVolume}
+      />
 
-        {/* 1. 当前曲目卡片 */}
-        <div className="playbar-track-info">
-          <div className="playbar-cover" onClick={() => setIsLyricsOverlayOpen(true)} style={{ cursor: "pointer" }} title="点击打开歌词">
-            {playingSong ? <FileAudio size={22} color="var(--accent)" /> : <Music size={22} />}
-          </div>
-          <div className="playbar-meta">
-            <span className="playbar-title" title={playingSong?.title || "未开始播放"}>
-              {playingSong?.title || "未开始播放"}
-            </span>
-            <span className="playbar-artist">
-              {playingSong ? `${playingSong.artist || "未知歌手"} · ${playingVersion?.format.toUpperCase() || ""}` : "Aetheria 音乐库"}
-            </span>
-          </div>
-        </div>
+      {/* 6. 独立对话框与 Toast 提示 */}
+      <TagManagerModal 
+        isOpen={isTagManagerOpen}
+        onClose={() => setIsTagManagerOpen(false)}
+        tags={tags}
+        newTagName={newTagName}
+        setNewTagName={setNewTagName}
+        newTagColor={newTagColor}
+        setNewTagColor={setNewTagColor}
+        presetColors={PRESET_COLORS}
+        onCreateTag={handleCreateTag}
+        onDeleteTag={handleDeleteTag}
+      />
 
-        {/* 2. 播放动作控制与循环模式 */}
-        <div className="playbar-controls">
-          <div className="control-buttons">
-            <button 
-              className={`ctrl-btn ${playMode === "shuffle" ? "active" : ""}`} 
-              onClick={handlePlaybackModeCycle} 
-              title="切换到随机播放"
-            >
-              <Shuffle size={18} />
-            </button>
-            
-            <button className="ctrl-btn" onClick={handlePrev} title="上一首">
-              <SkipBack size={20} />
-            </button>
-            
-            <button className="ctrl-btn play-pause" onClick={handlePlayPause}>
-              {isPlaying ? <Pause size={20} /> : <Play size={20} style={{ transform: "translateX(1px)" }} />}
-            </button>
-            
-            <button className="ctrl-btn" onClick={handleNext} title="下一首">
-              <SkipForward size={20} />
-            </button>
+      <SettingsModal 
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        theme={theme}
+        setTheme={setTheme}
+        libraryPath={libraryPath}
+        onImportSongs={handleImportSongs}
+      />
 
-            <button 
-              className="ctrl-btn" 
-              onClick={handlePlaybackModeCycle} 
-              title={playMode === "single" ? "单曲循环" : "列表循环"}
-            >
-              {playMode === "single" ? <Repeat1 size={18} className="active" /> : <Repeat size={18} />}
-            </button>
-          </div>
-
-          <div style={{ fontSize: "0.75rem", color: "var(--text-sub)", display: "flex", gap: "8px" }}>
-            <span>{formatTime(currentTime)}</span>
-            <span>/</span>
-            <span>{formatTime(duration)}</span>
-          </div>
-        </div>
-
-        {/* 3. 音量控制器与歌词开关 */}
-        <div className="playbar-volume">
-          <button 
-            className={`ctrl-btn ${isLyricsOverlayOpen ? "active" : ""}`} 
-            style={{ marginRight: 10 }}
-            onClick={() => setIsLyricsOverlayOpen(!isLyricsOverlayOpen)} 
-            title="歌词面板"
-          >
-            <LayoutList size={18} />
-          </button>
-          
-          <Volume2 size={16} color="var(--text-sub)" />
-          <span className="volume-pct-label">{Math.round(volume * 100)}%</span>
-          <div className="volume-slider" onMouseDown={handleVolumeMouseDown}>
-            <div className="slider-fill" style={{ width: `${volume * 100}%` }}></div>
-            <div className="slider-handle" style={{ left: `${volume * 100}%` }}></div>
-          </div>
-        </div>
-
-        {/* 动画频谱 Canvas */}
-        <canvas ref={canvasRef} className="visualizer-canvas" width={1000} height={36} />
-      </div>
-
-      {/* Modal 1: 标签管理器弹框 */}
-      {isTagManagerOpen && (
-        <div className="modal-overlay" onClick={() => setIsTagManagerOpen(false)}>
-          <div className="modal-content" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <span className="modal-title">管理已有标签</span>
-              <button className="ctrl-btn" onClick={() => setIsTagManagerOpen(false)}><X size={18} /></button>
-            </div>
-            
-            {/* 新建标签表单直接移入管理器，释放外部布局压力 */}
-            <div className="form-group" style={{ background: "var(--bg-hover)", padding: "12px", borderRadius: "10px" }}>
-              <label>新建自定义标签</label>
-              <div style={{ display: "flex", gap: "8px", marginBottom: "8px" }}>
-                <input 
-                  type="text" 
-                  placeholder="标签名, 如: 抒情" 
-                  className="text-input"
-                  style={{ flex: 1 }}
-                  value={newTagName}
-                  onChange={e => setNewTagName(e.target.value)}
-                />
-                <button className="btn-primary" onClick={handleCreateTag}>
-                  <Plus size={16} /> 创建
-                </button>
-              </div>
-              <div className="color-picker-grid">
-                {PRESET_COLORS.map(c => (
-                  <div 
-                    key={c}
-                    className={`color-option ${newTagColor === c ? "selected" : ""}`}
-                    style={{ backgroundColor: c }}
-                    onClick={() => setNewTagColor(c)}
-                  />
-                ))}
-              </div>
-            </div>
-
-            <div className="tag-list-manager">
-              {tags.map(tag => (
-                <div key={tag.id} className="manager-tag-row">
-                  <span style={{ color: tag.color, fontWeight: 600 }}>
-                    [{tag.category || "自定义"}] {tag.name}
-                  </span>
-                  <button className="ctrl-btn" style={{ color: "#ef4444" }} onClick={() => handleDeleteTag(tag.id)}>
-                    <Trash2 size={16} />
-                  </button>
-                </div>
-              ))}
-              {tags.length === 0 && (
-                <div style={{ color: "#64748b", textAlign: "center", padding: "12px" }}>暂无标签</div>
-              )}
-            </div>
-
-            <div className="modal-footer">
-              <button className="btn-secondary" style={{ width: "100%" }} onClick={() => setIsTagManagerOpen(false)}>关闭</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal 2: 系统设置弹框 - 去除多余无用的底端确认退出按钮 */}
-      {isSettingsOpen && (
-        <div className="modal-overlay" onClick={() => setIsSettingsOpen(false)}>
-          <div className="modal-content" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <span className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Settings size={20} /> 系统设置
-              </span>
-              <button className="ctrl-btn" onClick={() => setIsSettingsOpen(false)}><X size={18} /></button>
-            </div>
-            
-            <div className="form-group">
-              <label>切换界面主题风格</label>
-              <div className="theme-selector-grid">
-                <div 
-                  className={`theme-card ${theme === "dark" ? "active" : ""}`}
-                  onClick={() => setTheme("dark")}
-                >
-                  <div className="theme-preview dark"></div>
-                  <div className="theme-name">深邃暗色</div>
-                </div>
-                <div 
-                  className={`theme-card ${theme === "light" ? "active" : ""}`}
-                  onClick={() => setTheme("light")}
-                >
-                  <div className="theme-preview light"></div>
-                  <div className="theme-name">纯净亮色</div>
-                </div>
-                <div 
-                  className={`theme-card ${theme === "pink" ? "active" : ""}`}
-                  onClick={() => setTheme("pink")}
-                >
-                  <div className="theme-preview pink"></div>
-                  <div className="theme-name">温润粉樱</div>
-                </div>
-              </div>
-            </div>
-
-            {/* 导入功能收归至设置中 */}
-            <div className="form-group" style={{ borderTop: "1px solid var(--border)", paddingTop: "12px" }}>
-              <label>导入本地音频数据</label>
-              <button className="import-btn" style={{ width: "100%", display: "flex", gap: "8px", justifyContent: "center", alignItems: "center" }} onClick={handleImportSongs}>
-                <FolderPlus size={16} /> 扫描导入本地音频文件夹
-              </button>
-            </div>
-
-            <div className="form-group">
-              <label>本地托管音乐库路径</label>
-              <div 
-                className="text-input" 
-                style={{ fontSize: '0.8rem', wordBreak: 'break-all', opacity: 0.8, background: 'var(--bg-hover)' }}
-              >
-                {libraryPath}
-              </div>
-            </div>
-
-            <div className="form-group">
-              <label>关于 Aetheria</label>
-              <div style={{ fontSize: '0.8rem', opacity: 0.7, lineHeight: 1.5 }}>
-                软件版本: v0.1.0 (Portable)<br />
-                数据引擎: SQLite 3 & Symphonia/Lofty (Rust)<br />
-                界面渲染: React 19 & Tauri 2.0
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Loader: 导入音频数据遮罩 */}
       {isImporting && (
         <div className="loader-overlay">
           <div className="spinner"></div>
@@ -1280,12 +964,7 @@ function App() {
         </div>
       )}
 
-      {/* 自定义高颜值毛玻璃 Toast 提示框 */}
-      {toast && (
-        <div className={`toast-container ${toast.type}`}>
-          {toast.message}
-        </div>
-      )}
+      {toast && <Toast message={toast.message} type={toast.type} />}
     </div>
   );
 }

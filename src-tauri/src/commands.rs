@@ -462,3 +462,120 @@ pub fn select_save_file() -> Result<Option<String>, String> {
     }
 }
 
+#[tauri::command]
+pub fn get_playlists() -> Result<Vec<db::Playlist>, String> {
+    let conn = err_str!(db::establish_connection())?;
+    let mut stmt = err_str!(conn.prepare(
+        "SELECT id, name, description, created_at FROM playlists ORDER BY created_at ASC"
+    ))?;
+    let rows = err_str!(stmt.query_map([], |row| {
+        Ok(db::Playlist {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            description: row.get(2)?,
+            created_at: row.get(3)?,
+        })
+    }))?;
+    let mut playlists = Vec::new();
+    for r in rows {
+        playlists.push(err_str!(r)?);
+    }
+    Ok(playlists)
+}
+
+#[tauri::command]
+pub fn create_playlist(name: String) -> Result<db::Playlist, String> {
+    let conn = err_str!(db::establish_connection())?;
+    let id = uuid::Uuid::new_v4().to_string();
+    err_str!(conn.execute(
+        "INSERT INTO playlists (id, name, description) VALUES (?1, ?2, '')",
+        params![id, name]
+    ))?;
+    
+    let mut stmt = err_str!(conn.prepare(
+        "SELECT id, name, description, created_at FROM playlists WHERE id = ?1"
+    ))?;
+    let playlist = err_str!(stmt.query_row(params![id], |row| {
+        Ok(db::Playlist {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            description: row.get(2)?,
+            created_at: row.get(3)?,
+        })
+    }))?;
+    Ok(playlist)
+}
+
+#[tauri::command]
+pub fn delete_playlist(id: String) -> Result<(), String> {
+    let conn = err_str!(db::establish_connection())?;
+    err_str!(conn.execute("DELETE FROM playlists WHERE id = ?1", params![id]))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn rename_playlist(id: String, name: String) -> Result<(), String> {
+    let conn = err_str!(db::establish_connection())?;
+    err_str!(conn.execute("UPDATE playlists SET name = ?1 WHERE id = ?2", params![name, id]))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn add_songs_to_playlist(playlist_id: String, song_ids: Vec<String>) -> Result<(), String> {
+    let mut conn = err_str!(db::establish_connection())?;
+    let tx = err_str!(conn.transaction())?;
+    
+    // Get current max sort_order
+    let max_sort_order: i32 = err_str!(tx.query_row(
+        "SELECT COALESCE(MAX(sort_order), -1) FROM playlist_songs WHERE playlist_id = ?1",
+        params![playlist_id],
+        |row| row.get(0)
+    ))?;
+    
+    let mut current_order = max_sort_order + 1;
+    for song_id in song_ids {
+        let exists: i64 = err_str!(tx.query_row(
+            "SELECT COUNT(*) FROM playlist_songs WHERE playlist_id = ?1 AND song_id = ?2",
+            params![playlist_id, song_id],
+            |row| row.get(0)
+        ))?;
+        if exists == 0 {
+            err_str!(tx.execute(
+                "INSERT INTO playlist_songs (playlist_id, song_id, sort_order) VALUES (?1, ?2, ?3)",
+                params![playlist_id, song_id, current_order]
+            ))?;
+            current_order += 1;
+        }
+    }
+    err_str!(tx.commit())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn remove_songs_from_playlist(playlist_id: String, song_ids: Vec<String>) -> Result<(), String> {
+    let mut conn = err_str!(db::establish_connection())?;
+    let tx = err_str!(conn.transaction())?;
+    for song_id in song_ids {
+        err_str!(tx.execute(
+            "DELETE FROM playlist_songs WHERE playlist_id = ?1 AND song_id = ?2",
+            params![playlist_id, song_id]
+        ))?;
+    }
+    err_str!(tx.commit())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_playlist_songs(playlist_id: String) -> Result<Vec<String>, String> {
+    let conn = err_str!(db::establish_connection())?;
+    let mut stmt = err_str!(conn.prepare(
+        "SELECT song_id FROM playlist_songs WHERE playlist_id = ?1 ORDER BY sort_order ASC"
+    ))?;
+    let rows = err_str!(stmt.query_map(params![playlist_id], |row| row.get::<_, String>(0)))?;
+    let mut song_ids = Vec::new();
+    for r in rows {
+        song_ids.push(err_str!(r)?);
+    }
+    Ok(song_ids)
+}
+
