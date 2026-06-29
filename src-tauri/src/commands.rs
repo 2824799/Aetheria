@@ -435,6 +435,7 @@ pub fn get_library_path() -> Result<String, String> {
     Ok(db::get_library_dir().to_string_lossy().to_string())
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 pub fn select_audio_files() -> Result<Vec<String>, String> {
     let files = rfd::FileDialog::new()
@@ -452,6 +453,14 @@ pub fn select_audio_files() -> Result<Vec<String>, String> {
     }
 }
 
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[tauri::command]
+pub fn select_audio_files() -> Result<Vec<String>, String> {
+    // 移动端：降级使用，返回空（实际开发中移动端一般使用 Tauri 的 native dialogs 或 input picker）
+    Ok(Vec::new())
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 pub fn select_export_directory() -> Result<Option<String>, String> {
     let dir = rfd::FileDialog::new()
@@ -463,6 +472,13 @@ pub fn select_export_directory() -> Result<Option<String>, String> {
     }
 }
 
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[tauri::command]
+pub fn select_export_directory() -> Result<Option<String>, String> {
+    Ok(None)
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 pub fn select_directory() -> Result<Option<String>, String> {
     let dir = rfd::FileDialog::new()
@@ -474,6 +490,13 @@ pub fn select_directory() -> Result<Option<String>, String> {
     }
 }
 
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[tauri::command]
+pub fn select_directory() -> Result<Option<String>, String> {
+    Ok(None)
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 pub fn select_save_file() -> Result<Option<String>, String> {
     let file = rfd::FileDialog::new()
@@ -483,6 +506,12 @@ pub fn select_save_file() -> Result<Option<String>, String> {
         Some(path) => Ok(Some(path.to_string_lossy().to_string())),
         None => Ok(None)
     }
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[tauri::command]
+pub fn select_save_file() -> Result<Option<String>, String> {
+    Ok(None)
 }
 
 #[tauri::command]
