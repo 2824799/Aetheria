@@ -1,4 +1,4 @@
-import { X, Settings, FolderPlus } from "lucide-react";
+import { X, Settings, Trash2 } from "lucide-react";
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -6,7 +6,7 @@ interface SettingsModalProps {
   theme: "dark" | "light" | "pink";
   setTheme: (val: "dark" | "light" | "pink") => void;
   libraryPath: string;
-  onImportSongs: () => void;
+  onResetLibrary: () => void;
 }
 
 export default function SettingsModal({
@@ -15,7 +15,7 @@ export default function SettingsModal({
   theme,
   setTheme,
   libraryPath,
-  onImportSongs,
+  onResetLibrary,
 }: SettingsModalProps) {
   if (!isOpen) return null;
 
@@ -56,14 +56,6 @@ export default function SettingsModal({
           </div>
         </div>
 
-        {/* 导入功能收归至设置中 */}
-        <div className="form-group" style={{ borderTop: "1px solid var(--border)", paddingTop: "12px" }}>
-          <label>导入本地音频数据</label>
-          <button className="import-btn" style={{ width: "100%", display: "flex", gap: "8px", justifyContent: "center", alignItems: "center" }} onClick={onImportSongs}>
-            <FolderPlus size={16} /> 扫描导入本地音频文件夹
-          </button>
-        </div>
-
         <div className="form-group">
           <label>本地托管音乐库路径</label>
           <div 
@@ -74,11 +66,31 @@ export default function SettingsModal({
           </div>
         </div>
 
-        <div className="form-group">
+        <div className="form-group" style={{ borderTop: "1px solid var(--border)", paddingTop: "12px" }}>
+          <label style={{ color: "#ef4444" }}>危险操作区域</label>
+          <button 
+            className="import-btn" 
+            style={{ 
+              width: "100%", 
+              display: "flex", 
+              gap: "8px", 
+              justifyContent: "center", 
+              alignItems: "center", 
+              borderColor: "rgba(239, 68, 68, 0.4)", 
+              color: "#ef4444" 
+            }} 
+            onClick={onResetLibrary}
+          >
+            <Trash2 size={16} /> 一键重置数据库并清空全部数据
+          </button>
+        </div>
+
+        <div className="form-group" style={{ borderTop: "1px solid var(--border)", paddingTop: "12px" }}>
           <label>关于 Aetheria</label>
           <div style={{ fontSize: '0.8rem', opacity: 0.7, lineHeight: 1.5 }}>
             软件版本: v0.1.0 (Portable)<br />
             数据引擎: SQLite 3 & Symphonia/Lofty (Rust)<br />
+            开源许可: GNU AGPL v3 License<br />
             界面渲染: React 19 & Tauri 2.0
           </div>
         </div>

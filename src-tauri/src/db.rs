@@ -23,6 +23,7 @@ pub struct AudioVersion {
     pub file_size: i64,
     pub is_enabled: bool,
     pub is_primary: bool,
+    pub md5: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -119,6 +120,7 @@ pub fn init_db() -> Result<()> {
             file_size INTEGER NOT NULL,
             is_enabled INTEGER DEFAULT 1,
             is_primary INTEGER DEFAULT 0,
+            md5 TEXT,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (song_id) REFERENCES songs(id) ON DELETE CASCADE
         );",
@@ -177,6 +179,17 @@ pub fn init_db() -> Result<()> {
     conn.execute("CREATE INDEX IF NOT EXISTS idx_audio_files_song ON audio_files(song_id);", [])?;
     conn.execute("CREATE INDEX IF NOT EXISTS idx_song_tags_song ON song_tags(song_id);", [])?;
     conn.execute("CREATE INDEX IF NOT EXISTS idx_song_tags_tag ON song_tags(tag_id);", [])?;
+
+    // 数据库迁移：自动检查并补全 md5 列（针对已有旧数据库文件）
+    let has_md5: bool = conn.query_row(
+        "SELECT COUNT(*) FROM pragma_table_info('audio_files') WHERE name='md5'",
+        [],
+        |row| row.get::<_, i64>(0).map(|count| count > 0)
+    ).unwrap_or(false);
+    
+    if !has_md5 {
+        let _ = conn.execute("ALTER TABLE audio_files ADD COLUMN md5 TEXT;", []);
+    }
 
     // 插入默认种子标签（若库为空）
     let count: i64 = conn.query_row("SELECT COUNT(*) FROM tags", [], |row| row.get(0))?;

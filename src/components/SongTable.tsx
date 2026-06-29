@@ -11,6 +11,7 @@ interface AudioVersion {
   file_size?: number;
   is_primary: boolean;
   is_enabled: boolean;
+  md5?: string;
 }
 
 interface Tag {
@@ -61,6 +62,7 @@ interface SongTableProps {
   activePlaylistId: string | null;
   onAddSongsToPlaylist: (playlistId: string, songIds: string[]) => void;
   onRemoveSongsFromPlaylist: (playlistId: string, songIds: string[]) => void;
+  onDeleteSongs: (songIds: string[]) => void;
   clipboard: Clipboard | null;
   onSetClipboard: (clip: Clipboard | null) => void;
   onPasteSongs: (playlistId: string) => void;
@@ -87,6 +89,7 @@ export default function SongTable({
   activePlaylistId,
   onAddSongsToPlaylist,
   onRemoveSongsFromPlaylist,
+  onDeleteSongs,
   clipboard,
   onSetClipboard,
   onPasteSongs,
@@ -218,7 +221,7 @@ export default function SongTable({
     window.addEventListener("mouseup", handleWindowMouseUp);
   };
 
-  // 5. 行右键菜单触发（改为相对于容器定位，修复菜单位置随侧栏平移偏差 Bug）
+  // 5. 行右键菜单触发（右键不触发展开详情抽屉）
   const handleRowContextMenu = (e: React.MouseEvent, songId: string) => {
     e.preventDefault();
     e.stopPropagation();
@@ -227,8 +230,6 @@ export default function SongTable({
     if (!targetIds.includes(songId)) {
       targetIds = [songId];
       onSetSelectedSongIds(targetIds);
-      const song = songs.find(s => s.id === songId);
-      if (song) onSelectSong(song);
     }
 
     if (!containerRef.current) return;
@@ -263,7 +264,7 @@ export default function SongTable({
   };
 
   // 7. 上下文功能命令执行
-  const handleCommand = (cmd: "copy" | "cut" | "remove" | "paste" | string) => {
+  const handleCommand = (cmd: "copy" | "cut" | "remove" | "paste" | "delete" | string) => {
     setContextMenu(null);
 
     if (cmd === "copy" || cmd === "cut") {
@@ -275,6 +276,10 @@ export default function SongTable({
     } else if (cmd === "remove") {
       if (activePlaylistId && contextMenu?.targetSongIds.length) {
         onRemoveSongsFromPlaylist(activePlaylistId, contextMenu.targetSongIds);
+      }
+    } else if (cmd === "delete") {
+      if (contextMenu?.targetSongIds.length) {
+        onDeleteSongs(contextMenu.targetSongIds);
       }
     } else if (cmd === "paste") {
       if (activePlaylistId) {
@@ -410,9 +415,13 @@ export default function SongTable({
               <div className="context-menu-item" onClick={() => handleCommand("cut")}>
                 <Scissors size={14} /> 剪切所选歌曲
               </div>
+              {/* 新增彻底删除歌曲选项 */}
+              <div className="context-menu-item" style={{ color: "#ef4444" }} onClick={() => handleCommand("delete")}>
+                <Trash2 size={14} /> 彻底删除歌曲
+              </div>
               {activePlaylistId && (
                 <div className="context-menu-item" onClick={() => handleCommand("remove")}>
-                  <Trash2 size={14} style={{ color: "#ef4444" }} /> 从当前歌单移除
+                  <Trash2 size={14} style={{ color: "#f59e0b" }} /> 从当前歌单移除
                 </div>
               )}
               

@@ -38,7 +38,11 @@ pub fn run() {
             commands::rename_playlist,
             commands::add_songs_to_playlist,
             commands::remove_songs_from_playlist,
-            commands::get_playlist_songs
+            commands::get_playlist_songs,
+            commands::verify_audio_file,
+            commands::delete_song,
+            commands::delete_audio_version,
+            commands::reset_library
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

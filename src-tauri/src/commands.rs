@@ -45,7 +45,7 @@ pub fn get_songs() -> Result<Vec<Song>, String> {
         
         // 2. 查询该歌曲关联的所有音频版本
         let mut v_stmt = err_str!(conn.prepare(
-            "SELECT id, song_id, filepath, original_name, format, bitrate, sample_rate, duration, file_size, is_enabled, is_primary FROM audio_files WHERE song_id = ?1"
+            "SELECT id, song_id, filepath, original_name, format, bitrate, sample_rate, duration, file_size, is_enabled, is_primary, md5 FROM audio_files WHERE song_id = ?1"
         ))?;
         
         let v_rows = err_str!(v_stmt.query_map(params![song.id], |row| {
@@ -63,6 +63,7 @@ pub fn get_songs() -> Result<Vec<Song>, String> {
                 file_size: row.get(8)?,
                 is_enabled: is_enabled_int != 0,
                 is_primary: is_primary_int != 0,
+                md5: row.get(11)?,
             })
         }))?;
         
@@ -156,6 +157,23 @@ pub fn import_song(filepath: String) -> Result<Song, String> {
         }
     }
     
+    // 计算导入文件的 MD5 哈希进行重复校验
+    let file_data = err_str!(fs::read(src_path))?;
+    let file_md5 = format!("{:x}", md5::compute(file_data));
+
+    let conn = err_str!(db::establish_connection())?;
+
+    // 检查此 MD5 是否已存在于数据库中
+    let md5_exists: bool = err_str!(conn.query_row(
+        "SELECT COUNT(*) FROM audio_files WHERE md5 = ?1",
+        params![file_md5],
+        |row| row.get::<_, i64>(0).map(|count| count > 0)
+    ))?;
+
+    if md5_exists {
+        return Err(format!("音频文件 [{}] 已存在于音乐库中，请勿重复导入！", original_name));
+    }
+    
     // 2. 复制物理文件到托管文件夹
     let uuid = Uuid::new_v4().to_string();
     let dest_filename = format!("{}.{}", uuid, ext);
@@ -163,8 +181,6 @@ pub fn import_song(filepath: String) -> Result<Song, String> {
     let dest_absolute_path = db::get_files_dir().join(&dest_filename);
     
     err_str!(fs::copy(src_path, &dest_absolute_path))?;
-    
-    let conn = err_str!(db::establish_connection())?;
     
     // 3. 匹配歌曲实体，防重复
     // 查找是否已存在相同 Title 且相同 Artist 的歌曲
@@ -205,8 +221,8 @@ pub fn import_song(filepath: String) -> Result<Song, String> {
     
     let version_id = Uuid::new_v4().to_string();
     err_str!(conn.execute(
-        "INSERT INTO audio_files (id, song_id, filepath, original_name, format, bitrate, sample_rate, duration, file_size, is_enabled, is_primary) 
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1, ?10)",
+        "INSERT INTO audio_files (id, song_id, filepath, original_name, format, bitrate, sample_rate, duration, file_size, is_enabled, is_primary, md5) 
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1, ?10, ?11)",
         params![
             version_id,
             song_id,
@@ -217,7 +233,8 @@ pub fn import_song(filepath: String) -> Result<Song, String> {
             sample_rate,
             duration,
             file_size,
-            is_primary
+            is_primary,
+            file_md5
         ]
     ))?;
     
@@ -243,7 +260,7 @@ pub fn import_song(filepath: String) -> Result<Song, String> {
     
     // 再次加载该歌曲的全部版本和标签
     let mut v_stmt = err_str!(conn.prepare(
-        "SELECT id, song_id, filepath, original_name, format, bitrate, sample_rate, duration, file_size, is_enabled, is_primary FROM audio_files WHERE song_id = ?1"
+        "SELECT id, song_id, filepath, original_name, format, bitrate, sample_rate, duration, file_size, is_enabled, is_primary, md5 FROM audio_files WHERE song_id = ?1"
     ))?;
     let v_rows = err_str!(v_stmt.query_map(params![song.id], |row| {
         let is_enabled_int: i32 = row.get(9)?;
@@ -260,6 +277,7 @@ pub fn import_song(filepath: String) -> Result<Song, String> {
             file_size: row.get(8)?,
             is_enabled: is_enabled_int != 0,
             is_primary: is_primary_int != 0,
+            md5: row.get(11)?,
         })
     }))?;
     for v in v_rows {
@@ -618,6 +636,98 @@ pub fn import_audio_files(dir_path: String) -> Result<i32, String> {
         }
     }
     Ok(import_count)
+}
+
+#[tauri::command]
+pub fn verify_audio_file(filepath: String) -> bool {
+    let lib_dir = db::get_library_dir();
+    let file_path = lib_dir.join(&filepath);
+    file_path.exists() && file_path.is_file()
+}
+
+#[tauri::command]
+pub fn delete_song(song_id: String) -> Result<(), String> {
+    let conn = err_str!(db::establish_connection())?;
+    
+    // Find all versions of this song, and delete their physical files from disk
+    let mut stmt = err_str!(conn.prepare("SELECT filepath FROM audio_files WHERE song_id = ?1"))?;
+    let rows = err_str!(stmt.query_map(params![song_id], |row| row.get::<_, String>(0)))?;
+    let files_dir = db::get_library_dir();
+    for filepath_res in rows {
+        if let Ok(filepath) = filepath_res {
+            let absolute_path = files_dir.join(filepath);
+            if absolute_path.exists() {
+                let _ = fs::remove_file(absolute_path);
+            }
+        }
+    }
+    
+    // Delete from DB (on delete cascade handles song_tags, audio_files, playlist_songs)
+    err_str!(conn.execute("DELETE FROM songs WHERE id = ?1", params![song_id]))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn delete_audio_version(version_id: String) -> Result<(), String> {
+    let conn = err_str!(db::establish_connection())?;
+    
+    // Find filepath to delete physical file
+    let filepath: String = err_str!(conn.query_row(
+        "SELECT filepath FROM audio_files WHERE id = ?1",
+        params![version_id],
+        |row| row.get(0)
+    ))?;
+    
+    let absolute_path = db::get_library_dir().join(filepath);
+    if absolute_path.exists() {
+        let _ = fs::remove_file(absolute_path);
+    }
+    
+    // Delete from DB
+    err_str!(conn.execute("DELETE FROM audio_files WHERE id = ?1", params![version_id]))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn reset_library() -> Result<(), String> {
+    let conn = err_str!(db::establish_connection())?;
+    
+    // 1. Delete all physical files in library/files/
+    let files_dir = db::get_files_dir();
+    if files_dir.exists() {
+        let _ = fs::remove_dir_all(&files_dir);
+        let _ = fs::create_dir_all(&files_dir);
+    }
+    
+    // 2. Clear all tables in SQLite
+    let tables = ["songs", "audio_files", "tags", "song_tags", "playlists", "playlist_songs"];
+    for table in tables {
+        let _ = conn.execute(&format!("DELETE FROM {}", table), []);
+    }
+    
+    // 3. Re-initialize default tags
+    let default_tags = vec![
+        ("中文", "#ef4444", "语言"),
+        ("英文", "#3b82f6", "语言"),
+        ("日韩", "#f43f5e", "语言"),
+        ("纯音乐", "#10b981", "流派"),
+        ("摇滚", "#f59e0b", "流派"),
+        ("流行", "#ec4899", "流派"),
+        ("民谣", "#84cc16", "流派"),
+        ("古典", "#64748b", "流派"),
+        ("伤感", "#8b5cf6", "情绪"),
+        ("治愈", "#06b6d4", "情绪"),
+        ("欢快", "#eab308", "情绪"),
+    ];
+
+    for (name, color, category) in default_tags {
+        let _ = conn.execute(
+            "INSERT INTO tags (name, color, category) VALUES (?1, ?2, ?3)",
+            params![name, color, category],
+        );
+    }
+    
+    Ok(())
 }
 
 

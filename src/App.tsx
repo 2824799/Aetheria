@@ -627,6 +627,20 @@ function App() {
   };
 
   const handlePlayVersion = async (song: Song, version: AudioVersion) => {
+    // 校验本地文件是否存在，防止已经被外部误删
+    const exists = await invoke<boolean>("verify_audio_file", { filepath: version.filepath });
+    if (!exists) {
+      showToast(`本地音频文件已丢失或被外部删除！`, "error");
+      // 自动关闭该版本启用状态并更新界面
+      try {
+        await invoke("update_version_status", { versionId: version.id, active: false });
+        loadLibrary();
+      } catch (err) {
+        console.error(err);
+      }
+      return;
+    }
+
     try {
       initAudioAnalyzer();
       
@@ -650,6 +664,116 @@ function App() {
       }
     } catch (err) {
       console.error("播放音频失败:", err);
+    }
+  };
+
+  // 删除音频源版本
+  const handleDeleteVersion = async (versionId: string) => {
+    if (!activeSong) return;
+    const version = activeSong.versions.find(v => v.id === versionId);
+    const versionName = version ? version.original_name : "该音频源";
+    const isLastVersion = activeSong.versions.length <= 1;
+
+    const confirmDel = confirm(`确定要永久删除音频源 [${versionName}] 吗？这会从本地磁盘抹除该文件。`);
+    if (!confirmDel) return;
+
+    try {
+      await invoke("delete_audio_version", { versionId });
+      showToast("音源已删除", "success");
+
+      const { loadedSongs } = await loadLibrary();
+      const updated = loadedSongs.find(s => s.id === activeSong.id);
+      if (updated) {
+        setActiveSong(updated);
+      } else {
+        setActiveSong(null);
+        setIsDetailOpen(false);
+      }
+
+      if (isLastVersion) {
+        showToast("该歌曲目前没有绑定任何音频版本，您可以继续彻底删除该歌曲实体或重新关联新版本。", "info");
+      }
+
+      if (playingVersion && playingVersion.id === versionId) {
+        if (audioRef.current) audioRef.current.pause();
+        setPlayingVersion(null);
+        setIsPlaying(false);
+        setCurrentTime(0);
+        setDuration(0);
+        if (updated) {
+          const nextAvailable = updated.versions.find(v => v.is_enabled);
+          if (nextAvailable) {
+            setPlayingVersion(nextAvailable);
+          }
+        }
+      }
+    } catch (err) {
+      showToast("删除音源失败: " + err, "error");
+    }
+  };
+
+  // 批量彻底删除歌曲
+  const handleDeleteSongs = async (songIds: string[]) => {
+    const count = songIds.length;
+    const confirmDel = confirm(`确定要永久删除选中的 ${count} 首歌曲及其关联的所有本地文件吗？此操作不可逆！`);
+    if (!confirmDel) return;
+
+    let deletedCount = 0;
+    for (const songId of songIds) {
+      try {
+        await invoke("delete_song", { songId });
+        deletedCount++;
+      } catch (err) {
+        console.error(`删除歌曲 ${songId} 失败:`, err);
+      }
+    }
+
+    showToast(`成功彻底删除了 ${deletedCount} 首歌曲！`, "success");
+    await loadLibrary();
+
+    if (playingSong && songIds.includes(playingSong.id)) {
+      if (audioRef.current) audioRef.current.pause();
+      setPlayingSong(null);
+      setPlayingVersion(null);
+      setIsPlaying(false);
+      setCurrentTime(0);
+      setDuration(0);
+    }
+
+    if (activeSong && songIds.includes(activeSong.id)) {
+      setActiveSong(null);
+      setIsDetailOpen(false);
+    }
+
+    setSelectedSongIds([]);
+  };
+
+  // 一键重置数据库与数据清理
+  const handleResetLibrary = async () => {
+    const confirm1 = confirm("⚠️ 警告：此操作将永久清空本地托管的全部音乐文件、歌单、标签配置及数据库记录！");
+    if (!confirm1) return;
+    const confirm2 = confirm("❌ 确定真的要执行重置吗？这会清除您的全部播放状态，重置后软件将恢复到初始白板状态。");
+    if (!confirm2) return;
+
+    try {
+      await invoke("reset_library");
+      showToast("整个音乐库已成功清空并重置！", "success");
+      
+      if (audioRef.current) audioRef.current.pause();
+      setPlayingSong(null);
+      setPlayingVersion(null);
+      setIsPlaying(false);
+      setCurrentTime(0);
+      setDuration(0);
+      setActiveSong(null);
+      setIsDetailOpen(false);
+      setSelectedSongIds([]);
+      
+      await loadLibrary();
+      await fetchPlaylists();
+      setIsSettingsOpen(false);
+    } catch (err) {
+      showToast("清空重置失败: " + err, "error");
     }
   };
 
@@ -937,6 +1061,7 @@ function App() {
           activePlaylistId={activePlaylistId}
           onAddSongsToPlaylist={handleAddSongsToPlaylist}
           onRemoveSongsFromPlaylist={handleRemoveSongsFromPlaylist}
+          onDeleteSongs={handleDeleteSongs}
           clipboard={clipboard}
           onSetClipboard={setClipboard}
           onPasteSongs={handlePasteSongs}
@@ -963,6 +1088,7 @@ function App() {
           onSetPrimaryVersion={handleSetPrimaryVersion}
           onToggleVersionStatus={handleToggleVersionStatus}
           onExportVersion={handleExportVersion}
+          onDeleteVersion={handleDeleteVersion}
         />
         
         {/* 全屏滚动歌词浮层 */}
@@ -1035,7 +1161,7 @@ function App() {
         theme={theme}
         setTheme={setTheme}
         libraryPath={libraryPath}
-        onImportSongs={handleImportFolder}
+        onResetLibrary={handleResetLibrary}
       />
 
       {isImporting && (

@@ -1,4 +1,4 @@
-import { X, Music, Download, CheckSquare, Square, Play, Pause } from "lucide-react";
+import { X, Music, Download, CheckSquare, Square, Play, Pause, Trash2 } from "lucide-react";
 
 interface AudioVersion {
   id: string;
@@ -10,6 +10,7 @@ interface AudioVersion {
   file_size?: number;
   is_primary: boolean;
   is_enabled: boolean;
+  md5?: string;
 }
 
 interface Tag {
@@ -48,6 +49,7 @@ interface DetailPaneProps {
   onSetPrimaryVersion: (versionId: string) => void;
   onToggleVersionStatus: (versionId: string, active: boolean) => void;
   onExportVersion: (versionId: string) => void;
+  onDeleteVersion: (versionId: string) => void;
 }
 
 export default function DetailPane({
@@ -65,6 +67,7 @@ export default function DetailPane({
   onSetPrimaryVersion,
   onToggleVersionStatus,
   onExportVersion,
+  onDeleteVersion,
 }: DetailPaneProps) {
   const formatTime = (secs: number) => {
     if (isNaN(secs)) return "0:00";
@@ -155,7 +158,10 @@ export default function DetailPane({
                       </label>
                     </div>
                     
-                    <div style={{ borderTop: "1px dashed var(--border)", paddingTop: "6px", display: "flex", justifyContent: "flex-end" }}>
+                    <div style={{ borderTop: "1px dashed var(--border)", paddingTop: "6px", display: "flex", justifyContent: "flex-end", gap: "8px" }}>
+                      <button className="action-btn-sm" style={{ color: "#ef4444" }} onClick={() => onDeleteVersion(v.id)}>
+                        <Trash2 size={12} /> 删除此音频源
+                      </button>
                       <button className="action-btn-sm" onClick={() => onExportVersion(v.id)}>
                         <Download size={12} /> 导出还原音频
                       </button>
