@@ -1511,3 +1511,21 @@ body {
   background: var(--bg-hover) !important;
   border-radius: 4px;
 }
+
+/* Mobile specific styling */
+@keyframes slideUp {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}

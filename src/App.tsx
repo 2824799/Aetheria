@@ -12,6 +12,7 @@ import Toast from "./components/Toast";
 import TagManagerModal from "./components/TagManagerModal";
 import SettingsModal from "./components/SettingsModal";
 import ImportPreviewModal from "./components/ImportPreviewModal";
+import MobileLayout from "./components/MobileLayout";
 
 import "./App.css";
 
@@ -145,6 +146,14 @@ function App() {
   const [theme, setTheme] = useState<"dark" | "light" | "pink">(() => {
     return (localStorage.getItem("aetheria-theme") as any) || "dark";
   });
+
+  // 移动端/响应式屏幕宽度判定
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
   // 播放器 DOM 引用
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -1140,116 +1149,36 @@ function App() {
       <div className="ambient-glow glow-1"></div>
       <div className="ambient-glow glow-2"></div>
 
-      {/* 1. 左侧边栏 - 自定义解耦组件 */}
-      <Sidebar 
-        playlists={playlists}
-        activePlaylistId={activePlaylistId}
-        onSelectPlaylist={setActivePlaylistId}
-        onCreatePlaylist={handleCreatePlaylist}
-        onRenamePlaylist={handleRenamePlaylist}
-        onDeletePlaylist={handleDeletePlaylist}
-        allSongsCount={songs.length}
-        onOpenSettings={() => setIsSettingsOpen(true)}
-      />
-
-      {/* 中间主要功能区 */}
-      <div className="glass-panel main-content">
-        
-        {/* 顶部居中搜索框 + 最右侧导入按钮 */}
-        <div className="header-row" style={{ marginBottom: '12px' }}>
-          <div className="search-container" style={{ width: '450px' }}>
-            <Search className="search-icon" size={18} />
-            <input 
-              type="text" 
-              placeholder="搜索歌曲、歌手、专辑..." 
-              className="search-input"
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-            />
-          </div>
-          <div style={{ position: "absolute", right: 0 }}>
-            <button 
-              className="import-btn" 
-              onClick={(e) => { e.stopPropagation(); setShowImportDropdown(!showImportDropdown); }} 
-              title="导入本地音乐"
-            >
-              <FolderPlus size={16} /> 导入歌曲
-            </button>
-            {showImportDropdown && (
-              <div 
-                className="context-menu glass-panel" 
-                style={{ 
-                  position: "absolute", 
-                  right: 0, 
-                  top: "100%", 
-                  marginTop: "6px", 
-                  width: "160px",
-                  zIndex: 1002 
-                }}
-                onClick={() => setShowImportDropdown(false)}
-              >
-                <div className="context-menu-item" onClick={handleImportFolder}>
-                  <Folder size={14} /> 导入整个文件夹
-                </div>
-                <div className="context-menu-item" onClick={handleImportFiles}>
-                  <FileAudio size={14} /> 导入多个音源文件
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* 2. 标签多维条件过滤器 - 自定义解耦组件 */}
-        <TagFilter 
-          tags={tags}
-          selectedTags={selectedTags}
-          onToggleTag={handleToggleTag}
-          filterMode={filterMode}
-          onSetFilterMode={setFilterMode}
-          isTagsExpanded={isTagsExpanded}
-          onSetTagsExpanded={setIsTagsExpanded}
-          onOpenTagManager={() => setIsTagManagerOpen(true)}
-        />
-
-        {/* 3. 歌曲表格列表 - 支持拖拽多选与右键上下文 */}
-        <SongTable 
+      {isMobile ? (
+        <MobileLayout 
           songs={displaySongs}
-          activeSong={activeSong}
-          onSelectSong={(song) => {
-            setActiveSong(song);
-            setIsDetailOpen(true);
-          }}
+          playlists={playlists}
+          activePlaylistId={activePlaylistId}
+          onSelectPlaylist={setActivePlaylistId}
+          onCreatePlaylist={handleCreatePlaylist}
+          onDeletePlaylist={handleDeletePlaylist}
           playingSong={playingSong}
+          playingVersion={playingVersion}
           isPlaying={isPlaying}
           onPlaySong={handlePlaySong}
           onPlayPause={handlePlayPause}
-          selectedSongIds={selectedSongIds}
-          onSetSelectedSongIds={setSelectedSongIds}
-          playlists={playlists}
-          activePlaylistId={activePlaylistId}
-          onAddSongsToPlaylist={handleAddSongsToPlaylist}
-          onRemoveSongsFromPlaylist={handleRemoveSongsFromPlaylist}
-          onDeleteSongs={handleDeleteSongs}
-          clipboard={clipboard}
-          onSetClipboard={setClipboard}
-          onPasteSongs={handlePasteSongs}
-        />
-
-        {/* 点击详情外部遮罩层自动收起 */}
-        {isDetailOpen && (
-          <div className="drawer-overlay" onClick={() => setIsDetailOpen(false)} />
-        )}
-
-        {/* 4. 侧滑详情抽屉 - 自定义解耦组件 */}
-        <DetailPane 
-          isOpen={isDetailOpen}
-          onClose={() => setIsDetailOpen(false)}
           activeSong={activeSong}
-          activeTab={activeTab}
-          onSetActiveTab={setActiveTab}
-          playingVersion={playingVersion}
-          isPlaying={isPlaying}
-          onPlayVersion={handlePlayVersion}
+          onSelectSong={setActiveSong}
+          searchQuery={searchQuery}
+          setSearchQuery={setSearchQuery}
+          onOpenSettings={() => setIsSettingsOpen(true)}
+          onOpenTagManager={() => setIsTagManagerOpen(true)}
+          onImportFolder={handleImportFolder}
+          onImportFiles={handleImportFiles}
+          currentTime={currentTime}
+          duration={duration}
+          onSeek={handleSeek}
+          volume={volume}
+          onSetVolume={setVolume}
+          playMode={playMode}
+          onSetPlayMode={setPlayMode}
+          onPrev={handlePrev}
+          onNext={handleNext}
           allTags={tags}
           onBindTag={handleBindTag}
           onUnbindTag={handleUnbindTag}
@@ -1260,54 +1189,178 @@ function App() {
           onImportVersionForSong={handleImportVersionForSong}
           onUpdateMetadata={handleUpdateSongMetadata}
         />
-        
-        {/* 全屏滚动歌词浮层 */}
-        {isLyricsOverlayOpen && playingSong && (
-          <div className="lyrics-overlay">
-            <button className="lyrics-overlay-close" onClick={() => setIsLyricsOverlayOpen(false)}>
-              <X size={20} />
-            </button>
-            
-            <div className="lyrics-overlay-title">{playingSong.title}</div>
-            <div className="lyrics-overlay-artist">{playingSong.artist || "未知歌手"}</div>
-            
-            <div className="lyrics-scroll-box">
-              {lyricsLines.map((line, idx) => {
-                const isActive = idx === activeLyricsIndex;
-                return (
-                  <div 
-                    key={idx} 
-                    ref={isActive ? activeLineRef : null}
-                    className={isActive ? "lyrics-line-active" : "lyrics-line-inactive"}
-                  >
-                    {line}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-      </div>
+      ) : (
+        <>
+          {/* 1. 左侧边栏 - 自定义解耦组件 */}
+          <Sidebar 
+            playlists={playlists}
+            activePlaylistId={activePlaylistId}
+            onSelectPlaylist={setActivePlaylistId}
+            onCreatePlaylist={handleCreatePlaylist}
+            onRenamePlaylist={handleRenamePlaylist}
+            onDeletePlaylist={handleDeletePlaylist}
+            allSongsCount={songs.length}
+            onOpenSettings={() => setIsSettingsOpen(true)}
+          />
 
-      {/* 5. 底部播放器控制栏 - 自定义解耦组件 */}
-      <PlayBar 
-        canvasRef={canvasRef}
-        playingSong={playingSong}
-        playingVersion={playingVersion}
-        isPlaying={isPlaying}
-        currentTime={currentTime}
-        duration={duration}
-        volume={volume}
-        playMode={playMode}
-        isLyricsOverlayOpen={isLyricsOverlayOpen}
-        onSetLyricsOverlayOpen={setIsLyricsOverlayOpen}
-        onPlayPause={handlePlayPause}
-        onPrev={handlePrev}
-        onNext={handleNext}
-        onPlaybackModeCycle={handlePlaybackModeCycle}
-        onSeek={handleSeek}
-        onVolumeChange={setVolume}
-      />
+          {/* 中间主要功能区 */}
+          <div className="glass-panel main-content">
+            
+            {/* 顶部居中搜索框 + 最右侧导入按钮 */}
+            <div className="header-row" style={{ marginBottom: '12px' }}>
+              <div className="search-container" style={{ width: '450px' }}>
+                <Search className="search-icon" size={18} />
+                <input 
+                  type="text" 
+                  placeholder="搜索歌曲、歌手、专辑..." 
+                  className="search-input"
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                />
+              </div>
+              <div style={{ position: "absolute", right: 0 }}>
+                <button 
+                  className="import-btn" 
+                  onClick={(e) => { e.stopPropagation(); setShowImportDropdown(!showImportDropdown); }} 
+                  title="导入本地音乐"
+                >
+                  <FolderPlus size={16} /> 导入歌曲
+                </button>
+                {showImportDropdown && (
+                  <div 
+                    className="context-menu glass-panel" 
+                    style={{ 
+                      position: "absolute", 
+                      right: 0, 
+                      top: "100%", 
+                      marginTop: "6px", 
+                      width: "160px",
+                      zIndex: 1002 
+                    }}
+                    onClick={() => setShowImportDropdown(false)}
+                  >
+                    <div className="context-menu-item" onClick={handleImportFolder}>
+                      <Folder size={14} /> 导入整个文件夹
+                    </div>
+                    <div className="context-menu-item" onClick={handleImportFiles}>
+                      <FileAudio size={14} /> 导入多个音源文件
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* 2. 标签多维条件过滤器 - 自定义解耦组件 */}
+            <TagFilter 
+              tags={tags}
+              selectedTags={selectedTags}
+              onToggleTag={handleToggleTag}
+              filterMode={filterMode}
+              onSetFilterMode={setFilterMode}
+              isTagsExpanded={isTagsExpanded}
+              onSetTagsExpanded={setIsTagsExpanded}
+              onOpenTagManager={() => setIsTagManagerOpen(true)}
+            />
+
+            {/* 3. 歌曲表格列表 - 支持拖拽多选与右键上下文 */}
+            <SongTable 
+              songs={displaySongs}
+              activeSong={activeSong}
+              onSelectSong={(song) => {
+                setActiveSong(song);
+                setIsDetailOpen(true);
+              }}
+              playingSong={playingSong}
+              isPlaying={isPlaying}
+              onPlaySong={handlePlaySong}
+              onPlayPause={handlePlayPause}
+              selectedSongIds={selectedSongIds}
+              onSetSelectedSongIds={setSelectedSongIds}
+              playlists={playlists}
+              activePlaylistId={activePlaylistId}
+              onAddSongsToPlaylist={handleAddSongsToPlaylist}
+              onRemoveSongsFromPlaylist={handleRemoveSongsFromPlaylist}
+              onDeleteSongs={handleDeleteSongs}
+              clipboard={clipboard}
+              onSetClipboard={setClipboard}
+              onPasteSongs={handlePasteSongs}
+            />
+
+            {/* 点击详情外部遮罩层自动收起 */}
+            {isDetailOpen && (
+              <div className="drawer-overlay" onClick={() => setIsDetailOpen(false)} />
+            )}
+
+            {/* 4. 侧滑详情抽屉 - 自定义解耦组件 */}
+            <DetailPane 
+              isOpen={isDetailOpen}
+              onClose={() => setIsDetailOpen(false)}
+              activeSong={activeSong}
+              activeTab={activeTab}
+              onSetActiveTab={setActiveTab}
+              playingVersion={playingVersion}
+              isPlaying={isPlaying}
+              onPlayVersion={handlePlayVersion}
+              allTags={tags}
+              onBindTag={handleBindTag}
+              onUnbindTag={handleUnbindTag}
+              onSetPrimaryVersion={handleSetPrimaryVersion}
+              onToggleVersionStatus={handleToggleVersionStatus}
+              onExportVersion={handleExportVersion}
+              onDeleteVersion={handleDeleteVersion}
+              onImportVersionForSong={handleImportVersionForSong}
+              onUpdateMetadata={handleUpdateSongMetadata}
+            />
+            
+            {/* 全屏滚动歌词浮层 */}
+            {isLyricsOverlayOpen && playingSong && (
+              <div className="lyrics-overlay">
+                <button className="lyrics-overlay-close" onClick={() => setIsLyricsOverlayOpen(false)}>
+                  <X size={20} />
+                </button>
+                
+                <div className="lyrics-overlay-title">{playingSong.title}</div>
+                <div className="lyrics-overlay-artist">{playingSong.artist || "未知歌手"}</div>
+                
+                <div className="lyrics-scroll-box">
+                  {lyricsLines.map((line, idx) => {
+                    const isActive = idx === activeLyricsIndex;
+                    return (
+                      <div 
+                        key={idx} 
+                        ref={isActive ? activeLineRef : null}
+                        className={isActive ? "lyrics-line-active" : "lyrics-line-inactive"}
+                      >
+                        {line}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 5. 底部播放器控制栏 - 自定义解耦组件 */}
+          <PlayBar 
+            canvasRef={canvasRef}
+            playingSong={playingSong}
+            playingVersion={playingVersion}
+            isPlaying={isPlaying}
+            currentTime={currentTime}
+            duration={duration}
+            volume={volume}
+            playMode={playMode}
+            isLyricsOverlayOpen={isLyricsOverlayOpen}
+            onSetLyricsOverlayOpen={setIsLyricsOverlayOpen}
+            onPlayPause={handlePlayPause}
+            onPrev={handlePrev}
+            onNext={handleNext}
+            onPlaybackModeCycle={handlePlaybackModeCycle}
+            onSeek={handleSeek}
+            onVolumeChange={setVolume}
+          />
+        </>
+      )}
 
       {/* 6. 独立对话框与 Toast 提示 */}
       <TagManagerModal 
