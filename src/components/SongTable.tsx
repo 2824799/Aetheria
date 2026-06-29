@@ -104,15 +104,72 @@ export default function SongTable({
   // 自定义右键菜单状态
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
 
-  // 列宽可拖拽调节状态
-  const [colWidths, setColWidths] = useState({
-    play: 32,
-    title: 260,
-    artist: 140,
-    tags: 200,
-    versions: 70,
-    specs: 160
+  // 列宽持久化加载与存储
+  const [colWidths, setColWidths] = useState<{
+    play: number;
+    title: number;
+    artist: number;
+    tags: number;
+    versions: number;
+    specs: number;
+  }>(() => {
+    const saved = localStorage.getItem("aetheria-col-widths");
+    return saved ? JSON.parse(saved) : {
+      play: 32,
+      title: 260,
+      artist: 140,
+      tags: 200,
+      versions: 70,
+      specs: 160
+    };
   });
+
+  // 列顺序持久化加载与存储
+  const [colOrder, setColOrder] = useState<string[]>(() => {
+    const saved = localStorage.getItem("aetheria-col-order");
+    return saved ? JSON.parse(saved) : [
+      "play", "title", "artist", "tags", "versions", "specs"
+    ];
+  });
+
+  // 监听并实时存储列属性变化
+  useEffect(() => {
+    localStorage.setItem("aetheria-col-widths", JSON.stringify(colWidths));
+  }, [colWidths]);
+
+  useEffect(() => {
+    localStorage.setItem("aetheria-col-order", JSON.stringify(colOrder));
+  }, [colOrder]);
+
+  // HTML5 Drag & Drop 拖拽换位逻辑
+  const [draggedCol, setDraggedCol] = useState<string | null>(null);
+
+  const handleDragStart = (e: React.DragEvent, col: string) => {
+    setDraggedCol(col);
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleDragOver = (e: React.DragEvent, col: string) => {
+    if (col !== "play") {
+      e.preventDefault(); // 只有非播放排布才允许拖放
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent, targetCol: string) => {
+    e.preventDefault();
+    if (!draggedCol || draggedCol === targetCol || targetCol === "play") return;
+    
+    const newOrder = [...colOrder];
+    const dragIdx = newOrder.indexOf(draggedCol);
+    const targetIdx = newOrder.indexOf(targetCol);
+    
+    // 重排
+    newOrder.splice(dragIdx, 1);
+    newOrder.splice(targetIdx, 0, draggedCol);
+    
+    setColOrder(newOrder);
+    setDraggedCol(null);
+  };
 
   const startResize = (e: React.MouseEvent, column: keyof typeof colWidths) => {
     e.preventDefault();
@@ -151,7 +208,6 @@ export default function SongTable({
 
   // 1. 鼠标点击歌曲行（处理 Shift/Ctrl 选择与阻止侧滑抽屉弹出冲突）
   const handleRowClick = (e: React.MouseEvent, song: Song, index: number) => {
-    // 只有在没有摁住 Ctrl/Shift 键的情况下，才触发展开详情抽屉
     const isModifierPressed = e.ctrlKey || e.metaKey || e.shiftKey;
     if (!isModifierPressed) {
       onSelectSong(song);
@@ -160,7 +216,6 @@ export default function SongTable({
     let newSelected = [...selectedSongIds];
 
     if (e.ctrlKey || e.metaKey) {
-      // Ctrl 键：多选切换
       if (newSelected.includes(song.id)) {
         newSelected = newSelected.filter(id => id !== song.id);
       } else {
@@ -168,16 +223,12 @@ export default function SongTable({
       }
       lastSelectedIndexRef.current = index;
     } else if (e.shiftKey && lastSelectedIndexRef.current !== -1) {
-      // Shift 键：范围选择
       const start = Math.min(lastSelectedIndexRef.current, index);
       const end = Math.max(lastSelectedIndexRef.current, index);
       const rangeIds = songs.slice(start, end + 1).map(s => s.id);
-      
-      // 合并目前选中的和范围选中的（去重）
       const set = new Set([...newSelected, ...rangeIds]);
       newSelected = Array.from(set);
     } else {
-      // 普通单选
       newSelected = [song.id];
       lastSelectedIndexRef.current = index;
     }
@@ -185,10 +236,10 @@ export default function SongTable({
     onSetSelectedSongIds(newSelected);
   };
 
-  // 2. 框选拖拽鼠标按下，注册全局事件监听解决拖动出容器松开卡死 bug
+  // 2. 框选拖拽鼠标按下，添加 thead 判定防止表头点击触发框选
   const handleTableMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     const target = e.target as HTMLElement;
-    if (target.closest(".play-row-btn") || target.closest(".ctrl-btn") || target.closest(".action-btn-sm") || target.closest(".tag-pill") || target.closest(".context-menu")) {
+    if (target.closest("thead") || target.closest(".play-row-btn") || target.closest(".ctrl-btn") || target.closest(".action-btn-sm") || target.closest(".tag-pill") || target.closest(".context-menu")) {
       return;
     }
     
@@ -208,7 +259,6 @@ export default function SongTable({
       onSetSelectedSongIds([]);
     }
 
-    // 绑定至 window 的移动和弹起事件，实现全局松手结算
     const handleWindowMouseMove = (moveEvent: MouseEvent) => {
       if (!containerRef.current) return;
       const cRect = containerRef.current.getBoundingClientRect();
@@ -217,7 +267,6 @@ export default function SongTable({
       
       setBoxCurrent({ x: currentX, y: currentY });
 
-      // 局部延迟以防检测过于高频卡顿
       setTimeout(() => {
         if (!selectionBoxRef.current || !containerRef.current) return;
         const boxBounds = selectionBoxRef.current.getBoundingClientRect();
@@ -257,7 +306,7 @@ export default function SongTable({
     window.addEventListener("mouseup", handleWindowMouseUp);
   };
 
-  // 5. 行右键菜单触发（右键不触发展开详情抽屉）
+  // 5. 行右键菜单触发
   const handleRowContextMenu = (e: React.MouseEvent, songId: string) => {
     e.preventDefault();
     e.stopPropagation();
@@ -340,24 +389,46 @@ export default function SongTable({
       <table className="song-table" style={{ tableLayout: "fixed", width: "100%" }}>
         <thead>
           <tr>
-            <th style={{ width: colWidths.play, padding: "8px 4px" }}></th>
-            <th style={{ width: colWidths.title, position: "relative", paddingRight: "8px" }}>
-              歌曲名称
-              <div className="resizer" onMouseDown={(e) => startResize(e, "title")} />
-            </th>
-            <th style={{ width: colWidths.artist, position: "relative", paddingRight: "8px" }}>
-              歌手
-              <div className="resizer" onMouseDown={(e) => startResize(e, "artist")} />
-            </th>
-            <th style={{ width: colWidths.tags, position: "relative", paddingRight: "8px" }}>
-              绑定的自定义标签
-              <div className="resizer" onMouseDown={(e) => startResize(e, "tags")} />
-            </th>
-            <th style={{ width: colWidths.versions, position: "relative", textAlign: "center", paddingRight: "8px" }}>
-              版本数
-              <div className="resizer" onMouseDown={(e) => startResize(e, "versions")} />
-            </th>
-            <th style={{ width: colWidths.specs, textAlign: "center" }}>默认音质</th>
+            {colOrder.map(col => {
+              if (col === "play") {
+                return (
+                  <th key="play" style={{ width: colWidths.play, padding: "8px 4px" }} />
+                );
+              }
+
+              const labelMap: Record<string, string> = {
+                title: "歌曲名称",
+                artist: "歌手",
+                tags: "标签",
+                versions: "版本数",
+                specs: "默认音质"
+              };
+
+              const alignRight = col === "versions" || col === "specs";
+
+              return (
+                <th 
+                  key={col}
+                  style={{ 
+                    width: colWidths[col as keyof typeof colWidths], 
+                    position: "relative", 
+                    paddingRight: "8px",
+                    textAlign: alignRight ? "center" : "left",
+                    cursor: "grab",
+                    userSelect: "none"
+                  }}
+                  draggable
+                  onDragStart={(e) => handleDragStart(e, col)}
+                  onDragOver={(e) => handleDragOver(e, col)}
+                  onDrop={(e) => handleDrop(e, col)}
+                >
+                  <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {labelMap[col] || col}
+                  </span>
+                  <div className="resizer" onMouseDown={(e) => startResize(e, col as keyof typeof colWidths)} />
+                </th>
+              );
+            })}
           </tr>
         </thead>
         <tbody>
@@ -382,52 +453,90 @@ export default function SongTable({
                 onDoubleClick={() => onPlaySong(song)}
                 onContextMenu={(e) => handleRowContextMenu(e, song.id)}
               >
-                {/* 拦截点击事件以提升直接播放反馈 */}
-                <td style={{ width: colWidths.play, padding: "8px 4px" }} onClick={(e) => {
-                  e.stopPropagation();
-                  if (isCurrentlyPlaying) {
-                    onPlayPause();
-                  } else {
-                    onPlaySong(song);
-                  }
-                }}>
-                  <div className="play-row-btn">
-                    {isCurrentlyPlaying && isPlaying ? <Pause size={14} /> : <Play size={14} />}
-                  </div>
-                </td>
-                <td style={{ width: colWidths.title, textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
-                  <div className="song-title-cell">
-                    <span className="song-title-text" title={song.title}>{song.title}</span>
-                  </div>
-                </td>
-                <td style={{ width: colWidths.artist, textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
-                  <span className="song-artist-text" title={song.artist || "未知歌手"}>{song.artist || "未知歌手"}</span>
-                </td>
-                <td style={{ width: colWidths.tags }}>
-                  <div className="badge-container" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {song.tags.map(t => (
-                      <span 
-                        key={t.id} 
-                        className="tag-pill" 
-                        style={{ borderLeft: `3px solid ${t.color}`, color: t.color }}
+                {colOrder.map(col => {
+                  if (col === "play") {
+                    return (
+                      <td 
+                        key="play"
+                        style={{ width: colWidths.play, padding: "8px 4px" }} 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (isCurrentlyPlaying) {
+                            onPlayPause();
+                          } else {
+                            onPlaySong(song);
+                          }
+                        }}
                       >
-                        {t.name}
-                      </span>
-                    ))}
-                  </div>
-                </td>
-                <td style={{ width: colWidths.versions, textAlign: "center", fontWeight: 600 }}>{song.versions.length}</td>
-                <td style={{ width: colWidths.specs, textAlign: "center" }}>
-                  <span className="format-badge specs" style={{ textTransform: "none", fontSize: "0.72rem", padding: "3px 8px" }}>
-                    {specs}
-                  </span>
-                </td>
+                        <div className="play-row-btn">
+                          {isCurrentlyPlaying && isPlaying ? <Pause size={14} /> : <Play size={14} />}
+                        </div>
+                      </td>
+                    );
+                  }
+
+                  if (col === "title") {
+                    return (
+                      <td key="title" style={{ width: colWidths.title, textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
+                        <div className="song-title-cell">
+                          <span className="song-title-text" title={song.title}>{song.title}</span>
+                        </div>
+                      </td>
+                    );
+                  }
+
+                  if (col === "artist") {
+                    return (
+                      <td key="artist" style={{ width: colWidths.artist, textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
+                        <span className="song-artist-text" title={song.artist || "未知歌手"}>{song.artist || "未知歌手"}</span>
+                      </td>
+                    );
+                  }
+
+                  if (col === "tags") {
+                    return (
+                      <td key="tags" style={{ width: colWidths.tags }}>
+                        <div className="badge-container" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {song.tags.map(t => (
+                            <span 
+                              key={t.id} 
+                              className="tag-pill" 
+                              style={{ borderLeft: `3px solid ${t.color}`, color: t.color }}
+                            >
+                              {t.name}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                    );
+                  }
+
+                  if (col === "versions") {
+                    return (
+                      <td key="versions" style={{ width: colWidths.versions, textAlign: "center", fontWeight: 600 }}>
+                        {song.versions.length}
+                      </td>
+                    );
+                  }
+
+                  if (col === "specs") {
+                    return (
+                      <td key="specs" style={{ width: colWidths.specs, textAlign: "center" }}>
+                        <span className="format-badge specs" style={{ textTransform: "none", fontSize: "0.72rem", padding: "3px 8px" }}>
+                          {specs}
+                        </span>
+                      </td>
+                    );
+                  }
+
+                  return null;
+                })}
               </tr>
             );
           })}
           {songs.length === 0 && (
             <tr>
-              <td colSpan={6} style={{ textAlign: "center", padding: "40px", color: "var(--text-sub)" }}>
+              <td colSpan={colOrder.length} style={{ textAlign: "center", padding: "40px", color: "var(--text-sub)" }}>
                 没有找到符合条件的歌曲，请导入或调整过滤器
               </td>
             </tr>
@@ -449,7 +558,7 @@ export default function SongTable({
         />
       )}
 
-      {/* 自定义毛玻璃右键级联菜单 - 定位修改为 absolute 相对于容器，解决坐标漂移问题 */}
+      {/* 自定义右键菜单 */}
       {contextMenu?.visible && (
         <div 
           className="context-menu glass-panel"
@@ -469,7 +578,6 @@ export default function SongTable({
               <div className="context-menu-item" onClick={() => handleCommand("cut")}>
                 <Scissors size={14} /> 剪切所选歌曲
               </div>
-              {/* 新增彻底删除歌曲选项 */}
               <div className="context-menu-item" style={{ color: "#ef4444" }} onClick={() => handleCommand("delete")}>
                 <Trash2 size={14} /> 彻底删除歌曲
               </div>
@@ -479,7 +587,6 @@ export default function SongTable({
                 </div>
               )}
               
-              {/* 二级联动子菜单：添加到歌单 */}
               {playlists.length > 0 && (
                 <div className="context-menu-item cascade-trigger">
                   <Plus size={14} /> 添加到歌单 <ArrowRight size={12} style={{ marginLeft: "auto" }} />
@@ -498,7 +605,6 @@ export default function SongTable({
               )}
             </>
           ) : (
-            // 空白区域右键菜单：粘贴
             clipboard && (
               <div className="context-menu-item" onClick={() => handleCommand("paste")}>
                 <ClipboardPaste size={14} /> 粘贴歌曲 ({clipboard.songIds.length} 首)

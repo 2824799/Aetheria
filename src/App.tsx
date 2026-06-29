@@ -237,6 +237,19 @@ function App() {
           }
         }
       }
+
+      // 恢复上次双击/单击打开的歌曲详情侧栏状态
+      const savedActiveSongId = localStorage.getItem("aetheria-active-song-id");
+      const savedIsDetailOpen = localStorage.getItem("aetheria-is-detail-open") === "true";
+      if (savedActiveSongId && loadedSongs.length > 0) {
+        const song = loadedSongs.find(s => s.id === savedActiveSongId);
+        if (song) {
+          setActiveSong(song);
+          if (savedIsDetailOpen) {
+            setIsDetailOpen(true);
+          }
+        }
+      }
     });
 
     fetchPlaylists();
@@ -358,14 +371,30 @@ function App() {
     } else {
       localStorage.removeItem("aetheria-clipboard");
     }
-  }, [clipboard]);
+}, [clipboard]);
 
   // 全局主题变化
   useEffect(() => {
     document.documentElement.className = "";
     document.documentElement.classList.add(`theme-${theme}`);
+  }, [theme]);
+
+  useEffect(() => {
     localStorage.setItem("aetheria-theme", theme);
   }, [theme]);
+
+  // 同步上次激活选中详情歌曲及侧边栏状态到本地
+  useEffect(() => {
+    if (activeSong) {
+      localStorage.setItem("aetheria-active-song-id", activeSong.id);
+    } else {
+      localStorage.removeItem("aetheria-active-song-id");
+    }
+  }, [activeSong]);
+
+  useEffect(() => {
+    localStorage.setItem("aetheria-is-detail-open", isDetailOpen ? "true" : "false");
+  }, [isDetailOpen]);
 
   // 解析并高亮滚动当前播放歌词
   const lyricsLines = useMemo(() => {
