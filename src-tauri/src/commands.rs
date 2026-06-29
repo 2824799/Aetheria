@@ -6,6 +6,7 @@ use lofty::probe::Probe;
 use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::tag::Accessor;
 
+use serde::{Deserialize, Serialize};
 use crate::db::{self, Song, AudioVersion, Tag};
 
 // 错误处理辅助宏
@@ -866,6 +867,192 @@ pub fn import_audio_version_for_song(song_id: String, filepath: String) -> Resul
         md5: Some(file_md5),
         bit_depth,
     })
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct PreviewInfo {
+    pub filepath: String,
+    pub filename: String,
+    pub title: String,
+    pub artist: String,
+}
+
+#[tauri::command]
+pub fn preview_audio_metadata(filepaths: Vec<String>) -> Result<Vec<PreviewInfo>, String> {
+    let mut list = Vec::new();
+    for fp in filepaths {
+        let path = Path::new(&fp);
+        let filename = path.file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        
+        let mut title = path.file_stem()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        let mut artist = "未知歌手".to_string();
+        
+        if let Ok(tagged_file) = Probe::open(path).and_then(|p| p.read()) {
+            if let Some(primary_tag) = tagged_file.primary_tag() {
+                if let Some(t) = primary_tag.title() {
+                    title = t.to_string();
+                }
+                if let Some(a) = primary_tag.artist() {
+                    artist = a.to_string();
+                }
+            }
+        }
+        
+        list.push(PreviewInfo {
+            filepath: fp,
+            filename,
+            title,
+            artist,
+        });
+    }
+    Ok(list)
+}
+
+#[tauri::command]
+pub fn import_song_with_metadata(filepath: String, title: String, artist: String) -> Result<(), String> {
+    let src_path = Path::new(&filepath);
+    if !src_path.exists() {
+        return Err("File does not exist".to_string());
+    }
+    
+    let original_name = src_path.file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+        
+    let ext = src_path.extension()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+
+    let file_size = err_str!(src_path.metadata())?.len() as i64;
+    
+    // 1. 读取音频属性
+    let tagged_file = Probe::open(src_path)
+        .map_err(|e| format!("Failed to open file probe: {}", e))?
+        .read()
+        .map_err(|e| format!("Failed to read metadata: {}", e))?;
+        
+    let properties = tagged_file.properties();
+    let duration = properties.duration().as_secs_f64();
+    let bitrate = properties.audio_bitrate().map(|b| (b * 1000) as i32);
+    let sample_rate = properties.sample_rate().map(|s| s as i32);
+    let bit_depth = properties.bit_depth().map(|d| d as i32);
+    
+    // MD5 校验
+    let file_data = err_str!(fs::read(src_path))?;
+    let file_md5 = format!("{:x}", md5::compute(file_data));
+
+    let conn = err_str!(db::establish_connection())?;
+
+    let md5_exists: bool = err_str!(conn.query_row(
+        "SELECT COUNT(*) FROM audio_files WHERE md5 = ?1",
+        params![file_md5],
+        |row| row.get::<_, i64>(0).map(|count| count > 0)
+    ))?;
+
+    if md5_exists {
+        return Err(format!("音频文件 [{}] 已存在于库中，请勿重复导入！", original_name));
+    }
+    
+    // 2. 复制文件到托管目录
+    let uuid = Uuid::new_v4().to_string();
+    let dest_filename = format!("{}.{}", uuid, ext);
+    let dest_relative_path = format!("files/{}", dest_filename);
+    let dest_absolute_path = db::get_files_dir().join(&dest_filename);
+    
+    err_str!(fs::copy(src_path, &dest_absolute_path))?;
+    
+    // 3. 匹配或新建歌曲实体
+    let artist_opt = if artist.trim().is_empty() || artist == "未知歌手" { None } else { Some(artist.trim().to_string()) };
+    let song_id: String = match &artist_opt {
+        None => {
+            let id_opt: Option<String> = err_str!(conn.query_row(
+                "SELECT id FROM songs WHERE title = ?1 AND artist IS NULL",
+                params![title.trim()],
+                |row| row.get(0)
+            ).optional())?;
+            id_opt
+        },
+        Some(art) => {
+            let id_opt: Option<String> = err_str!(conn.query_row(
+                "SELECT id FROM songs WHERE title = ?1 AND artist = ?2",
+                params![title.trim(), art],
+                |row| row.get(0)
+            ).optional())?;
+            id_opt
+        }
+    }.unwrap_or_else(|| {
+        let new_id = Uuid::new_v4().to_string();
+        conn.execute(
+            "INSERT INTO songs (id, title, artist) VALUES (?1, ?2, ?3)",
+            params![new_id, title.trim(), artist_opt]
+        ).unwrap();
+        new_id
+    });
+
+    // 4. 插入音频版本记录
+    let version_count: i64 = err_str!(conn.query_row(
+        "SELECT COUNT(*) FROM audio_files WHERE song_id = ?1",
+        params![song_id],
+        |row| row.get(0)
+    ))?;
+    let is_primary = if version_count == 0 { 1 } else { 0 };
+    
+    let version_id = Uuid::new_v4().to_string();
+    err_str!(conn.execute(
+        "INSERT INTO audio_files (id, song_id, filepath, original_name, format, bitrate, sample_rate, duration, file_size, is_enabled, is_primary, md5, bit_depth) 
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1, ?10, ?11, ?12)",
+        params![
+            version_id,
+            song_id,
+            dest_relative_path,
+            original_name,
+            ext,
+            bitrate,
+            sample_rate,
+            duration,
+            file_size,
+            is_primary,
+            file_md5,
+            bit_depth
+        ]
+    ))?;
+    
+    Ok(())
+}
+
+#[tauri::command]
+pub fn update_song_metadata(song_id: String, title: String, artist: String) -> Result<(), String> {
+    let conn = err_str!(db::establish_connection())?;
+    let artist_val = if artist.trim().is_empty() || artist.trim() == "未知歌手" {
+        None
+    } else {
+        Some(artist.trim().to_string())
+    };
+    err_str!(conn.execute(
+        "UPDATE songs SET title = ?1, artist = ?2 WHERE id = ?3",
+        params![title.trim(), artist_val, song_id]
+    ))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn scan_directory_for_preview(dir_path: String) -> Result<Vec<String>, String> {
+    let path = Path::new(&dir_path);
+    if !path.is_dir() {
+        return Err("Not a directory".to_string());
+    }
+    let mut files = Vec::new();
+    scan_directory(path, &mut files).map_err(|e| e.to_string())?;
+    let list = files.into_iter().map(|f| f.to_string_lossy().to_string()).collect();
+    Ok(list)
 }
 
 

@@ -104,6 +104,40 @@ export default function SongTable({
   // 自定义右键菜单状态
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
 
+  // 列宽可拖拽调节状态
+  const [colWidths, setColWidths] = useState({
+    play: 32,
+    title: 260,
+    artist: 140,
+    tags: 200,
+    versions: 70,
+    specs: 160
+  });
+
+  const startResize = (e: React.MouseEvent, column: keyof typeof colWidths) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startWidth = colWidths[column];
+    
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const deltaX = moveEvent.clientX - startX;
+      const newWidth = Math.max(column === "play" ? 24 : 50, startWidth + deltaX);
+      setColWidths(prev => ({
+        ...prev,
+        [column]: newWidth
+      }));
+    };
+    
+    const handleMouseUp = () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+    
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+  };
+
   const containerRef = useRef<HTMLDivElement | null>(null);
   const selectionBoxRef = useRef<HTMLDivElement | null>(null);
   const lastSelectedIndexRef = useRef<number>(-1);
@@ -303,15 +337,27 @@ export default function SongTable({
       onContextMenu={handleTableContextMenu}
       style={{ position: "relative" }}
     >
-      <table className="song-table">
+      <table className="song-table" style={{ tableLayout: "fixed", width: "100%" }}>
         <thead>
           <tr>
-            <th></th>
-            <th>歌曲名称</th>
-            <th>歌手</th>
-            <th>绑定的自定义标签</th>
-            <th style={{ textAlign: "center" }}>版本数</th>
-            <th style={{ textAlign: "center" }}>默认音质</th>
+            <th style={{ width: colWidths.play, padding: "8px 4px" }}></th>
+            <th style={{ width: colWidths.title, position: "relative", paddingRight: "8px" }}>
+              歌曲名称
+              <div className="resizer" onMouseDown={(e) => startResize(e, "title")} />
+            </th>
+            <th style={{ width: colWidths.artist, position: "relative", paddingRight: "8px" }}>
+              歌手
+              <div className="resizer" onMouseDown={(e) => startResize(e, "artist")} />
+            </th>
+            <th style={{ width: colWidths.tags, position: "relative", paddingRight: "8px" }}>
+              绑定的自定义标签
+              <div className="resizer" onMouseDown={(e) => startResize(e, "tags")} />
+            </th>
+            <th style={{ width: colWidths.versions, position: "relative", textAlign: "center", paddingRight: "8px" }}>
+              版本数
+              <div className="resizer" onMouseDown={(e) => startResize(e, "versions")} />
+            </th>
+            <th style={{ width: colWidths.specs, textAlign: "center" }}>默认音质</th>
           </tr>
         </thead>
         <tbody>
@@ -337,7 +383,7 @@ export default function SongTable({
                 onContextMenu={(e) => handleRowContextMenu(e, song.id)}
               >
                 {/* 拦截点击事件以提升直接播放反馈 */}
-                <td onClick={(e) => {
+                <td style={{ width: colWidths.play, padding: "8px 4px" }} onClick={(e) => {
                   e.stopPropagation();
                   if (isCurrentlyPlaying) {
                     onPlayPause();
@@ -349,16 +395,16 @@ export default function SongTable({
                     {isCurrentlyPlaying && isPlaying ? <Pause size={14} /> : <Play size={14} />}
                   </div>
                 </td>
-                <td>
+                <td style={{ width: colWidths.title, textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
                   <div className="song-title-cell">
-                    <span className="song-title-text">{song.title}</span>
+                    <span className="song-title-text" title={song.title}>{song.title}</span>
                   </div>
                 </td>
-                <td>
-                  <span className="song-artist-text">{song.artist || "未知歌手"}</span>
+                <td style={{ width: colWidths.artist, textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
+                  <span className="song-artist-text" title={song.artist || "未知歌手"}>{song.artist || "未知歌手"}</span>
                 </td>
-                <td>
-                  <div className="badge-container">
+                <td style={{ width: colWidths.tags }}>
+                  <div className="badge-container" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {song.tags.map(t => (
                       <span 
                         key={t.id} 
@@ -370,8 +416,8 @@ export default function SongTable({
                     ))}
                   </div>
                 </td>
-                <td style={{ textAlign: "center", fontWeight: 600 }}>{song.versions.length}</td>
-                <td style={{ textAlign: "center" }}>
+                <td style={{ width: colWidths.versions, textAlign: "center", fontWeight: 600 }}>{song.versions.length}</td>
+                <td style={{ width: colWidths.specs, textAlign: "center" }}>
                   <span className="format-badge specs" style={{ textTransform: "none", fontSize: "0.72rem", padding: "3px 8px" }}>
                     {specs}
                   </span>

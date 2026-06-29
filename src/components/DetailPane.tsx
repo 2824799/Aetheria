@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { X, Music, Download, CheckSquare, Square, Play, Pause, Trash2 } from "lucide-react";
 
 interface AudioVersion {
@@ -53,6 +54,7 @@ interface DetailPaneProps {
   onExportVersion: (versionId: string) => void;
   onDeleteVersion: (versionId: string) => void;
   onImportVersionForSong: (songId: string) => void;
+  onUpdateMetadata: (songId: string, title: string, artist: string) => void;
 }
 
 export default function DetailPane({
@@ -72,7 +74,30 @@ export default function DetailPane({
   onExportVersion,
   onDeleteVersion,
   onImportVersionForSong,
+  onUpdateMetadata,
 }: DetailPaneProps) {
+  const [editTitle, setEditTitle] = useState("");
+  const [editArtist, setEditArtist] = useState("");
+
+  useEffect(() => {
+    if (activeSong) {
+      setEditTitle(activeSong.title);
+      setEditArtist(activeSong.artist || "未知歌手");
+    }
+  }, [activeSong]);
+
+  const handleSave = () => {
+    if (activeSong) {
+      const titleToSave = editTitle.trim();
+      const artistToSave = editArtist.trim() === "未知歌手" ? "" : editArtist.trim();
+      const oldTitle = activeSong.title;
+      const oldArtist = activeSong.artist || "";
+      if (titleToSave && (titleToSave !== oldTitle || artistToSave !== oldArtist)) {
+        onUpdateMetadata(activeSong.id, titleToSave, artistToSave);
+      }
+    }
+  };
+
   const formatTime = (secs: number) => {
     if (isNaN(secs)) return "0:00";
     const m = Math.floor(secs / 60);
@@ -93,8 +118,49 @@ export default function DetailPane({
               <div className="cover-glow"></div>
               <Music size={44} />
             </div>
-            <div className="detail-title">{activeSong.title}</div>
-            <div className="detail-artist">{activeSong.artist || "未知歌手"}</div>
+            <input 
+              type="text" 
+              className="detail-title-input" 
+              value={editTitle} 
+              onChange={e => setEditTitle(e.target.value)}
+              onBlur={handleSave}
+              onKeyDown={e => { if (e.key === "Enter") handleSave(); }}
+              title="双击或点击可编辑歌曲名"
+              style={{
+                width: "100%",
+                textAlign: "center",
+                fontSize: "1.1rem",
+                fontWeight: "bold",
+                background: "transparent",
+                border: "none",
+                borderBottom: "1px dashed transparent",
+                outline: "none",
+                color: "var(--text)",
+                marginTop: "12px",
+                padding: "2px 4px"
+              }}
+            />
+            <input 
+              type="text" 
+              className="detail-artist-input" 
+              value={editArtist} 
+              onChange={e => setEditArtist(e.target.value)}
+              onBlur={handleSave}
+              onKeyDown={e => { if (e.key === "Enter") handleSave(); }}
+              title="双击或点击可编辑歌手名"
+              style={{
+                width: "100%",
+                textAlign: "center",
+                fontSize: "0.85rem",
+                background: "transparent",
+                border: "none",
+                borderBottom: "1px dashed transparent",
+                outline: "none",
+                color: "var(--text-sub)",
+                marginTop: "4px",
+                padding: "2px 4px"
+              }}
+            />
           </div>
 
           <div className="detail-tabs-container">

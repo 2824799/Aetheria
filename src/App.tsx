@@ -11,6 +11,7 @@ import PlayBar from "./components/PlayBar";
 import Toast from "./components/Toast";
 import TagManagerModal from "./components/TagManagerModal";
 import SettingsModal from "./components/SettingsModal";
+import ImportPreviewModal from "./components/ImportPreviewModal";
 
 import "./App.css";
 
@@ -130,6 +131,10 @@ function App() {
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState("");
   const [showImportDropdown, setShowImportDropdown] = useState(false);
+
+  // 导入预览相关状态
+  const [filesToPreview, setFilesToPreview] = useState<string[]>([]);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   
   // 标签新建属性
   const [newTagName, setNewTagName] = useState("");
@@ -154,6 +159,12 @@ function App() {
 
   // 待恢复的播放进度时间 Ref (用于解决 HTML5 Audio src 赋值时立刻设置 currentTime 无效的 bug)
   const pendingRestoreTimeRef = useRef<number | null>(null);
+
+  // 缓存正在播放的音源 Ref 以解决 React useEffect 监听器的闭包陷阱
+  const playingVersionRef = useRef<AudioVersion | null>(null);
+  useEffect(() => {
+    playingVersionRef.current = playingVersion;
+  }, [playingVersion]);
 
   // 全局精美自定义 Toast 提示框状态
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
@@ -258,23 +269,32 @@ function App() {
       setCurrentTime(audio.currentTime);
       localStorage.setItem("aetheria-current-time", audio.currentTime.toString());
     };
-    const onLoadedMetadata = () => {
-      setDuration(audio.duration);
-      if (pendingRestoreTimeRef.current !== null) {
-        audio.currentTime = pendingRestoreTimeRef.current;
-        setCurrentTime(pendingRestoreTimeRef.current);
-        pendingRestoreTimeRef.current = null;
+    const handleLoadedMetadata = () => {
+      if (audioRef.current) {
+        // 优先信任数据库中由 lofty 解析的音频元数据时长，防止 HTML5 Audio 对 AAC/ADTS 等格式估算错误显示为 133 分钟等 Bug
+        if (playingVersionRef.current && playingVersionRef.current.duration) {
+          setDuration(playingVersionRef.current.duration);
+        } else {
+          setDuration(audioRef.current.duration);
+        }
+        
+        // 如果有挂起的还原进度
+        if (pendingRestoreTimeRef.current !== null) {
+          audioRef.current.currentTime = pendingRestoreTimeRef.current;
+          setCurrentTime(pendingRestoreTimeRef.current);
+          pendingRestoreTimeRef.current = null;
+        }
       }
     };
     const onEnded = () => handleEnded();
 
     audio.addEventListener("timeupdate", onTimeUpdate);
-    audio.addEventListener("loadedmetadata", onLoadedMetadata);
+    audio.addEventListener("loadedmetadata", handleLoadedMetadata);
     audio.addEventListener("ended", onEnded);
 
     return () => {
       audio.removeEventListener("timeupdate", onTimeUpdate);
-      audio.removeEventListener("loadedmetadata", onLoadedMetadata);
+      audio.removeEventListener("loadedmetadata", handleLoadedMetadata);
       audio.removeEventListener("ended", onEnded);
       audio.pause();
     };
@@ -468,18 +488,20 @@ function App() {
         return;
       }
 
-      setImportProgress("正在扫描并解析音频元数据...");
-      const count = await invoke<number>("import_audio_files", { dirPath: selectedDir });
-      setImportProgress(`成功导入了 ${count} 首歌曲！`);
-      
-      setTimeout(() => {
+      setImportProgress("正在扫描文件夹...");
+      const scannedFiles = await invoke<string[]>("scan_directory_for_preview", { dirPath: selectedDir });
+      if (scannedFiles.length === 0) {
+        showToast("该目录下未找到兼容的音频文件", "info");
         setIsImporting(false);
-        loadLibrary();
-      }, 1500);
+        return;
+      }
+      setFilesToPreview(scannedFiles);
+      setIsPreviewOpen(true);
     } catch (err) {
       console.error(err);
-      setImportProgress("导入出错: " + err);
-      setTimeout(() => setIsImporting(false), 3000);
+      showToast("扫描失败: " + err, "error");
+    } finally {
+      setIsImporting(false);
     }
   };
 
@@ -493,29 +515,53 @@ function App() {
         setIsImporting(false);
         return;
       }
-
-      setImportProgress(`正在导入 ${selectedFiles.length} 首歌曲...`);
-      let successCount = 0;
-      for (const filepath of selectedFiles) {
-        try {
-          await invoke("import_song", { filepath });
-          successCount++;
-        } catch (e) {
-          console.error(`Failed to import ${filepath}:`, e);
-        }
-      }
-      
-      setImportProgress(`成功导入了 ${successCount} 首歌曲！`);
-      
-      setTimeout(() => {
-        setIsImporting(false);
-        loadLibrary();
-      }, 1500);
+      setFilesToPreview(selectedFiles);
+      setIsPreviewOpen(true);
     } catch (err) {
       console.error(err);
-      setImportProgress("导入出错: " + err);
-      setTimeout(() => setIsImporting(false), 3000);
+      showToast("选择失败: " + err, "error");
+    } finally {
+      setIsImporting(false);
     }
+  };
+
+  // 1.3 确认预览后批量导入
+  const handleConfirmImport = async (songsList: { filepath: string; title: string; artist: string }[]) => {
+    setIsPreviewOpen(false);
+    setIsImporting(true);
+    setImportProgress(`正在导入并解析 ${songsList.length} 首歌曲...`);
+    
+    let successCount = 0;
+    let duplicateCount = 0;
+    
+    for (const song of songsList) {
+      try {
+        await invoke("import_song_with_metadata", { 
+          filepath: song.filepath, 
+          title: song.title, 
+          artist: song.artist 
+        });
+        successCount++;
+      } catch (err) {
+        console.error(err);
+        if (String(err).includes("已存在")) {
+          duplicateCount++;
+        }
+      }
+    }
+    
+    let msg = `成功导入了 ${successCount} 首歌曲！`;
+    if (duplicateCount > 0) {
+      msg += ` 并跳过了 ${duplicateCount} 首已存在的重复音源。`;
+    }
+    
+    setImportProgress(msg);
+    showToast(msg, "success");
+    
+    setTimeout(() => {
+      setIsImporting(false);
+      loadLibrary();
+    }, 1500);
   };
 
   // 2. 标签管理逻辑
@@ -614,6 +660,19 @@ function App() {
       if (updated) setActiveSong(updated);
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const handleUpdateSongMetadata = async (songId: string, title: string, artist: string) => {
+    try {
+      await invoke("update_song_metadata", { songId, title, artist });
+      showToast("歌曲基本信息已保存", "success");
+      
+      const { loadedSongs: freshSongs } = await loadLibrary();
+      const updated = freshSongs.find(s => s.id === songId);
+      if (updated) setActiveSong(updated);
+    } catch (err) {
+      showToast("保存信息失败: " + err, "error");
     }
   };
 
@@ -1149,6 +1208,7 @@ function App() {
           onExportVersion={handleExportVersion}
           onDeleteVersion={handleDeleteVersion}
           onImportVersionForSong={handleImportVersionForSong}
+          onUpdateMetadata={handleUpdateSongMetadata}
         />
         
         {/* 全屏滚动歌词浮层 */}
@@ -1232,6 +1292,13 @@ function App() {
       )}
 
       {toast && <Toast message={toast.message} type={toast.type} />}
+
+      <ImportPreviewModal 
+        isOpen={isPreviewOpen}
+        onClose={() => setIsPreviewOpen(false)}
+        filesToImport={filesToPreview}
+        onConfirm={handleConfirmImport}
+      />
     </div>
   );
 }

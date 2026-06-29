@@ -393,13 +393,24 @@ body {
   text-overflow: ellipsis;
 }
 
-/* Fixed Column Width Setup */
-.song-table th:nth-child(1), .song-table td:nth-child(1) { width: 50px; text-align: center; } /* Play button */
-.song-table th:nth-child(2), .song-table td:nth-child(2) { width: 45%; } /* Song Title (very wide!) */
-.song-table th:nth-child(3), .song-table td:nth-child(3) { width: 20%; } /* Artist */
-.song-table th:nth-child(4), .song-table td:nth-child(4) { width: 20%; } /* Tags list */
-.song-table th:nth-child(5), .song-table td:nth-child(5) { width: 70px; text-align: center; } /* Versions count */
-.song-table th:nth-child(6), .song-table td:nth-child(6) { width: 75px; text-align: center; } /* Format */
+/* Column resizer styling */
+.song-table th {
+  position: relative;
+}
+.resizer {
+  position: absolute;
+  right: 0;
+  top: 0;
+  height: 100%;
+  width: 6px;
+  cursor: col-resize;
+  user-select: none;
+  background: transparent;
+  z-index: 10;
+}
+.resizer:hover, .resizer:active {
+  border-right: 2px solid var(--accent);
+}
 
 .song-row {
   cursor: pointer;
@@ -1491,4 +1502,12 @@ body {
 .ctrl-btn-xs:hover {
   background: var(--bg-hover);
   color: var(--text-main);
+}
+
+/* Detail header metadata editing styles */
+.detail-title-input:hover, .detail-title-input:focus,
+.detail-artist-input:hover, .detail-artist-input:focus {
+  border-bottom-color: var(--border) !important;
+  background: var(--bg-hover) !important;
+  border-radius: 4px;
 }

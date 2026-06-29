@@ -43,7 +43,11 @@ pub fn run() {
             commands::delete_song,
             commands::delete_audio_version,
             commands::reset_library,
-            commands::import_audio_version_for_song
+            commands::import_audio_version_for_song,
+            commands::preview_audio_metadata,
+            commands::import_song_with_metadata,
+            commands::update_song_metadata,
+            commands::scan_directory_for_preview
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
