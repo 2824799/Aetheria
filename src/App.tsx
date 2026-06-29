@@ -174,6 +174,9 @@ function App() {
     playingVersionRef.current = version;
   };
 
+  // 缓存播放结束的回调，防范 React 闭包旧状态
+  const handleEndedRef = useRef<(() => void) | null>(null);
+
   // 全局精美自定义 Toast 提示框状态
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
   const showToast = (message: string, type: "success" | "error" | "info" = "info") => {
@@ -279,6 +282,11 @@ function App() {
     };
   }, []);
 
+  // 同步更新播放结束回调的最新引用到 Ref，避免事件监听闭包陈旧
+  useEffect(() => {
+    handleEndedRef.current = handleEnded;
+  });
+
   // 音频初始化与事件监听
   useEffect(() => {
     const audio = new Audio();
@@ -308,11 +316,11 @@ function App() {
       }
     };
     
-    // 用 Ref 封装 handleEnded 解决 React 闭包缓存导致的切歌失效
-    const handleEndedRef = useRef(handleEnded);
-    handleEndedRef.current = handleEnded;
-
-    const onEnded = () => handleEndedRef.current();
+    const onEnded = () => {
+      if (handleEndedRef.current) {
+        handleEndedRef.current();
+      }
+    };
 
     audio.addEventListener("timeupdate", onTimeUpdate);
     audio.addEventListener("loadedmetadata", handleLoadedMetadata);
@@ -324,7 +332,7 @@ function App() {
       audio.removeEventListener("ended", onEnded);
       audio.pause();
     };
-  }); // 每次渲染都更新 listeners 中的 Refs 以确保不包含任何闭包陈旧状态
+  }, []); // 仅挂载时初始化一次，避免死循环渲染
 
   // 同步音量状态到播放器 DOM 并保存本地状态
   useEffect(() => {
