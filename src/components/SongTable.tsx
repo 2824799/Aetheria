@@ -147,6 +147,7 @@ export default function SongTable({
   const handleDragStart = (e: React.DragEvent, col: string) => {
     setDraggedCol(col);
     e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", col);
   };
 
   const handleDragOver = (e: React.DragEvent, col: string) => {

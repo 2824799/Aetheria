@@ -160,11 +160,19 @@ function App() {
   // 待恢复的播放进度时间 Ref (用于解决 HTML5 Audio src 赋值时立刻设置 currentTime 无效的 bug)
   const pendingRestoreTimeRef = useRef<number | null>(null);
 
-  // 缓存正在播放的音源 Ref 以解决 React useEffect 监听器的闭包陷阱
+  // 缓存正在播放的歌曲与音源 Ref 以解决 React useEffect 监听器的闭包陷阱与同步更新竞赛 Bug
+  const playingSongRef = useRef<Song | null>(null);
   const playingVersionRef = useRef<AudioVersion | null>(null);
-  useEffect(() => {
-    playingVersionRef.current = playingVersion;
-  }, [playingVersion]);
+
+  const changePlayingSong = (song: Song | null) => {
+    setPlayingSong(song);
+    playingSongRef.current = song;
+  };
+
+  const changePlayingVersion = (version: AudioVersion | null) => {
+    setPlayingVersion(version);
+    playingVersionRef.current = version;
+  };
 
   // 全局精美自定义 Toast 提示框状态
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
@@ -217,8 +225,8 @@ function App() {
         if (song) {
           const version = song.versions.find(v => v.id === savedVersionId);
           if (version) {
-            setPlayingSong(song);
-            setPlayingVersion(version);
+            changePlayingSong(song);
+            changePlayingVersion(version);
             
             if (audioRef.current) {
               const normalizedPath = (libPath + "/" + version.filepath).replace(/\\/g, "/");
@@ -299,7 +307,12 @@ function App() {
         }
       }
     };
-    const onEnded = () => handleEnded();
+    
+    // 用 Ref 封装 handleEnded 解决 React 闭包缓存导致的切歌失效
+    const handleEndedRef = useRef(handleEnded);
+    handleEndedRef.current = handleEnded;
+
+    const onEnded = () => handleEndedRef.current();
 
     audio.addEventListener("timeupdate", onTimeUpdate);
     audio.addEventListener("loadedmetadata", handleLoadedMetadata);
@@ -311,7 +324,7 @@ function App() {
       audio.removeEventListener("ended", onEnded);
       audio.pause();
     };
-  }, []);
+  }); // 每次渲染都更新 listeners 中的 Refs 以确保不包含任何闭包陈旧状态
 
   // 同步音量状态到播放器 DOM 并保存本地状态
   useEffect(() => {
@@ -664,7 +677,7 @@ function App() {
         setActiveSong(updated);
         if (playingSong && playingSong.id === activeSong.id) {
           const newPrimary = updated.versions.find(v => v.id === versionId);
-          if (newPrimary) setPlayingVersion(newPrimary);
+          if (newPrimary) changePlayingVersion(newPrimary);
         }
       }
       showToast("默认主版本设置成功", "success");
@@ -799,8 +812,8 @@ function App() {
         audioRef.current.src = assetUrl;
         audioRef.current.load();
         
-        setPlayingSong(song);
-        setPlayingVersion(version);
+        changePlayingSong(song);
+        changePlayingVersion(version);
         setIsPlaying(true);
         
         await audioRef.current.play();
@@ -843,14 +856,14 @@ function App() {
 
       if (playingVersion && playingVersion.id === versionId) {
         if (audioRef.current) audioRef.current.pause();
-        setPlayingVersion(null);
+        changePlayingVersion(null);
         setIsPlaying(false);
         setCurrentTime(0);
         setDuration(0);
         if (updated) {
           const nextAvailable = updated.versions.find(v => v.is_enabled);
           if (nextAvailable) {
-            setPlayingVersion(nextAvailable);
+            changePlayingVersion(nextAvailable);
           }
         }
       }
@@ -880,8 +893,8 @@ function App() {
 
     if (playingSong && songIds.includes(playingSong.id)) {
       if (audioRef.current) audioRef.current.pause();
-      setPlayingSong(null);
-      setPlayingVersion(null);
+      changePlayingSong(null);
+      changePlayingVersion(null);
       setIsPlaying(false);
       setCurrentTime(0);
       setDuration(0);
@@ -907,8 +920,8 @@ function App() {
       showToast("整个音乐库已成功清空并重置！", "success");
       
       if (audioRef.current) audioRef.current.pause();
-      setPlayingSong(null);
-      setPlayingVersion(null);
+      changePlayingSong(null);
+      changePlayingVersion(null);
       setIsPlaying(false);
       setCurrentTime(0);
       setDuration(0);
