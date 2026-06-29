@@ -24,6 +24,7 @@ pub struct AudioVersion {
     pub is_enabled: bool,
     pub is_primary: bool,
     pub md5: Option<String>,
+    pub bit_depth: Option<i32>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -121,6 +122,7 @@ pub fn init_db() -> Result<()> {
             is_enabled INTEGER DEFAULT 1,
             is_primary INTEGER DEFAULT 0,
             md5 TEXT,
+            bit_depth INTEGER,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (song_id) REFERENCES songs(id) ON DELETE CASCADE
         );",
@@ -189,6 +191,17 @@ pub fn init_db() -> Result<()> {
     
     if !has_md5 {
         let _ = conn.execute("ALTER TABLE audio_files ADD COLUMN md5 TEXT;", []);
+    }
+
+    // 数据库迁移：自动检查并补全 bit_depth 列（针对已有旧数据库文件）
+    let has_bit_depth: bool = conn.query_row(
+        "SELECT COUNT(*) FROM pragma_table_info('audio_files') WHERE name='bit_depth'",
+        [],
+        |row| row.get::<_, i64>(0).map(|count| count > 0)
+    ).unwrap_or(false);
+    
+    if !has_bit_depth {
+        let _ = conn.execute("ALTER TABLE audio_files ADD COLUMN bit_depth INTEGER;", []);
     }
 
     // 插入默认种子标签（若库为空）

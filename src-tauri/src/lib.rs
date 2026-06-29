@@ -42,7 +42,8 @@ pub fn run() {
             commands::verify_audio_file,
             commands::delete_song,
             commands::delete_audio_version,
-            commands::reset_library
+            commands::reset_library,
+            commands::import_audio_version_for_song
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

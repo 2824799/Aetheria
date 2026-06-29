@@ -24,6 +24,9 @@ interface AudioVersion {
   file_size?: number;
   is_primary: boolean;
   is_enabled: boolean;
+  md5?: string;
+  bit_depth?: number;
+  sample_rate?: number;
 }
 
 interface Tag {
@@ -571,8 +574,14 @@ function App() {
   // 3. 版本精细化控制逻辑
   const handleSetPrimaryVersion = async (versionId: string) => {
     if (!activeSong) return;
+    const version = activeSong.versions.find(v => v.id === versionId);
+    if (!version) return;
     try {
-      await invoke("set_primary_version", { songId: activeSong.id, versionId });
+      await invoke("update_version_status", { 
+        version_id: versionId, 
+        is_enabled: version.is_enabled, 
+        is_primary: true 
+      });
       const { loadedSongs: freshSongs } = await loadLibrary();
       
       const updated = freshSongs.find(s => s.id === activeSong.id);
@@ -586,18 +595,68 @@ function App() {
       showToast("默认主版本设置成功", "success");
     } catch (err) {
       console.error(err);
+      showToast("设置失败: " + err, "error");
     }
   };
 
   const handleToggleVersionStatus = async (versionId: string, active: boolean) => {
     if (!activeSong) return;
+    const version = activeSong.versions.find(v => v.id === versionId);
+    if (!version) return;
     try {
-      await invoke("update_version_status", { versionId, active });
+      await invoke("update_version_status", { 
+        version_id: versionId, 
+        is_enabled: active, 
+        is_primary: version.is_primary 
+      });
       const { loadedSongs: freshSongs } = await loadLibrary();
       const updated = freshSongs.find(s => s.id === activeSong.id);
       if (updated) setActiveSong(updated);
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const handleImportVersionForSong = async (songId: string) => {
+    setIsImporting(true);
+    setImportProgress("正在选择关联音频文件...");
+    try {
+      const selectedFiles = await invoke<string[]>("select_audio_files");
+      if (selectedFiles.length === 0) {
+        setIsImporting(false);
+        return;
+      }
+
+      setImportProgress("正在解析并关联音频...");
+      let successCount = 0;
+      let errorMsg = "";
+      for (const filepath of selectedFiles) {
+        try {
+          await invoke("import_audio_version_for_song", { songId, filepath });
+          successCount++;
+        } catch (e) {
+          console.error(e);
+          errorMsg = String(e);
+        }
+      }
+
+      if (successCount > 0) {
+        showToast(`成功关联了 ${successCount} 个新音频源！`, "success");
+      } else if (errorMsg) {
+        showToast(errorMsg, "error");
+      }
+
+      // 刷新数据并保持选中抽屉状态
+      const { loadedSongs: freshSongs } = await loadLibrary();
+      if (activeSong) {
+        const updated = freshSongs.find(s => s.id === activeSong.id);
+        if (updated) setActiveSong(updated);
+      }
+    } catch (err) {
+      console.error(err);
+      showToast("导入关联失败: " + err, "error");
+    } finally {
+      setIsImporting(false);
     }
   };
 
@@ -1089,6 +1148,7 @@ function App() {
           onToggleVersionStatus={handleToggleVersionStatus}
           onExportVersion={handleExportVersion}
           onDeleteVersion={handleDeleteVersion}
+          onImportVersionForSong={handleImportVersionForSong}
         />
         
         {/* 全屏滚动歌词浮层 */}

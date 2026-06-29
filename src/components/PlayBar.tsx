@@ -10,6 +10,9 @@ interface AudioVersion {
   file_size?: number;
   is_primary: boolean;
   is_enabled: boolean;
+  md5?: string;
+  bit_depth?: number;
+  sample_rate?: number;
 }
 
 interface Song {

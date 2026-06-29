@@ -45,7 +45,7 @@ pub fn get_songs() -> Result<Vec<Song>, String> {
         
         // 2. 查询该歌曲关联的所有音频版本
         let mut v_stmt = err_str!(conn.prepare(
-            "SELECT id, song_id, filepath, original_name, format, bitrate, sample_rate, duration, file_size, is_enabled, is_primary, md5 FROM audio_files WHERE song_id = ?1"
+            "SELECT id, song_id, filepath, original_name, format, bitrate, sample_rate, duration, file_size, is_enabled, is_primary, md5, bit_depth FROM audio_files WHERE song_id = ?1"
         ))?;
         
         let v_rows = err_str!(v_stmt.query_map(params![song.id], |row| {
@@ -64,6 +64,7 @@ pub fn get_songs() -> Result<Vec<Song>, String> {
                 is_enabled: is_enabled_int != 0,
                 is_primary: is_primary_int != 0,
                 md5: row.get(11)?,
+                bit_depth: row.get(12)?,
             })
         }))?;
         
@@ -124,8 +125,9 @@ pub fn import_song(filepath: String) -> Result<Song, String> {
         
     let properties = tagged_file.properties();
     let duration = properties.duration().as_secs_f64();
-    let bitrate = properties.audio_bitrate().map(|b| b as i32);
+    let bitrate = properties.audio_bitrate().map(|b| (b * 1000) as i32); // 存入 bps (bits per second)，解决 1kbps 显示错误
     let sample_rate = properties.sample_rate().map(|s| s as i32);
+    let bit_depth = properties.bit_depth().map(|d| d as i32);
     
     let mut title = src_path.file_stem()
         .unwrap_or_default()
@@ -221,8 +223,8 @@ pub fn import_song(filepath: String) -> Result<Song, String> {
     
     let version_id = Uuid::new_v4().to_string();
     err_str!(conn.execute(
-        "INSERT INTO audio_files (id, song_id, filepath, original_name, format, bitrate, sample_rate, duration, file_size, is_enabled, is_primary, md5) 
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1, ?10, ?11)",
+        "INSERT INTO audio_files (id, song_id, filepath, original_name, format, bitrate, sample_rate, duration, file_size, is_enabled, is_primary, md5, bit_depth) 
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1, ?10, ?11, ?12)",
         params![
             version_id,
             song_id,
@@ -234,7 +236,8 @@ pub fn import_song(filepath: String) -> Result<Song, String> {
             duration,
             file_size,
             is_primary,
-            file_md5
+            file_md5,
+            bit_depth
         ]
     ))?;
     
@@ -260,7 +263,7 @@ pub fn import_song(filepath: String) -> Result<Song, String> {
     
     // 再次加载该歌曲的全部版本和标签
     let mut v_stmt = err_str!(conn.prepare(
-        "SELECT id, song_id, filepath, original_name, format, bitrate, sample_rate, duration, file_size, is_enabled, is_primary, md5 FROM audio_files WHERE song_id = ?1"
+        "SELECT id, song_id, filepath, original_name, format, bitrate, sample_rate, duration, file_size, is_enabled, is_primary, md5, bit_depth FROM audio_files WHERE song_id = ?1"
     ))?;
     let v_rows = err_str!(v_stmt.query_map(params![song.id], |row| {
         let is_enabled_int: i32 = row.get(9)?;
@@ -278,6 +281,7 @@ pub fn import_song(filepath: String) -> Result<Song, String> {
             is_enabled: is_enabled_int != 0,
             is_primary: is_primary_int != 0,
             md5: row.get(11)?,
+            bit_depth: row.get(12)?,
         })
     }))?;
     for v in v_rows {
@@ -671,6 +675,13 @@ pub fn delete_song(song_id: String) -> Result<(), String> {
 pub fn delete_audio_version(version_id: String) -> Result<(), String> {
     let conn = err_str!(db::establish_connection())?;
     
+    // 查询被删除版本所属歌曲 ID 和主版本状态
+    let (song_id, is_primary): (String, i32) = err_str!(conn.query_row(
+        "SELECT song_id, is_primary FROM audio_files WHERE id = ?1",
+        params![version_id],
+        |row| Ok((row.get(0)?, row.get(1)?))
+    ))?;
+
     // Find filepath to delete physical file
     let filepath: String = err_str!(conn.query_row(
         "SELECT filepath FROM audio_files WHERE id = ?1",
@@ -685,6 +696,32 @@ pub fn delete_audio_version(version_id: String) -> Result<(), String> {
     
     // Delete from DB
     err_str!(conn.execute("DELETE FROM audio_files WHERE id = ?1", params![version_id]))?;
+
+    // 如果删除的是主版本，自动提升该歌曲的另一个启用音源为主播放版本
+    if is_primary != 0 {
+        let next_primary_id: Option<String> = err_str!(conn.query_row(
+            "SELECT id FROM audio_files WHERE song_id = ?1 AND is_enabled = 1 LIMIT 1",
+            params![song_id],
+            |row| row.get(0)
+        ).optional())?;
+        
+        let target_id = match next_primary_id {
+            Some(id) => Some(id),
+            None => err_str!(conn.query_row(
+                "SELECT id FROM audio_files WHERE song_id = ?1 LIMIT 1",
+                params![song_id],
+                |row| row.get(0)
+            ).optional())?
+        };
+        
+        if let Some(tid) = target_id {
+            err_str!(conn.execute(
+                "UPDATE audio_files SET is_primary = 1 WHERE id = ?1",
+                params![tid]
+            ))?;
+        }
+    }
+    
     Ok(())
 }
 
@@ -728,6 +765,107 @@ pub fn reset_library() -> Result<(), String> {
     }
     
     Ok(())
+}
+
+#[tauri::command]
+pub fn import_audio_version_for_song(song_id: String, filepath: String) -> Result<AudioVersion, String> {
+    let src_path = Path::new(&filepath);
+    if !src_path.exists() {
+        return Err("File does not exist".to_string());
+    }
+    
+    let original_name = src_path.file_name()
+        .ok_or_else(|| "Invalid file name".to_string())?
+        .to_string_lossy()
+        .to_string();
+        
+    let ext = src_path.extension()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+
+    let file_size = err_str!(src_path.metadata())?.len() as i64;
+    
+    // 1. 使用 lofty 读取元数据
+    let tagged_file = Probe::open(src_path)
+        .map_err(|e| format!("Failed to open file probe: {}", e))?
+        .read()
+        .map_err(|e| format!("Failed to read metadata: {}", e))?;
+        
+    let properties = tagged_file.properties();
+    let duration = properties.duration().as_secs_f64();
+    let bitrate = properties.audio_bitrate().map(|b| (b * 1000) as i32);
+    let sample_rate = properties.sample_rate().map(|s| s as i32);
+    let bit_depth = properties.bit_depth().map(|d| d as i32);
+    
+    // 计算文件的 MD5
+    let file_data = err_str!(fs::read(src_path))?;
+    let file_md5 = format!("{:x}", md5::compute(file_data));
+
+    let conn = err_str!(db::establish_connection())?;
+
+    // 校验 MD5
+    let md5_exists: bool = err_str!(conn.query_row(
+        "SELECT COUNT(*) FROM audio_files WHERE md5 = ?1",
+        params![file_md5],
+        |row| row.get::<_, i64>(0).map(|count| count > 0)
+    ))?;
+
+    if md5_exists {
+        return Err(format!("该音频文件已存在于库中，请勿重复导入！"));
+    }
+    
+    // 2. 复制文件
+    let uuid = Uuid::new_v4().to_string();
+    let dest_filename = format!("{}.{}", uuid, ext);
+    let dest_relative_path = format!("files/{}", dest_filename);
+    let dest_absolute_path = db::get_files_dir().join(&dest_filename);
+    
+    err_str!(fs::copy(src_path, &dest_absolute_path))?;
+    
+    // 3. 确定是否为主版本
+    let version_count: i64 = err_str!(conn.query_row(
+        "SELECT COUNT(*) FROM audio_files WHERE song_id = ?1",
+        params![song_id],
+        |row| row.get(0)
+    ))?;
+    let is_primary = if version_count == 0 { 1 } else { 0 };
+    
+    let version_id = Uuid::new_v4().to_string();
+    err_str!(conn.execute(
+        "INSERT INTO audio_files (id, song_id, filepath, original_name, format, bitrate, sample_rate, duration, file_size, is_enabled, is_primary, md5, bit_depth) 
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1, ?10, ?11, ?12)",
+        params![
+            version_id,
+            song_id,
+            dest_relative_path,
+            original_name,
+            ext,
+            bitrate,
+            sample_rate,
+            duration,
+            file_size,
+            is_primary,
+            file_md5,
+            bit_depth
+        ]
+    ))?;
+    
+    Ok(AudioVersion {
+        id: version_id,
+        song_id,
+        filepath: dest_relative_path,
+        original_name,
+        format: Some(ext),
+        bitrate,
+        sample_rate,
+        duration,
+        file_size,
+        is_enabled: true,
+        is_primary: is_primary != 0,
+        md5: Some(file_md5),
+        bit_depth,
+    })
 }
 
 

@@ -11,6 +11,8 @@ interface AudioVersion {
   is_primary: boolean;
   is_enabled: boolean;
   md5?: string;
+  bit_depth?: number;
+  sample_rate?: number;
 }
 
 interface Tag {
@@ -50,6 +52,7 @@ interface DetailPaneProps {
   onToggleVersionStatus: (versionId: string, active: boolean) => void;
   onExportVersion: (versionId: string) => void;
   onDeleteVersion: (versionId: string) => void;
+  onImportVersionForSong: (songId: string) => void;
 }
 
 export default function DetailPane({
@@ -68,6 +71,7 @@ export default function DetailPane({
   onToggleVersionStatus,
   onExportVersion,
   onDeleteVersion,
+  onImportVersionForSong,
 }: DetailPaneProps) {
   const formatTime = (secs: number) => {
     if (isNaN(secs)) return "0:00";
@@ -118,13 +122,34 @@ export default function DetailPane({
             {/* 1. 音频版本控制 */}
             {activeTab === "versions" && (
               <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                <button 
+                  className="import-btn" 
+                  style={{ 
+                    width: "100%", 
+                    display: "flex", 
+                    gap: "8px", 
+                    justifyContent: "center", 
+                    alignItems: "center",
+                    marginBottom: "8px",
+                    background: "var(--accent-glow)"
+                  }} 
+                  onClick={() => onImportVersionForSong(activeSong.id)}
+                >
+                  <Music size={14} /> 添加关联音频文件
+                </button>
+                
                 {activeSong.versions.map(v => (
                   <div key={v.id} className="version-item">
                     <div className="version-row">
                       <div className="version-meta">
                         <span className="version-filename" title={v.original_name}>{v.original_name}</span>
                         <span className="version-specs">
-                          {v.format.toUpperCase()} · {v.bitrate ? `${Math.round(v.bitrate / 1000)}kbps` : "未知码率"} · {v.file_size ? `${(v.file_size / 1024 / 1024).toFixed(2)} MB` : ""} · {formatTime(v.duration || 0)}
+                          {[
+                            v.format ? v.format.toUpperCase() : "",
+                            v.sample_rate ? `${(v.sample_rate / 1000).toFixed(1).replace(".0", "")}k` : "",
+                            v.bit_depth ? `${v.bit_depth}b` : "",
+                            v.bitrate ? `${Math.round(v.bitrate / 1000)}kbps` : ""
+                          ].filter(Boolean).join(" · ")} · {v.file_size ? `${(v.file_size / 1024 / 1024).toFixed(2)} MB` : ""} · {formatTime(v.duration || 0)}
                         </span>
                       </div>
                       <button 

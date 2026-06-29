@@ -12,6 +12,8 @@ interface AudioVersion {
   is_primary: boolean;
   is_enabled: boolean;
   md5?: string;
+  bit_depth?: number;
+  sample_rate?: number;
 }
 
 interface Tag {
@@ -317,7 +319,13 @@ export default function SongTable({
             const isCurrentlyPlaying = playingSong?.id === song.id;
             const isSelected = selectedSongIds.includes(song.id);
             const primaryVersion = song.versions.find(v => v.is_primary);
-            const activeFormat = primaryVersion?.format.toUpperCase() || "未知";
+            let specs = "未知";
+            if (primaryVersion) {
+              const freq = primaryVersion.sample_rate ? `${(primaryVersion.sample_rate / 1000).toFixed(1).replace(".0", "")}k` : "";
+              const depth = primaryVersion.bit_depth ? `${primaryVersion.bit_depth}b` : "";
+              const rate = primaryVersion.bitrate ? `${Math.round(primaryVersion.bitrate / 1000)}kbps` : "";
+              specs = [freq, depth, rate].filter(Boolean).join("/") || "未知";
+            }
             
             return (
               <tr 
@@ -364,8 +372,8 @@ export default function SongTable({
                 </td>
                 <td style={{ textAlign: "center", fontWeight: 600 }}>{song.versions.length}</td>
                 <td style={{ textAlign: "center" }}>
-                  <span className={`format-badge ${activeFormat.toLowerCase()}`}>
-                    {activeFormat}
+                  <span className="format-badge specs" style={{ textTransform: "none", fontSize: "0.72rem", padding: "3px 8px" }}>
+                    {specs}
                   </span>
                 </td>
               </tr>
