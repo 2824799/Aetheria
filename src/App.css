@@ -118,6 +118,13 @@ body {
   width: 100vw;
 }
 
+.app-container-mobile {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+}
+
 /* Glass Panel Base */
 .glass-panel {
   background: var(--bg-panel);

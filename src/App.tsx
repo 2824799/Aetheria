@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import { X, Search, FolderPlus, Folder, FileAudio } from "lucide-react";
 
 import Sidebar from "./components/Sidebar";
@@ -13,6 +14,7 @@ import TagManagerModal from "./components/TagManagerModal";
 import SettingsModal from "./components/SettingsModal";
 import ImportPreviewModal from "./components/ImportPreviewModal";
 import MobileLayout from "./components/MobileLayout";
+import MobileFolderPickerModal from "./components/MobileFolderPickerModal";
 
 import "./App.css";
 
@@ -138,6 +140,11 @@ function App() {
   const [filesToPreview, setFilesToPreview] = useState<string[]>([]);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   
+  // 移动端专用选择器
+  const [isMobileFolderPickerOpen, setIsMobileFolderPickerOpen] = useState(false);
+  const [mobilePickerMode, setMobilePickerMode] = useState<"folder" | "file">("folder");
+  const [pickerCallback, setPickerCallback] = useState<((result: string | string[] | null) => void) | null>(null);
+  
   // 标签新建属性
   const [newTagName, setNewTagName] = useState("");
   const [newTagColor, setNewTagColor] = useState(PRESET_COLORS[0]);
@@ -155,6 +162,46 @@ function App() {
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, []);
+
+  const openFolderPicker = async (): Promise<string | null> => {
+    if (isMobile) {
+      return new Promise<string | null>((resolve) => {
+        setMobilePickerMode("folder");
+        setPickerCallback(() => (path: string | string[] | null) => {
+          setIsMobileFolderPickerOpen(false);
+          resolve(path as string | null);
+        });
+        setIsMobileFolderPickerOpen(true);
+      });
+    } else {
+      const selectedDir = await open({ directory: true, multiple: false });
+      if (Array.isArray(selectedDir)) return selectedDir[0] || null;
+      return selectedDir || null;
+    }
+  };
+
+  const openFilePicker = async (): Promise<string[]> => {
+    if (isMobile) {
+      return new Promise<string[]>((resolve) => {
+        setMobilePickerMode("file");
+        setPickerCallback(() => (paths: string | string[] | null) => {
+          setIsMobileFolderPickerOpen(false);
+          if (!paths) resolve([]);
+          else if (Array.isArray(paths)) resolve(paths);
+          else resolve([paths]);
+        });
+        setIsMobileFolderPickerOpen(true);
+      });
+    } else {
+      const selectedFiles = await open({ 
+        multiple: true,
+        filters: [{ name: "Audio", extensions: ["mp3", "wav", "flac", "m4a", "ogg", "aac"] }]
+      });
+      if (!selectedFiles) return [];
+      if (Array.isArray(selectedFiles)) return selectedFiles;
+      return [selectedFiles];
+    }
+  };
 
   // 播放器 DOM 引用
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -231,6 +278,9 @@ function App() {
           return;
         }
         
+        const path: string = await invoke("get_library_path");
+        setLibraryPath(path);
+
         loadLibrary().then(({ loadedSongs, libPath }) => {
           const savedSongId = localStorage.getItem("aetheria-playing-song-id");
           const savedVersionId = localStorage.getItem("aetheria-playing-version-id");
@@ -503,7 +553,7 @@ function App() {
     setIsImporting(true);
     setImportProgress("正在选择文件夹...");
     try {
-      const selectedDir = await invoke<string | null>("select_directory");
+      const selectedDir = await openFolderPicker();
       if (!selectedDir) {
         setIsImporting(false);
         return;
@@ -530,7 +580,7 @@ function App() {
     setIsImporting(true);
     setImportProgress("正在选择音频文件...");
     try {
-      const selectedFiles = await invoke<string[]>("select_audio_files");
+      const selectedFiles = await openFilePicker();
       if (selectedFiles.length === 0) {
         setIsImporting(false);
         return;
@@ -697,7 +747,7 @@ function App() {
     setIsImporting(true);
     setImportProgress("正在选择关联音频文件...");
     try {
-      const selectedFiles = await invoke<string[]>("select_audio_files");
+      const selectedFiles = await openFilePicker();
       if (selectedFiles.length === 0) {
         setIsImporting(false);
         return;
@@ -737,7 +787,12 @@ function App() {
 
   const handleExportVersion = async (versionId: string) => {
     try {
-      const destPath = await invoke<string | null>("select_save_file");
+      let ext = "mp3";
+      if (activeSong) {
+        const v = activeSong.versions.find(ver => ver.id === versionId);
+        if (v && v.format) ext = v.format;
+      }
+      const destPath = await save({ filters: [{ name: "Audio", extensions: [ext] }] });
       if (!destPath) return;
       await invoke("export_audio_file", { versionId, destPath });
       showToast("音频导出还原成功！", "success");
@@ -1081,7 +1136,7 @@ function App() {
   };
 
   return (
-    <div className="app-container">
+    <div className={isMobile ? "app-container-mobile" : "app-container"}>
       <div className="ambient-glow glow-1"></div>
       <div className="ambient-glow glow-2"></div>
 
@@ -1312,6 +1367,14 @@ function App() {
         onResetLibrary={handleResetLibrary}
       />
 
+      <MobileFolderPickerModal 
+        isOpen={isMobileFolderPickerOpen}
+        onClose={() => pickerCallback?.(null)}
+        onSelect={(result) => pickerCallback?.(result)}
+        mode={mobilePickerMode}
+        multiple={true}
+      />
+
       {isImporting && (
         <div className="loader-overlay">
           <div className="spinner"></div>
@@ -1344,7 +1407,7 @@ function App() {
             <button
               onClick={async () => {
                 try {
-                  const selectedPath = await invoke<string | null>("select_directory");
+                  const selectedPath = await openFolderPicker();
                   if (selectedPath) {
                     await invoke("initialize_library_path", { path: selectedPath });
                     setNeedsInit(false);

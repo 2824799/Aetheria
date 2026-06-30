@@ -7,21 +7,44 @@ mod commands;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            if let Some(path) = db::load_library_path(app.handle()) {
+            #[cfg(any(target_os = "android", target_os = "ios"))]
+            {
+                let path = db::load_library_path(app.handle()).unwrap_or_else(|| {
+                    let default_path = std::path::PathBuf::from("/storage/emulated/0/Android/data/com.aetheria.app/files/library");
+                    std::fs::create_dir_all(&default_path).ok();
+                    db::save_library_path(app.handle(), default_path.clone()).ok();
+                    default_path
+                });
                 db::set_library_dir(path.clone());
                 if let Err(e) = db::init_db() {
                     eprintln!("Failed to init DB during setup: {}", e);
                 } else {
                     let files_dir = db::get_files_dir();
-                    if let Err(e) = app.asset_protocol_scope().allow_directory(&files_dir, true) {
-                        eprintln!("Failed to allow asset directory: {}", e);
+                    let _ = app.asset_protocol_scope().allow_directory(&files_dir, true);
+                }
+            }
+
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            {
+                if let Some(path) = db::load_library_path(app.handle()) {
+                    db::set_library_dir(path.clone());
+                    if let Err(e) = db::init_db() {
+                        eprintln!("Failed to init DB during setup: {}", e);
+                    } else {
+                        let files_dir = db::get_files_dir();
+                        if let Err(e) = app.asset_protocol_scope().allow_directory(&files_dir, true) {
+                            eprintln!("Failed to allow asset directory: {}", e);
+                        }
                     }
                 }
             }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::list_directories,
+            commands::list_contents,
             commands::is_library_initialized,
             commands::initialize_library_path,
             commands::get_songs,

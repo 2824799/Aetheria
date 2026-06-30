@@ -50,12 +50,14 @@ pub struct Playlist {
     pub created_at: String,
 }
 
-use std::sync::OnceLock;
+use std::sync::RwLock;
 
-static LIBRARY_DIR: OnceLock<PathBuf> = OnceLock::new();
+static LIBRARY_DIR: RwLock<Option<PathBuf>> = RwLock::new(None);
 
 pub fn set_library_dir(path: PathBuf) {
-    let _ = LIBRARY_DIR.set(path);
+    if let Ok(mut dir) = LIBRARY_DIR.write() {
+        *dir = Some(path);
+    }
 }
 
 pub fn get_config_path(app_handle: &tauri::AppHandle) -> PathBuf {
@@ -94,8 +96,15 @@ pub fn save_library_path(app_handle: &tauri::AppHandle, path: PathBuf) -> Result
 
 // 获取库的根路径
 pub fn get_library_dir() -> PathBuf {
-    if let Some(path) = LIBRARY_DIR.get() {
-        path.clone()
+    let mut custom_path = None;
+    if let Ok(dir) = LIBRARY_DIR.read() {
+        if let Some(path) = &*dir {
+            custom_path = Some(path.clone());
+        }
+    }
+    
+    if let Some(path) = custom_path {
+        path
     } else {
         #[cfg(debug_assertions)]
         {
@@ -135,7 +144,21 @@ pub fn init_storage() -> std::io::Result<()> {
 // 建立 SQLite 连接
 pub fn establish_connection() -> Result<Connection> {
     let db_path = get_library_dir().join("database.db");
+    
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    let conn = {
+        let db_url = format!("file://{}?nolock=1", db_path.display());
+        Connection::open_with_flags(
+            db_url,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
+                | rusqlite::OpenFlags::SQLITE_OPEN_CREATE
+                | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+        )?
+    };
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     let conn = Connection::open(db_path)?;
+
     conn.execute("PRAGMA foreign_keys = ON;", [])?;
     Ok(conn)
 }

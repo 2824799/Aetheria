@@ -17,6 +17,72 @@ macro_rules! err_str {
     };
 }
 
+#[derive(Serialize)]
+pub struct DirEntry {
+    pub name: String,
+    pub path: String,
+    pub is_dir: bool,
+}
+
+#[tauri::command]
+pub fn list_directories(path: String) -> Result<Vec<DirEntry>, String> {
+    let mut entries = Vec::new();
+    let dir = std::fs::read_dir(path).map_err(|e| e.to_string())?;
+    for entry in dir {
+        if let Ok(entry) = entry {
+            if let Ok(file_type) = entry.file_type() {
+                if file_type.is_dir() {
+                    entries.push(DirEntry {
+                        name: entry.file_name().to_string_lossy().to_string(),
+                        path: entry.path().to_string_lossy().to_string(),
+                        is_dir: true,
+                    });
+                }
+            }
+        }
+    }
+    entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    Ok(entries)
+}
+
+#[tauri::command]
+pub fn list_contents(path: String) -> Result<Vec<DirEntry>, String> {
+    let mut entries = Vec::new();
+    let dir = std::fs::read_dir(path).map_err(|e| e.to_string())?;
+    for entry in dir {
+        if let Ok(entry) = entry {
+            if let Ok(file_type) = entry.file_type() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                let path = entry.path().to_string_lossy().to_string();
+                let is_dir = file_type.is_dir();
+                
+                if !is_dir {
+                    let ext = std::path::Path::new(&path).extension().unwrap_or_default().to_string_lossy().to_lowercase();
+                    if !["mp3", "wav", "flac", "m4a", "ogg", "aac"].contains(&ext.as_str()) {
+                        continue;
+                    }
+                }
+                
+                entries.push(DirEntry {
+                    name,
+                    path,
+                    is_dir,
+                });
+            }
+        }
+    }
+    entries.sort_by(|a, b| {
+        if a.is_dir && !b.is_dir {
+            std::cmp::Ordering::Less
+        } else if !a.is_dir && b.is_dir {
+            std::cmp::Ordering::Greater
+        } else {
+            a.name.to_lowercase().cmp(&b.name.to_lowercase())
+        }
+    });
+    Ok(entries)
+}
+
 #[tauri::command]
 pub fn is_library_initialized(app_handle: tauri::AppHandle) -> bool {
     db::load_library_path(&app_handle).is_some()
@@ -652,24 +718,24 @@ pub fn get_playlist_songs(playlist_id: String) -> Result<Vec<String>, String> {
     Ok(song_ids)
 }
 
-fn scan_directory(dir: &Path, files: &mut Vec<std::path::PathBuf>) -> std::io::Result<()> {
+fn scan_directory(dir: &Path, files: &mut Vec<std::path::PathBuf>) {
     if dir.is_dir() {
-        for entry in fs::read_dir(dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.is_dir() {
-                scan_directory(&path, files)?;
-            } else if path.is_file() {
-                if let Some(ext) = path.extension() {
-                    let ext_str = ext.to_string_lossy().to_lowercase();
-                    if ["mp3", "wav", "flac", "m4a", "ogg", "aac"].contains(&ext_str.as_str()) {
-                        files.push(path);
+        if let Ok(entries) = fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    scan_directory(&path, files);
+                } else if path.is_file() {
+                    if let Some(ext) = path.extension() {
+                        let ext_str = ext.to_string_lossy().to_lowercase();
+                        if ["mp3", "wav", "flac", "m4a", "ogg", "aac"].contains(&ext_str.as_str()) {
+                            files.push(path);
+                        }
                     }
                 }
             }
         }
     }
-    Ok(())
 }
 
 #[tauri::command]
@@ -680,7 +746,7 @@ pub fn import_audio_files(dir_path: String) -> Result<i32, String> {
     }
 
     let mut files = Vec::new();
-    scan_directory(path, &mut files).map_err(|e| e.to_string())?;
+    scan_directory(path, &mut files);
 
     let mut import_count = 0;
     for file in files {
@@ -1100,7 +1166,7 @@ pub fn scan_directory_for_preview(dir_path: String) -> Result<Vec<String>, Strin
         return Err("Not a directory".to_string());
     }
     let mut files = Vec::new();
-    scan_directory(path, &mut files).map_err(|e| e.to_string())?;
+    scan_directory(path, &mut files);
     let list = files.into_iter().map(|f| f.to_string_lossy().to_string()).collect();
     Ok(list)
 }
