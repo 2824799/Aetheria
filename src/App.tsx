@@ -689,7 +689,7 @@ function App() {
 
   const handleBindTag = async (songId: string, tagId: number) => {
     try {
-      await invoke("tag_song", { songId, tagId });
+      await invoke("tag_song", { songId, tagId, bind: true });
       const { loadedSongs: freshSongs } = await loadLibrary();
       const updated = freshSongs.find(s => s.id === songId);
       if (updated) {
@@ -707,7 +707,7 @@ function App() {
 
   const handleUnbindTag = async (songId: string, tagId: number) => {
     try {
-      await invoke("untag_song", { songId, tagId });
+      await invoke("tag_song", { songId, tagId, bind: false });
       const { loadedSongs: freshSongs } = await loadLibrary();
       const updated = freshSongs.find(s => s.id === songId);
       if (updated) {
