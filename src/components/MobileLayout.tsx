@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { 
   Play, Pause, SkipBack, SkipForward, Music, Settings, Tags, FolderPlus, 
-  ChevronDown, Volume2, Repeat, Shuffle, Plus, Trash2, Download 
+  ChevronDown, Volume2, Repeat, Shuffle, Plus, Trash2, Download, Menu, MoreHorizontal
 } from "lucide-react";
 
 interface AudioVersion {
@@ -129,8 +129,9 @@ export default function MobileLayout({
   onImportVersionForSong,
   onUpdateMetadata,
 }: MobileLayoutProps) {
-  // 控制移动端播放详情面板是否全屏展开
   const [isPlayerExpanded, setIsPlayerExpanded] = useState(false);
+  const [isSongDetailOpen, setIsSongDetailOpen] = useState(false);
+  const [isPlaylistDrawerOpen, setIsPlaylistDrawerOpen] = useState(false);
   const [mobileTab, setMobileTab] = useState<"versions" | "tags" | "lyrics">("versions");
   
   // 详情面板的可编辑状态
@@ -168,35 +169,17 @@ export default function MobileLayout({
     <div className="mobile-layout" style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden", background: "var(--bg-main)", color: "var(--text)" }}>
       
       {/* 顶部标题与快速控制 */}
-      <div style={{ padding: "16px 16px 8px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid var(--border-light)" }}>
-        <h1 style={{ fontSize: "1.3rem", fontWeight: "bold", background: "linear-gradient(135deg, var(--accent), #f59e0b)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
-          Aetheria
-        </h1>
+      <div style={{ padding: "16px 16px 8px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid var(--border-light)", position: "relative" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          <button className="ctrl-btn" onClick={() => setIsPlaylistDrawerOpen(true)} title="歌单"><Menu size={22} /></button>
+          <h1 style={{ fontSize: "1.3rem", fontWeight: "bold", background: "linear-gradient(135deg, var(--accent), #f59e0b)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+            Aetheria
+          </h1>
+        </div>
         <div style={{ display: "flex", gap: "10px" }}>
           <button className="ctrl-btn" onClick={onOpenTagManager} title="标签管理"><Tags size={20} /></button>
           <button className="ctrl-btn" onClick={onOpenSettings} title="设置"><Settings size={20} /></button>
         </div>
-      </div>
-
-      {/* 横向滚动歌单选择器 */}
-      <div style={{ display: "flex", gap: "8px", overflowX: "auto", padding: "8px 16px", whiteSpace: "nowrap" }} className="no-scrollbar">
-        <button 
-          className={`tag-pill ${activePlaylistId === null ? "active" : ""}`}
-          style={{ padding: "6px 16px", borderRadius: "16px", background: activePlaylistId === null ? "var(--accent)" : "var(--bg-panel)", color: activePlaylistId === null ? "#fff" : "var(--text)", border: "none", fontSize: "0.85rem", cursor: "pointer" }}
-          onClick={() => onSelectPlaylist(null)}
-        >
-          全部音乐 ({songs.length})
-        </button>
-        {playlists.map(pl => (
-          <button 
-            key={pl.id}
-            className={`tag-pill ${activePlaylistId === pl.id ? "active" : ""}`}
-            style={{ padding: "6px 16px", borderRadius: "16px", background: activePlaylistId === pl.id ? "var(--accent)" : "var(--bg-panel)", color: activePlaylistId === pl.id ? "#fff" : "var(--text)", border: "none", fontSize: "0.85rem", cursor: "pointer" }}
-            onClick={() => onSelectPlaylist(pl.id)}
-          >
-            {pl.name}
-          </button>
-        ))}
       </div>
 
       {/* 搜索栏 */}
@@ -231,8 +214,7 @@ export default function MobileLayout({
           return (
             <div 
               key={song.id}
-              onClick={() => onSelectSong(song)}
-              onDoubleClick={() => onPlaySong(song)}
+              onClick={() => { onSelectSong(song); onPlaySong(song); }}
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -249,25 +231,30 @@ export default function MobileLayout({
                 <span style={{ fontWeight: 600, fontSize: "0.95rem", color: isCurrentlyPlaying ? "var(--accent)" : "var(--text)", textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
                   {song.title}
                 </span>
-                <span style={{ fontSize: "0.78rem", color: "var(--text-sub)", textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
-                  {song.artist || "未知歌手"}
-                </span>
+                <div style={{ display: "flex", alignItems: "center", gap: "6px", textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
+                  <span style={{ fontSize: "0.78rem", color: "var(--text-sub)" }}>
+                    {song.artist || "未知歌手"}
+                  </span>
+                  <span style={{ fontSize: "0.68rem", padding: "1px 4px", background: "var(--border)", borderRadius: "4px", color: "var(--text)" }}>
+                    {formatText}
+                  </span>
+                  {song.tags.slice(0, 2).map(t => (
+                    <span key={t.id} style={{ fontSize: "0.68rem", color: t.color }}>#{t.name}</span>
+                  ))}
+                </div>
               </div>
 
               <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                <span className="format-badge" style={{ fontSize: "0.68rem", padding: "2px 6px" }}>
-                  {formatText}
-                </span>
                 <button 
                   className="ctrl-btn" 
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (isCurrentlyPlaying) onPlayPause();
-                    else onPlaySong(song);
+                    onSelectSong(song);
+                    setIsSongDetailOpen(true);
                   }}
-                  style={{ color: "var(--accent)" }}
+                  style={{ color: "var(--text-muted)" }}
                 >
-                  {isCurrentlyPlaying && isPlaying ? <Pause size={18} /> : <Play size={18} />}
+                  <MoreHorizontal size={20} />
                 </button>
               </div>
             </div>
@@ -325,6 +312,187 @@ export default function MobileLayout({
             <button className="ctrl-btn" onClick={onNext}>
               <SkipForward size={20} />
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* 侧滑歌单抽屉 (Playlist Drawer) */}
+      {isPlaylistDrawerOpen && (
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 110, display: "flex" }}>
+          <div style={{ flex: 1, background: "rgba(0,0,0,0.5)" }} onClick={() => setIsPlaylistDrawerOpen(false)} />
+          <div style={{ width: "260px", background: "var(--bg-panel)", height: "100%", boxShadow: "-4px 0 20px rgba(0,0,0,0.2)", display: "flex", flexDirection: "column", padding: "16px", animation: "slideRight 0.3s cubic-bezier(0.2, 0.8, 0.2, 1)" }}>
+            <h2 style={{ fontSize: "1.2rem", fontWeight: "bold", marginBottom: "20px" }}>我的歌单</h2>
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px", flex: 1, overflowY: "auto" }}>
+              <div 
+                onClick={() => { onSelectPlaylist(null); setIsPlaylistDrawerOpen(false); }}
+                style={{ padding: "12px", borderRadius: "8px", background: activePlaylistId === null ? "var(--bg-hover)" : "transparent", color: activePlaylistId === null ? "var(--accent)" : "var(--text)", fontWeight: activePlaylistId === null ? 600 : 400, cursor: "pointer", display: "flex", justifyContent: "space-between" }}
+              >
+                <span>全部音乐</span>
+                <span style={{ color: "var(--text-muted)" }}>{songs.length}</span>
+              </div>
+              {playlists.map(pl => (
+                <div 
+                  key={pl.id}
+                  onClick={() => { onSelectPlaylist(pl.id); setIsPlaylistDrawerOpen(false); }}
+                  style={{ padding: "12px", borderRadius: "8px", background: activePlaylistId === pl.id ? "var(--bg-hover)" : "transparent", color: activePlaylistId === pl.id ? "var(--accent)" : "var(--text)", fontWeight: activePlaylistId === pl.id ? 600 : 400, cursor: "pointer" }}
+                >
+                  {pl.name}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 歌曲详情抽屉 (Song Detail Overlay) */}
+      {isSongDetailOpen && activeSong && (
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "var(--bg-main)", zIndex: 100, display: "flex", flexDirection: "column", animation: "slideUp 0.35s cubic-bezier(0.2, 0.8, 0.2, 1)" }}>
+          
+          <div style={{ display: "flex", justifyContent: "space-between", padding: "16px", alignItems: "center", borderBottom: "1px solid var(--border-light)" }}>
+            <button className="ctrl-btn" onClick={() => setIsSongDetailOpen(false)}><ChevronDown size={28} /></button>
+            <span style={{ fontSize: "0.95rem", fontWeight: 600, color: "var(--text-sub)" }}>歌曲详情</span>
+            <div style={{ width: 28 }} />
+          </div>
+
+          {/* 动态封面发光组件 */}
+          <div style={{ flex: 1.2, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "10px 24px" }}>
+            <div 
+              style={{
+                width: "200px",
+                height: "200px",
+                borderRadius: "20px",
+                background: "var(--accent-glow)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "var(--accent)",
+                position: "relative",
+                boxShadow: "0 20px 50px var(--shadow)"
+              }}
+            >
+              <div 
+                style={{
+                  position: "absolute",
+                  top: 0, right: 0, bottom: 0, left: 0,
+                  borderRadius: "20px",
+                  background: "radial-gradient(circle, var(--accent) 0%, transparent 70%)",
+                  opacity: 0.15,
+                  filter: "blur(20px)"
+                }}
+              />
+              <Music size={80} style={{ opacity: 0.8 }} />
+            </div>
+
+            {/* 可编辑歌曲与歌手标题 */}
+            <input 
+              type="text" 
+              value={editTitle}
+              onChange={e => setEditTitle(e.target.value)}
+              onBlur={handleSaveMetadata}
+              onKeyDown={e => { if (e.key === "Enter") handleSaveMetadata(); }}
+              style={{ width: "85%", textAlign: "center", fontSize: "1.2rem", fontWeight: "bold", background: "transparent", border: "none", borderBottom: "1px dashed transparent", outline: "none", color: "var(--text)", marginTop: "24px" }}
+            />
+            <input 
+              type="text" 
+              value={editArtist}
+              onChange={e => setEditArtist(e.target.value)}
+              onBlur={handleSaveMetadata}
+              onKeyDown={e => { if (e.key === "Enter") handleSaveMetadata(); }}
+              style={{ width: "85%", textAlign: "center", fontSize: "0.85rem", background: "transparent", border: "none", borderBottom: "1px dashed transparent", outline: "none", color: "var(--text-sub)", marginTop: "6px" }}
+            />
+          </div>
+
+          {/* 三格详情面板选项卡 */}
+          <div style={{ display: "flex", borderBottom: "1px solid var(--border-light)", margin: "0 16px 8px 16px" }}>
+            <button 
+              onClick={() => setMobileTab("versions")} 
+              style={{ flex: 1, padding: "8px", background: "transparent", border: "none", borderBottom: mobileTab === "versions" ? "2px solid var(--accent)" : "none", color: mobileTab === "versions" ? "var(--accent)" : "var(--text-sub)", fontWeight: 600, fontSize: "0.8rem" }}
+            >
+              音频源 ({activeSong.versions.length})
+            </button>
+            <button 
+              onClick={() => setMobileTab("tags")} 
+              style={{ flex: 1, padding: "8px", background: "transparent", border: "none", borderBottom: mobileTab === "tags" ? "2px solid var(--accent)" : "none", color: mobileTab === "tags" ? "var(--accent)" : "var(--text-sub)", fontWeight: 600, fontSize: "0.8rem" }}
+            >
+              关联标签 ({activeSong.tags.length})
+            </button>
+            <button 
+              onClick={() => setMobileTab("lyrics")} 
+              style={{ flex: 1, padding: "8px", background: "transparent", border: "none", borderBottom: mobileTab === "lyrics" ? "2px solid var(--accent)" : "none", color: mobileTab === "lyrics" ? "var(--accent)" : "var(--text-sub)", fontWeight: 600, fontSize: "0.8rem" }}
+            >
+              滚动歌词
+            </button>
+          </div>
+
+          {/* 中间自适应面板切换区域 */}
+          <div style={{ flex: 1, overflowY: "auto", padding: "4px 16px" }}>
+            {mobileTab === "versions" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                <button 
+                  className="import-btn" 
+                  style={{ width: "100%", padding: "8px", display: "flex", gap: "6px", justifyContent: "center", alignItems: "center", fontSize: "0.85rem" }} 
+                  onClick={() => onImportVersionForSong(activeSong.id)}
+                >
+                  <Plus size={16} /> 绑定其他音轨文件
+                </button>
+                {activeSong.versions.map(v => (
+                  <div key={v.id} style={{ padding: "8px", background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: "8px", display: "flex", flexDirection: "column", gap: "4px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span style={{ fontSize: "0.75rem", fontWeight: 600, textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap", width: "70%" }}>
+                        {v.original_name}
+                      </span>
+                      <div style={{ display: "flex", gap: "6px" }}>
+                        <button className="ctrl-btn-xs" style={{ color: "#ef4444" }} onClick={() => onDeleteVersion(v.id)}><Trash2 size={12} /></button>
+                        <button className="ctrl-btn-xs" onClick={() => onExportVersion(v.id)}><Download size={12} /></button>
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: "10px", alignItems: "center", marginTop: "2px" }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "0.7rem", color: "var(--text-sub)" }}>
+                        <input type="checkbox" checked={v.is_enabled} onChange={(e) => onToggleVersionStatus(v.id, e.target.checked)} />
+                        启用
+                      </label>
+                      <label style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "0.7rem", color: "var(--text-sub)" }}>
+                        <input type="radio" name="mobile-primary" checked={v.is_primary} disabled={!v.is_enabled} onChange={() => onSetPrimaryVersion(v.id)} />
+                        设为主音源
+                      </label>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {mobileTab === "tags" && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                {allTags.map(tag => {
+                  const isBound = activeSong.tags.some(t => t.id === tag.id);
+                  return (
+                    <button
+                      key={tag.id}
+                      onClick={() => isBound ? onUnbindTag(activeSong.id, tag.id) : onBindTag(activeSong.id, tag.id)}
+                      style={{
+                        padding: "6px 12px", borderRadius: "16px", fontSize: "0.75rem", fontWeight: 600, border: "none",
+                        background: isBound ? tag.color : "var(--bg-panel)",
+                        color: isBound ? "#fff" : "var(--text-sub)",
+                        opacity: isBound ? 1 : 0.6,
+                        display: "flex", gap: "4px", alignItems: "center"
+                      }}
+                    >
+                      <span>#{tag.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {mobileTab === "lyrics" && (
+              <div style={{ textAlign: "center", padding: "10px", color: "var(--text-sub)", fontSize: "0.85rem" }}>
+                {activeSong.lyrics ? (
+                  <pre style={{ fontFamily: "inherit", whiteSpace: "pre-wrap", lineHeight: 1.8 }}>
+                    {activeSong.lyrics}
+                  </pre>
+                ) : "暂无歌词"}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -425,15 +593,15 @@ export default function MobileLayout({
           </div>
 
           {/* 中间自适应面板切换区域 */}
-          <div style={{ flex: 1, overflowY: "auto", padding: "4px 16px", maxHeight: "180px" }}>
+          <div style={{ flex: 1, overflowY: "auto", padding: "4px 16px" }}>
             {mobileTab === "versions" && (
               <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                 <button 
                   className="import-btn" 
-                  style={{ width: "100%", padding: "6px", display: "flex", gap: "6px", justifyContent: "center", alignItems: "center", fontSize: "0.78rem" }} 
+                  style={{ width: "100%", padding: "8px", display: "flex", gap: "6px", justifyContent: "center", alignItems: "center", fontSize: "0.85rem" }} 
                   onClick={() => onImportVersionForSong(playingSong.id)}
                 >
-                  <Plus size={12} /> 绑定其他音轨文件
+                  <Plus size={16} /> 绑定其他音轨文件
                 </button>
                 {playingSong.versions.map(v => (
                   <div key={v.id} style={{ padding: "8px", background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: "8px", display: "flex", flexDirection: "column", gap: "4px" }}>

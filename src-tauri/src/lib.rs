@@ -8,16 +8,22 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            // 1. 初始化数据库及存储文件夹
-            db::init_db()?;
-
-            // 2. 动态允许前端通过 asset:// 协议读取托管音乐文件
-            let files_dir = db::get_files_dir();
-            app.asset_protocol_scope().allow_directory(&files_dir, true)?;
-
+            if let Some(path) = db::load_library_path(app.handle()) {
+                db::set_library_dir(path.clone());
+                if let Err(e) = db::init_db() {
+                    eprintln!("Failed to init DB during setup: {}", e);
+                } else {
+                    let files_dir = db::get_files_dir();
+                    if let Err(e) = app.asset_protocol_scope().allow_directory(&files_dir, true) {
+                        eprintln!("Failed to allow asset directory: {}", e);
+                    }
+                }
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::is_library_initialized,
+            commands::initialize_library_path,
             commands::get_songs,
             commands::import_song,
             commands::import_audio_files,

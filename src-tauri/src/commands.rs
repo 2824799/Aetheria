@@ -8,12 +8,33 @@ use lofty::tag::Accessor;
 
 use serde::{Deserialize, Serialize};
 use crate::db::{self, Song, AudioVersion, Tag};
+use tauri::Manager;
 
 // 错误处理辅助宏
 macro_rules! err_str {
     ($e:expr) => {
         $e.map_err(|err| err.to_string())
     };
+}
+
+#[tauri::command]
+pub fn is_library_initialized(app_handle: tauri::AppHandle) -> bool {
+    db::load_library_path(&app_handle).is_some()
+}
+
+#[tauri::command]
+pub fn initialize_library_path(app_handle: tauri::AppHandle, path: String) -> Result<(), String> {
+    let p = std::path::PathBuf::from(path);
+    db::save_library_path(&app_handle, p.clone())?;
+    db::set_library_dir(p);
+    
+    // 初始化数据库与文件夹
+    db::init_db().map_err(|e| e.to_string())?;
+    
+    // 配置协议安全目录
+    let files_dir = db::get_files_dir();
+    app_handle.asset_protocol_scope().allow_directory(&files_dir, true).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]

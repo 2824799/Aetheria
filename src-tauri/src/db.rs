@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use rusqlite::{params, Connection, Result};
 use serde::{Deserialize, Serialize};
+use tauri::Manager;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Tag {
@@ -49,20 +50,73 @@ pub struct Playlist {
     pub created_at: String,
 }
 
+use std::sync::OnceLock;
+
+static LIBRARY_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+pub fn set_library_dir(path: PathBuf) {
+    let _ = LIBRARY_DIR.set(path);
+}
+
+pub fn get_config_path(app_handle: &tauri::AppHandle) -> PathBuf {
+    app_handle.path().app_data_dir().expect("Failed to get app data dir").join("config.json")
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct AppConfig {
+    library_path: String,
+}
+
+pub fn load_library_path(app_handle: &tauri::AppHandle) -> Option<PathBuf> {
+    let config_path = get_config_path(app_handle);
+    if config_path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&config_path) {
+            if let Ok(config) = serde_json::from_str::<AppConfig>(&content) {
+                return Some(PathBuf::from(config.library_path));
+            }
+        }
+    }
+    None
+}
+
+pub fn save_library_path(app_handle: &tauri::AppHandle, path: PathBuf) -> Result<(), String> {
+    let config_path = get_config_path(app_handle);
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let config = AppConfig {
+        library_path: path.to_string_lossy().to_string(),
+    };
+    let content = serde_json::to_string(&config).map_err(|e| e.to_string())?;
+    std::fs::write(&config_path, content).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 // 获取库的根路径
 pub fn get_library_dir() -> PathBuf {
-    #[cfg(debug_assertions)]
-    {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .expect("Failed to get parent directory")
-            .join("library")
-    }
-    #[cfg(not(debug_assertions))]
-    {
-        let mut path = std::env::current_exe().expect("Failed to get current exe path");
-        path.pop();
-        path.join("library")
+    if let Some(path) = LIBRARY_DIR.get() {
+        path.clone()
+    } else {
+        #[cfg(debug_assertions)]
+        {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .expect("Failed to get parent directory")
+                .join("library")
+        }
+        #[cfg(not(debug_assertions))]
+        {
+            #[cfg(any(target_os = "android", target_os = "ios"))]
+            {
+                std::env::temp_dir().join("library")
+            }
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            {
+                let mut path = std::env::current_exe().expect("Failed to get current exe path");
+                path.pop();
+                path.join("library")
+            }
+        }
     }
 }
 

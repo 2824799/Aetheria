@@ -77,6 +77,7 @@ function App() {
   const [tags, setTags] = useState<Tag[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [libraryPath, setLibraryPath] = useState<string>("");
+  const [needsInit, setNeedsInit] = useState(false);
   
   // 当前活动歌单
   const [activePlaylistId, setActivePlaylistId] = useState<string | null>(() => {
@@ -166,9 +167,6 @@ function App() {
   const analyserRef = useRef<AnalyserNode | null>(null);
   const sourceRef = useRef<MediaElementAudioSourceNode | null>(null);
 
-  // 待恢复的播放进度时间 Ref (用于解决 HTML5 Audio src 赋值时立刻设置 currentTime 无效的 bug)
-  const pendingRestoreTimeRef = useRef<number | null>(null);
-
   // 缓存正在播放的歌曲与音源 Ref 以解决 React useEffect 监听器的闭包陷阱与同步更新竞赛 Bug
   const playingSongRef = useRef<Song | null>(null);
   const playingVersionRef = useRef<AudioVersion | null>(null);
@@ -224,57 +222,53 @@ function App() {
     }
   };
 
-  // 挂载时加载库，并恢复历史播放位置
   useEffect(() => {
-    loadLibrary().then(({ loadedSongs, libPath }) => {
-      // 恢复上次播放的歌曲及进度
-      const savedSongId = localStorage.getItem("aetheria-playing-song-id");
-      const savedVersionId = localStorage.getItem("aetheria-playing-version-id");
-      const savedTimeStr = localStorage.getItem("aetheria-current-time");
-      
-      if (savedSongId && savedVersionId && loadedSongs.length > 0) {
-        const song = loadedSongs.find(s => s.id === savedSongId);
-        if (song) {
-          const version = song.versions.find(v => v.id === savedVersionId);
-          if (version) {
-            changePlayingSong(song);
-            changePlayingVersion(version);
-            
-            if (audioRef.current) {
-              const normalizedPath = (libPath + "/" + version.filepath).replace(/\\/g, "/");
-              const assetUrl = convertFileSrc(normalizedPath);
-              audioRef.current.src = assetUrl;
-              audioRef.current.load();
-              
-              if (savedTimeStr) {
-                const savedTime = parseFloat(savedTimeStr);
-                if (!isNaN(savedTime)) {
-                  pendingRestoreTimeRef.current = savedTime;
-                  setCurrentTime(savedTime);
+    const initApp = async () => {
+      try {
+        const isInit = await invoke<boolean>("is_library_initialized");
+        if (!isInit) {
+          setNeedsInit(true);
+          return;
+        }
+        
+        loadLibrary().then(({ loadedSongs, libPath }) => {
+          const savedSongId = localStorage.getItem("aetheria-playing-song-id");
+          const savedVersionId = localStorage.getItem("aetheria-playing-version-id");
+          const savedTimeStr = localStorage.getItem("aetheria-current-time");
+          
+          if (savedSongId && savedVersionId && loadedSongs.length > 0) {
+            const song = loadedSongs.find(s => s.id === savedSongId);
+            if (song) {
+              const version = song.versions.find(v => v.id === savedVersionId);
+              if (version) {
+                changePlayingSong(song);
+                changePlayingVersion(version);
+                
+                if (audioRef.current) {
+                  audioRef.current.crossOrigin = "anonymous";
+                  const normalizedPath = (libPath + "/" + version.filepath).replace(/\\/g, "/");
+                  const assetUrl = convertFileSrc(normalizedPath);
+                  audioRef.current.src = assetUrl;
+                  audioRef.current.load();
+                  
+                  if (savedTimeStr) {
+                    const savedTime = parseFloat(savedTimeStr);
+                    if (!isNaN(savedTime)) {
+                      audioRef.current.currentTime = savedTime;
+                    }
+                  }
                 }
               }
             }
           }
-        }
+        });
+        fetchPlaylists();
+      } catch (err) {
+        console.error("初始化应用失败:", err);
       }
+    };
+    initApp();
 
-      // 恢复上次双击/单击打开的歌曲详情侧栏状态
-      const savedActiveSongId = localStorage.getItem("aetheria-active-song-id");
-      const savedIsDetailOpen = localStorage.getItem("aetheria-is-detail-open") === "true";
-      if (savedActiveSongId && loadedSongs.length > 0) {
-        const song = loadedSongs.find(s => s.id === savedActiveSongId);
-        if (song) {
-          setActiveSong(song);
-          if (savedIsDetailOpen) {
-            setIsDetailOpen(true);
-          }
-        }
-      }
-    });
-
-    fetchPlaylists();
-
-    // 禁用默认的浏览器右键菜单以提升客户端原生感
     const handleContextMenu = (e: MouseEvent) => {
       e.preventDefault();
     };
@@ -291,59 +285,38 @@ function App() {
     };
   }, []);
 
-  // 同步更新播放结束回调的最新引用到 Ref，避免事件监听闭包陈旧
+  const handleTimeUpdate = () => {
+    if (audioRef.current) {
+      setCurrentTime(audioRef.current.currentTime);
+      localStorage.setItem("aetheria-current-time", audioRef.current.currentTime.toString());
+    }
+  };
+
+  const handleLoadedMetadata = () => {
+    if (audioRef.current) {
+      if (playingVersionRef.current && playingVersionRef.current.duration) {
+        setDuration(playingVersionRef.current.duration);
+      } else {
+        setDuration(audioRef.current.duration);
+      }
+    }
+  };
+
   useEffect(() => {
     handleEndedRef.current = handleEnded;
   });
 
-  // 音频初始化与事件监听
-  useEffect(() => {
-    const audio = new Audio();
-    audio.crossOrigin = "anonymous";
-    audioRef.current = audio;
-    audio.volume = volume;
-
-    const onTimeUpdate = () => {
-      setCurrentTime(audio.currentTime);
-      localStorage.setItem("aetheria-current-time", audio.currentTime.toString());
-    };
-    const handleLoadedMetadata = () => {
+  const handleEnded = () => {
+    if (playMode === "single") {
       if (audioRef.current) {
-        // 优先信任数据库中由 lofty 解析的音频元数据时长，防止 HTML5 Audio 对 AAC/ADTS 等格式估算错误显示为 133 分钟等 Bug
-        if (playingVersionRef.current && playingVersionRef.current.duration) {
-          setDuration(playingVersionRef.current.duration);
-        } else {
-          setDuration(audioRef.current.duration);
-        }
-        
-        // 如果有挂起的还原进度
-        if (pendingRestoreTimeRef.current !== null) {
-          audioRef.current.currentTime = pendingRestoreTimeRef.current;
-          setCurrentTime(pendingRestoreTimeRef.current);
-          pendingRestoreTimeRef.current = null;
-        }
+        audioRef.current.currentTime = 0;
+        audioRef.current.play().catch(err => console.log(err));
       }
-    };
-    
-    const onEnded = () => {
-      if (handleEndedRef.current) {
-        handleEndedRef.current();
-      }
-    };
+    } else {
+      handleNext();
+    }
+  };
 
-    audio.addEventListener("timeupdate", onTimeUpdate);
-    audio.addEventListener("loadedmetadata", handleLoadedMetadata);
-    audio.addEventListener("ended", onEnded);
-
-    return () => {
-      audio.removeEventListener("timeupdate", onTimeUpdate);
-      audio.removeEventListener("loadedmetadata", handleLoadedMetadata);
-      audio.removeEventListener("ended", onEnded);
-      audio.pause();
-    };
-  }, []); // 仅挂载时初始化一次，避免死循环渲染
-
-  // 同步音量状态到播放器 DOM 并保存本地状态
   useEffect(() => {
     if (audioRef.current) {
       audioRef.current.volume = volume;
@@ -351,7 +324,6 @@ function App() {
     localStorage.setItem("aetheria-volume", volume.toString());
   }, [volume]);
 
-  // 监听歌单 ID 改变加载该歌单内的所有歌曲 ID 排列
   useEffect(() => {
     if (activePlaylistId) {
       localStorage.setItem("aetheria-active-playlist-id", activePlaylistId);
@@ -362,11 +334,9 @@ function App() {
       localStorage.removeItem("aetheria-active-playlist-id");
       setPlaylistSongIds([]);
     }
-    // 切换歌单时清空选中歌曲
     setSelectedSongIds([]);
   }, [activePlaylistId]);
 
-  // 监听并自动保存过滤与播放配置
   useEffect(() => {
     localStorage.setItem("aetheria-selected-tags", JSON.stringify(selectedTags));
   }, [selectedTags]);
@@ -403,7 +373,6 @@ function App() {
     }
 }, [clipboard]);
 
-  // 全局主题变化
   useEffect(() => {
     document.documentElement.className = "";
     document.documentElement.classList.add(`theme-${theme}`);
@@ -413,7 +382,6 @@ function App() {
     localStorage.setItem("aetheria-theme", theme);
   }, [theme]);
 
-  // 同步上次激活选中详情歌曲及侧边栏状态到本地
   useEffect(() => {
     if (activeSong) {
       localStorage.setItem("aetheria-active-song-id", activeSong.id);
@@ -426,7 +394,6 @@ function App() {
     localStorage.setItem("aetheria-is-detail-open", isDetailOpen ? "true" : "false");
   }, [isDetailOpen]);
 
-  // 解析并高亮滚动当前播放歌词
   const lyricsLines = useMemo(() => {
     if (playingSong && playingSong.lyrics) {
       return playingSong.lyrics.split("\n").map(l => l.trim()).filter(l => l.length > 0);
@@ -440,7 +407,6 @@ function App() {
     return Math.min(index, lyricsLines.length - 1);
   }, [currentTime, duration, lyricsLines]);
 
-  // 歌词行自动滚动进中央
   useEffect(() => {
     if (activeLineRef.current) {
       activeLineRef.current.scrollIntoView({
@@ -450,7 +416,6 @@ function App() {
     }
   }, [activeLyricsIndex]);
 
-  // 音频柱状图绘制逻辑
   useEffect(() => {
     if (!canvasRef.current) return;
     const canvas = canvasRef.current;
@@ -469,7 +434,6 @@ function App() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       
       if (!analyserRef.current || !isPlaying) {
-        // 静止时的波纹横线
         ctx.beginPath();
         ctx.strokeStyle = theme === "light" ? "rgba(37, 99, 235, 0.15)" : "rgba(99, 102, 241, 0.18)";
         ctx.lineWidth = 2;
@@ -514,7 +478,6 @@ function App() {
     };
   }, [isPlaying, theme]);
 
-  // 初始化 Web Audio API 上下文，处理安全策略下的动态激活
   const initAudioAnalyzer = () => {
     if (!audioRef.current || audioContextRef.current) return;
 
@@ -536,7 +499,6 @@ function App() {
     }
   };
 
-  // 1. 导入音频文件夹（递归扫描导入）
   const handleImportFolder = async () => {
     setIsImporting(true);
     setImportProgress("正在选择文件夹...");
@@ -564,7 +526,6 @@ function App() {
     }
   };
 
-  // 1.2 导入单个或多个音频文件
   const handleImportFiles = async () => {
     setIsImporting(true);
     setImportProgress("正在选择音频文件...");
@@ -584,7 +545,6 @@ function App() {
     }
   };
 
-  // 1.3 确认预览后批量导入
   const handleConfirmImport = async (songsList: { filepath: string; title: string; artist: string }[]) => {
     setIsPreviewOpen(false);
     setIsImporting(true);
@@ -623,7 +583,6 @@ function App() {
     }, 1500);
   };
 
-  // 2. 标签管理逻辑
   const handleCreateTag = async () => {
     if (!newTagName.trim()) return;
     try {
@@ -676,7 +635,6 @@ function App() {
     }
   };
 
-  // 3. 版本精细化控制逻辑
   const handleSetPrimaryVersion = async (versionId: string) => {
     if (!activeSong) return;
     const version = activeSong.versions.find(v => v.id === versionId);
@@ -764,7 +722,6 @@ function App() {
         showToast(errorMsg, "error");
       }
 
-      // 刷新数据并保持选中抽屉状态
       const { loadedSongs: freshSongs } = await loadLibrary();
       if (activeSong) {
         const updated = freshSongs.find(s => s.id === activeSong.id);
@@ -789,7 +746,6 @@ function App() {
     }
   };
 
-  // 4. 播放器核心触发事件
   const handlePlaySong = (song: Song) => {
     let targetVersion = song.versions.find(v => v.is_primary && v.is_enabled);
     if (!targetVersion) {
@@ -804,11 +760,9 @@ function App() {
   };
 
   const handlePlayVersion = async (song: Song, version: AudioVersion) => {
-    // 校验本地文件是否存在，防止已经被外部误删
     const exists = await invoke<boolean>("verify_audio_file", { filepath: version.filepath });
     if (!exists) {
       showToast(`本地音频文件已丢失或被外部删除！`, "error");
-      // 自动关闭该版本启用状态并更新界面
       try {
         await invoke("update_version_status", { versionId: version.id, active: false });
         loadLibrary();
@@ -826,6 +780,7 @@ function App() {
       
       if (audioRef.current) {
         audioRef.current.pause();
+        audioRef.current.crossOrigin = "anonymous";
         audioRef.current.src = assetUrl;
         audioRef.current.load();
         
@@ -844,7 +799,6 @@ function App() {
     }
   };
 
-  // 删除音频源版本
   const handleDeleteVersion = async (versionId: string) => {
     if (!activeSong) return;
     const version = activeSong.versions.find(v => v.id === versionId);
@@ -889,7 +843,6 @@ function App() {
     }
   };
 
-  // 批量彻底删除歌曲
   const handleDeleteSongs = async (songIds: string[]) => {
     const count = songIds.length;
     const confirmDel = confirm(`确定要永久删除选中的 ${count} 首歌曲及其关联的所有本地文件吗？此操作不可逆！`);
@@ -925,7 +878,6 @@ function App() {
     setSelectedSongIds([]);
   };
 
-  // 一键重置数据库与数据清理
   const handleResetLibrary = async () => {
     const confirm1 = confirm("⚠️ 警告：此操作将永久清空本地托管的全部音乐文件、歌单、标签配置及数据库记录！");
     if (!confirm1) return;
@@ -968,7 +920,6 @@ function App() {
     }
   };
 
-  // 5. 歌单合集底层指令封装
   const handleCreatePlaylist = async (name: string) => {
     try {
       await invoke("create_playlist", { name });
@@ -1052,18 +1003,15 @@ function App() {
     }
   };
 
-  // 歌单与标签组合过滤引擎
   const displaySongs = useMemo(() => {
     let list = songs;
     
-    // 如果当前选中了某歌单，首先按照歌单中保存的 sort_order 排列过滤
     if (activePlaylistId) {
       list = playlistSongIds
         .map(id => songs.find(s => s.id === id))
         .filter((s): s is Song => !!s);
     }
     
-    // 接着在列表基础上过滤搜索关键词和选中的多维标签
     return list.filter(song => {
       const matchesSearch = searchQuery === "" || 
         song.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -1117,17 +1065,6 @@ function App() {
     handlePlaySong(displaySongs[prevIndex]);
   };
 
-  const handleEnded = () => {
-    if (playMode === "single") {
-      if (audioRef.current) {
-        audioRef.current.currentTime = 0;
-        audioRef.current.play().catch(err => console.log(err));
-      }
-    } else {
-      handleNext();
-    }
-  };
-
   const handleSeek = (seekTime: number) => {
     if (audioRef.current) {
       audioRef.current.currentTime = seekTime;
@@ -1145,7 +1082,6 @@ function App() {
 
   return (
     <div className="app-container">
-      {/* 炫酷磨砂发光背景 */}
       <div className="ambient-glow glow-1"></div>
       <div className="ambient-glow glow-2"></div>
 
@@ -1191,7 +1127,6 @@ function App() {
         />
       ) : (
         <>
-          {/* 1. 左侧边栏 - 自定义解耦组件 */}
           <Sidebar 
             playlists={playlists}
             activePlaylistId={activePlaylistId}
@@ -1203,10 +1138,7 @@ function App() {
             onOpenSettings={() => setIsSettingsOpen(true)}
           />
 
-          {/* 中间主要功能区 */}
           <div className="glass-panel main-content">
-            
-            {/* 顶部居中搜索框 + 最右侧导入按钮 */}
             <div className="header-row" style={{ marginBottom: '12px' }}>
               <div className="search-container" style={{ width: '450px' }}>
                 <Search className="search-icon" size={18} />
@@ -1250,7 +1182,6 @@ function App() {
               </div>
             </div>
 
-            {/* 2. 标签多维条件过滤器 - 自定义解耦组件 */}
             <TagFilter 
               tags={tags}
               selectedTags={selectedTags}
@@ -1262,7 +1193,6 @@ function App() {
               onOpenTagManager={() => setIsTagManagerOpen(true)}
             />
 
-            {/* 3. 歌曲表格列表 - 支持拖拽多选与右键上下文 */}
             <SongTable 
               songs={displaySongs}
               activeSong={activeSong}
@@ -1286,12 +1216,10 @@ function App() {
               onPasteSongs={handlePasteSongs}
             />
 
-            {/* 点击详情外部遮罩层自动收起 */}
             {isDetailOpen && (
               <div className="drawer-overlay" onClick={() => setIsDetailOpen(false)} />
             )}
 
-            {/* 4. 侧滑详情抽屉 - 自定义解耦组件 */}
             <DetailPane 
               isOpen={isDetailOpen}
               onClose={() => setIsDetailOpen(false)}
@@ -1312,7 +1240,6 @@ function App() {
               onUpdateMetadata={handleUpdateSongMetadata}
             />
             
-            {/* 全屏滚动歌词浮层 */}
             {isLyricsOverlayOpen && playingSong && (
               <div className="lyrics-overlay">
                 <button className="lyrics-overlay-close" onClick={() => setIsLyricsOverlayOpen(false)}>
@@ -1340,7 +1267,6 @@ function App() {
             )}
           </div>
 
-          {/* 5. 底部播放器控制栏 - 自定义解耦组件 */}
           <PlayBar 
             canvasRef={canvasRef}
             playingSong={playingSong}
@@ -1362,7 +1288,6 @@ function App() {
         </>
       )}
 
-      {/* 6. 独立对话框与 Toast 提示 */}
       <TagManagerModal 
         isOpen={isTagManagerOpen}
         onClose={() => setIsTagManagerOpen(false)}
@@ -1395,6 +1320,51 @@ function App() {
       )}
 
       {toast && <Toast message={toast.message} type={toast.type} />}
+
+      <audio
+        ref={audioRef}
+        crossOrigin="anonymous"
+        onTimeUpdate={handleTimeUpdate}
+        onLoadedMetadata={handleLoadedMetadata}
+        onEnded={handleEnded}
+      />
+
+      {needsInit && (
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "var(--bg-main)", zIndex: 9999, display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", padding: "24px" }}>
+          <div style={{ maxWidth: "400px", width: "100%", background: "var(--bg-panel)", borderRadius: "16px", padding: "32px 24px", textAlign: "center", border: "1px solid var(--border)", boxShadow: "0 20px 40px rgba(0,0,0,0.4)" }}>
+            <div style={{ width: "80px", height: "80px", background: "linear-gradient(135deg, var(--accent), #f59e0b)", borderRadius: "50%", margin: "0 auto 24px auto", display: "flex", justifyContent: "center", alignItems: "center", color: "#fff" }}>
+              <FolderPlus size={40} />
+            </div>
+            <h2 style={{ fontSize: "1.5rem", fontWeight: "bold", marginBottom: "16px", background: "linear-gradient(135deg, var(--accent), #f59e0b)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+              欢迎使用 Aetheria
+            </h2>
+            <p style={{ color: "var(--text-muted)", fontSize: "0.95rem", marginBottom: "32px", lineHeight: 1.5 }}>
+              在开始之前，请选择一个本地文件夹作为您的音乐库数据库目录。我们将会在此文件夹中保存所有的数据。
+            </p>
+            <button
+              onClick={async () => {
+                try {
+                  const selectedPath = await invoke<string | null>("select_directory");
+                  if (selectedPath) {
+                    await invoke("initialize_library_path", { path: selectedPath });
+                    setNeedsInit(false);
+                    loadLibrary();
+                    fetchPlaylists();
+                    showToast("数据库初始化成功！");
+                  }
+                } catch (err) {
+                  showToast("初始化失败: " + err, "error");
+                }
+              }}
+              style={{ width: "100%", padding: "14px", background: "var(--accent)", color: "#fff", border: "none", borderRadius: "12px", fontSize: "1rem", fontWeight: "bold", cursor: "pointer", transition: "all 0.2s" }}
+              onMouseOver={e => e.currentTarget.style.transform = "scale(1.02)"}
+              onMouseOut={e => e.currentTarget.style.transform = "scale(1)"}
+            >
+              选择文件夹
+            </button>
+          </div>
+        </div>
+      )}
 
       <ImportPreviewModal 
         isOpen={isPreviewOpen}
