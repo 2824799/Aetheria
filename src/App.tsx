@@ -207,35 +207,15 @@ function App() {
     return files;
   };
 
-  const resolveAudioSource = async (normalizedPath: string, format: string): Promise<string> => {
-    if (isMobile) {
-      try {
-        const audioBuffer = await invoke<Uint8Array>("read_audio_file_bytes", { filepath: normalizedPath });
-        
-        let mimeType = "audio/mpeg";
-        const ext = format.toLowerCase();
-        if (ext === "flac") mimeType = "audio/flac";
-        else if (ext === "wav") mimeType = "audio/wav";
-        else if (ext === "m4a") mimeType = "audio/mp4";
-        else if (ext === "ogg") mimeType = "audio/ogg";
-        else if (ext === "aac") mimeType = "audio/aac";
-        
-        const blob = new Blob([audioBuffer], { type: mimeType });
-        const blobUrl = URL.createObjectURL(blob);
-        
-        if (currentBlobUrlRef.current) {
-          URL.revokeObjectURL(currentBlobUrlRef.current);
-        }
-        currentBlobUrlRef.current = blobUrl;
-        return blobUrl;
-      } catch (err) {
-        console.error("Failed to read audio file bytes:", err);
-        showToast("加载音频文件失败: " + err, "error");
-        return "";
-      }
-    } else {
-      return convertFileSrc(normalizedPath);
+  const resolveAudioSource = async (normalizedPath: string, _format: string): Promise<string> => {
+    // Use Tauri's built-in asset protocol for all platforms.
+    // This streams audio via HTTP Range requests — no need to load entire files into memory.
+    // On Android, this produces https://asset.localhost/<path> which the WebView can stream natively.
+    if (currentBlobUrlRef.current) {
+      URL.revokeObjectURL(currentBlobUrlRef.current);
+      currentBlobUrlRef.current = null;
     }
+    return convertFileSrc(normalizedPath);
   };
 
   // 播放器 DOM 引用
@@ -886,12 +866,7 @@ function App() {
           audioRef.current.crossOrigin = "anonymous";
         }
         
-        setImportProgress("正在加载音频数据...");
-        setIsImporting(true);
-        
         const audioUrl = await resolveAudioSource(normalizedPath, version.format);
-        setIsImporting(false);
-        
         if (!audioUrl) return;
         
         audioRef.current.src = audioUrl;
@@ -901,7 +876,18 @@ function App() {
         changePlayingVersion(version);
         setIsPlaying(true);
         
-        await audioRef.current.play();
+        const playWhenReady = () => {
+          if (audioRef.current) {
+            audioRef.current.play().catch(err => console.error("播放失败:", err));
+          }
+        };
+        
+        // If already enough data buffered, play immediately; otherwise wait for canplay
+        if (audioRef.current.readyState >= 2) {
+          playWhenReady();
+        } else {
+          audioRef.current.addEventListener("canplay", playWhenReady, { once: true });
+        }
         
         if (audioContextRef.current && audioContextRef.current.state === "suspended") {
           await audioContextRef.current.resume();
