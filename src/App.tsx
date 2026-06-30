@@ -210,7 +210,7 @@ function App() {
   const resolveAudioSource = async (normalizedPath: string, format: string): Promise<string> => {
     if (isMobile) {
       try {
-        const b64 = await invoke<string>("read_audio_file_base64", { filepath: normalizedPath });
+        const audioBuffer = await invoke<Uint8Array>("read_audio_file_bytes", { filepath: normalizedPath });
         
         let mimeType = "audio/mpeg";
         const ext = format.toLowerCase();
@@ -220,8 +220,7 @@ function App() {
         else if (ext === "ogg") mimeType = "audio/ogg";
         else if (ext === "aac") mimeType = "audio/aac";
         
-        const base64Response = await fetch(`data:${mimeType};base64,${b64}`);
-        const blob = await base64Response.blob();
+        const blob = new Blob([audioBuffer], { type: mimeType });
         const blobUrl = URL.createObjectURL(blob);
         
         if (currentBlobUrlRef.current) {
@@ -230,7 +229,7 @@ function App() {
         currentBlobUrlRef.current = blobUrl;
         return blobUrl;
       } catch (err) {
-        console.error("Failed to read audio file base64:", err);
+        console.error("Failed to read audio file bytes:", err);
         showToast("加载音频文件失败: " + err, "error");
         return "";
       }
@@ -567,7 +566,7 @@ function App() {
   }, [isPlaying, theme]);
 
   const initAudioAnalyzer = () => {
-    if (isMobile) return; // Disable analyser on mobile to prevent Android custom protocol CORS/locking issues
+    if (isMobile) return;
     if (!audioRef.current || audioContextRef.current) return;
 
     try {

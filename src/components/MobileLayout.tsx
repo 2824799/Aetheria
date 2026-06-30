@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
 import { 
   Play, Pause, SkipBack, SkipForward, Music, Settings, Tags, FolderPlus, 
-  ChevronDown, Volume2, Repeat, Shuffle, Plus, Trash2, Download, Menu, MoreHorizontal
+  ChevronDown, Volume2, Repeat, Shuffle, Plus, Trash2, Download, Menu, MoreHorizontal,
+  CheckSquare, Square
 } from "lucide-react";
 import TagFilter from "./TagFilter";
 
@@ -225,7 +226,7 @@ export default function MobileLayout({
       </div>
 
       {/* 标签折叠多维筛选面板 */}
-      <div style={{ padding: "4px 16px" }}>
+      <div style={{ padding: "8px 16px", margin: "4px 16px", background: "var(--bg-panel)", borderRadius: "12px", border: "1px solid var(--accent-glow)" }}>
         <TagFilter 
           tags={allTags}
           selectedTags={selectedTags}
@@ -515,25 +516,26 @@ export default function MobileLayout({
             )}
 
             {mobileTab === "tags" && (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "8px" }}>
                 {allTags.map(tag => {
                   const isBound = activeSong.tags.some(t => t.id === tag.id);
                   return (
-                    <button
+                    <div
                       key={tag.id}
                       onClick={() => isBound ? onUnbindTag(activeSong.id, tag.id) : onBindTag(activeSong.id, tag.id)}
                       style={{
-                        padding: "6px 12px", borderRadius: "16px", fontSize: "0.75rem", fontWeight: 600, border: "none",
-                        background: isBound ? tag.color : "var(--bg-panel)",
-                        color: isBound ? "#fff" : "var(--text-sub)",
-                        opacity: isBound ? 1 : 0.6,
-                        display: "flex", gap: "4px", alignItems: "center"
+                        padding: "10px", borderRadius: "8px", border: `1px solid ${isBound ? tag.color : "var(--border)"}`,
+                        display: "flex", justifyContent: "space-between", alignItems: "center",
+                        background: isBound ? `${tag.color}15` : "var(--bg-panel)",
+                        cursor: "pointer"
                       }}
                     >
-                      <span>#{tag.name}</span>
-                    </button>
+                      <span style={{ color: tag.color || "var(--text-main)", fontWeight: 600 }}>{tag.name}</span>
+                      {isBound ? <CheckSquare size={20} color={tag.color || "var(--accent)"} /> : <Square size={20} color="var(--text-sub)" />}
+                    </div>
                   );
                 })}
+                {allTags.length === 0 && <div style={{ color: "var(--text-sub)", textAlign: "center", marginTop: "10px" }}>暂无标签，请先添加</div>}
               </div>
             )}
 
@@ -683,17 +685,17 @@ export default function MobileLayout({
             )}
 
             {mobileTab === "tags" && (
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "8px" }}>
                 {allTags.map(t => {
                   const isBound = playingSong.tags.some(tag => tag.id === t.id);
                   return (
                     <div 
                       key={t.id} 
                       onClick={() => isBound ? onUnbindTag(playingSong.id, t.id) : onBindTag(playingSong.id, t.id)}
-                      style={{ padding: "6px 10px", borderRadius: "6px", background: "var(--bg-panel)", border: `1px solid ${isBound ? t.color : "var(--border)"}`, display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", fontSize: "0.75rem" }}
+                      style={{ padding: "10px", borderRadius: "8px", background: isBound ? `${t.color}15` : "var(--bg-panel)", border: `1px solid ${isBound ? t.color : "var(--border)"}`, display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", fontSize: "0.85rem" }}
                     >
                       <span style={{ color: t.color, fontWeight: 600 }}>{t.name}</span>
-                      <input type="checkbox" checked={isBound} readOnly />
+                      {isBound ? <CheckSquare size={20} color={t.color || "var(--accent)"} /> : <Square size={20} color="var(--text-sub)" />}
                     </div>
                   );
                 })}
