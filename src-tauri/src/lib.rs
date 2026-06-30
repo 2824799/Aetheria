@@ -78,7 +78,8 @@ pub fn run() {
             commands::preview_audio_metadata,
             commands::import_song_with_metadata,
             commands::update_song_metadata,
-            commands::scan_directory_for_preview
+            commands::scan_directory_for_preview,
+            commands::read_audio_file_bytes
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

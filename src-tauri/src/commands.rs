@@ -1171,4 +1171,10 @@ pub fn scan_directory_for_preview(dir_path: String) -> Result<Vec<String>, Strin
     Ok(list)
 }
 
+#[tauri::command]
+pub fn read_audio_file_bytes(filepath: String) -> Result<Vec<u8>, String> {
+    let path = Path::new(&filepath);
+    std::fs::read(path).map_err(|e| e.to_string())
+}
+
 

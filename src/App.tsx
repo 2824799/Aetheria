@@ -207,11 +207,44 @@ function App() {
     return files;
   };
 
+  const resolveAudioSource = async (normalizedPath: string, format: string): Promise<string> => {
+    if (isMobile) {
+      try {
+        const bytes = await invoke<number[]>("read_audio_file_bytes", { filepath: normalizedPath });
+        const arrayBuffer = new Uint8Array(bytes);
+        
+        let mimeType = "audio/mpeg";
+        const ext = format.toLowerCase();
+        if (ext === "flac") mimeType = "audio/flac";
+        else if (ext === "wav") mimeType = "audio/wav";
+        else if (ext === "m4a") mimeType = "audio/mp4";
+        else if (ext === "ogg") mimeType = "audio/ogg";
+        else if (ext === "aac") mimeType = "audio/aac";
+        
+        const blob = new Blob([arrayBuffer], { type: mimeType });
+        const blobUrl = URL.createObjectURL(blob);
+        
+        if (currentBlobUrlRef.current) {
+          URL.revokeObjectURL(currentBlobUrlRef.current);
+        }
+        currentBlobUrlRef.current = blobUrl;
+        return blobUrl;
+      } catch (err) {
+        console.error("Failed to read audio file bytes:", err);
+        showToast("加载音频文件失败: " + err, "error");
+        return "";
+      }
+    } else {
+      return convertFileSrc(normalizedPath);
+    }
+  };
+
   // 播放器 DOM 引用
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animationRef = useRef<number | null>(null);
   const activeLineRef = useRef<HTMLDivElement | null>(null);
+  const currentBlobUrlRef = useRef<string | null>(null);
   
   // Web Audio API 动效相关
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -299,20 +332,19 @@ function App() {
                 changePlayingVersion(version);
                 
                 if (audioRef.current) {
-                  if (!isMobile) {
-                    audioRef.current.crossOrigin = "anonymous";
-                  }
                   const normalizedPath = (libPath + "/" + version.filepath).replace(/\\/g, "/");
-                  const assetUrl = convertFileSrc(normalizedPath);
-                  audioRef.current.src = assetUrl;
-                  audioRef.current.load();
-                  
-                  if (savedTimeStr) {
-                    const savedTime = parseFloat(savedTimeStr);
-                    if (!isNaN(savedTime)) {
-                      audioRef.current.currentTime = savedTime;
+                  resolveAudioSource(normalizedPath, version.format).then(url => {
+                    if (url && audioRef.current) {
+                      audioRef.current.src = url;
+                      audioRef.current.load();
+                      if (savedTimeStr) {
+                        const savedTime = parseFloat(savedTimeStr);
+                        if (!isNaN(savedTime)) {
+                          audioRef.current.currentTime = savedTime;
+                        }
+                      }
                     }
-                  }
+                  });
                 }
               }
             }
@@ -838,14 +870,22 @@ function App() {
       initAudioAnalyzer();
       
       const normalizedPath = (libraryPath + "/" + version.filepath).replace(/\\/g, "/");
-      const assetUrl = convertFileSrc(normalizedPath);
       
       if (audioRef.current) {
         audioRef.current.pause();
         if (!isMobile) {
           audioRef.current.crossOrigin = "anonymous";
         }
-        audioRef.current.src = assetUrl;
+        
+        setImportProgress("正在加载音频数据...");
+        setIsImporting(true);
+        
+        const audioUrl = await resolveAudioSource(normalizedPath, version.format);
+        setIsImporting(false);
+        
+        if (!audioUrl) return;
+        
+        audioRef.current.src = audioUrl;
         audioRef.current.load();
         
         changePlayingSong(song);
