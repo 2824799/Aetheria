@@ -79,6 +79,7 @@ function App() {
   const [tags, setTags] = useState<Tag[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [libraryPath, setLibraryPath] = useState<string>("");
+  const [audioServerPort, setAudioServerPort] = useState<number>(0);
   const [needsInit, setNeedsInit] = useState(false);
   
   // 当前活动歌单
@@ -208,13 +209,16 @@ function App() {
   };
 
   const resolveAudioSource = async (normalizedPath: string, _format: string): Promise<string> => {
-    // Use Tauri's built-in asset protocol for all platforms.
-    // This streams audio via HTTP Range requests — no need to load entire files into memory.
-    // On Android, this produces https://asset.localhost/<path> which the WebView can stream natively.
     if (currentBlobUrlRef.current) {
       URL.revokeObjectURL(currentBlobUrlRef.current);
       currentBlobUrlRef.current = null;
     }
+    if (isMobile && audioServerPort > 0) {
+      // Use local HTTP server with proper Range request support for Android streaming
+      const encodedPath = encodeURIComponent(normalizedPath);
+      return `http://127.0.0.1:${audioServerPort}/audio?path=${encodedPath}`;
+    }
+    // Desktop: use Tauri's built-in asset protocol
     return convertFileSrc(normalizedPath);
   };
 
@@ -296,6 +300,12 @@ function App() {
         
         const path: string = await invoke("get_library_path");
         setLibraryPath(path);
+
+        // Fetch the local audio streaming server port (for Android)
+        try {
+          const port = await invoke<number>("get_audio_server_port");
+          if (port > 0) setAudioServerPort(port);
+        } catch (_) { /* Server not running on desktop, that's OK */ }
 
         loadLibrary().then(({ loadedSongs, libPath }) => {
           const savedSongId = localStorage.getItem("aetheria-playing-song-id");

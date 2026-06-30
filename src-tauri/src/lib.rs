@@ -2,6 +2,12 @@ use tauri::Manager;
 
 mod db;
 mod commands;
+mod audio_server;
+
+#[tauri::command]
+fn get_audio_server_port() -> u16 {
+    audio_server::get_port()
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -26,6 +32,8 @@ pub fn run() {
                     let files_dir = db::get_files_dir();
                     let _ = app.asset_protocol_scope().allow_directory(&files_dir, true);
                 }
+                // Start local HTTP audio streaming server for Android
+                audio_server::start();
             }
 
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -79,7 +87,8 @@ pub fn run() {
             commands::import_song_with_metadata,
             commands::update_song_metadata,
             commands::scan_directory_for_preview,
-            commands::read_audio_file_base64
+            commands::read_audio_file_base64,
+            get_audio_server_port
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
