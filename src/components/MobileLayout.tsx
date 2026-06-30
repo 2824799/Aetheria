@@ -91,6 +91,9 @@ interface MobileLayoutProps {
   onDeleteVersion: (versionId: string) => void;
   onImportVersionForSong: (songId: string) => void;
   onUpdateMetadata: (songId: string, title: string, artist: string) => void;
+  onAddSongsToPlaylist: (playlistId: string, songIds: string[]) => void;
+  onRemoveSongsFromPlaylist: (playlistId: string, songIds: string[]) => void;
+  onDeleteSongs: (songIds: string[]) => void;
 }
 
 export default function MobileLayout({
@@ -128,11 +131,15 @@ export default function MobileLayout({
   onDeleteVersion,
   onImportVersionForSong,
   onUpdateMetadata,
+  onAddSongsToPlaylist,
+  onRemoveSongsFromPlaylist,
+  onDeleteSongs,
 }: MobileLayoutProps) {
   const [isPlayerExpanded, setIsPlayerExpanded] = useState(false);
   const [isSongDetailOpen, setIsSongDetailOpen] = useState(false);
   const [isPlaylistDrawerOpen, setIsPlaylistDrawerOpen] = useState(false);
   const [mobileTab, setMobileTab] = useState<"versions" | "tags" | "lyrics">("versions");
+  const [contextMenuSong, setContextMenuSong] = useState<Song | null>(null);
   
   // 详情面板的可编辑状态
   const [editTitle, setEditTitle] = useState("");
@@ -166,7 +173,7 @@ export default function MobileLayout({
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
 
   return (
-    <div className="mobile-layout" style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden", background: "var(--bg-main)", color: "var(--text)" }}>
+    <div className="mobile-layout" style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden", background: "var(--bg-app)", color: "var(--text-main)" }}>
       
       {/* 顶部标题与快速控制 */}
       <div style={{ padding: "16px 16px 8px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid var(--border-light)", position: "relative" }}>
@@ -189,7 +196,7 @@ export default function MobileLayout({
           placeholder="搜索歌名、歌手或格式..." 
           value={searchQuery}
           onChange={e => setSearchQuery(e.target.value)}
-          style={{ width: "100%", padding: "10px 14px", borderRadius: "20px", border: "1px solid var(--border)", background: "var(--bg-panel)", color: "var(--text)", outline: "none", fontSize: "0.9rem" }}
+          style={{ width: "100%", padding: "10px 14px", borderRadius: "20px", border: "1px solid var(--border)", background: "var(--bg-panel)", color: "var(--text-main)", outline: "none", fontSize: "0.9rem" }}
         />
       </div>
 
@@ -228,16 +235,35 @@ export default function MobileLayout({
               }}
             >
               <div style={{ display: "flex", flexDirection: "column", gap: "2px", flex: 1, overflow: "hidden" }}>
-                <span style={{ fontWeight: 600, fontSize: "0.95rem", color: isCurrentlyPlaying ? "var(--accent)" : "var(--text)", textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
+                <span style={{ fontWeight: 600, fontSize: "0.95rem", color: isCurrentlyPlaying ? "var(--accent)" : "var(--text-main)", textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
                   {song.title}
                 </span>
                 <div style={{ display: "flex", alignItems: "center", gap: "6px", textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
                   <span style={{ fontSize: "0.78rem", color: "var(--text-sub)" }}>
                     {song.artist || "未知歌手"}
                   </span>
-                  <span style={{ fontSize: "0.68rem", padding: "1px 4px", background: "var(--border)", borderRadius: "4px", color: "var(--text)" }}>
+                  <span style={{ fontSize: "0.68rem", padding: "1px 4px", background: "var(--border)", borderRadius: "4px", color: "var(--text-main)" }}>
                     {formatText}
                   </span>
+                  {primary && (
+                    <>
+                      {primary.bit_depth && (
+                        <span style={{ fontSize: "0.68rem", padding: "1px 4px", background: "var(--border)", borderRadius: "4px", color: "var(--text-main)" }}>
+                          {primary.bit_depth}bit
+                        </span>
+                      )}
+                      {primary.sample_rate && (
+                        <span style={{ fontSize: "0.68rem", padding: "1px 4px", background: "var(--border)", borderRadius: "4px", color: "var(--text-main)" }}>
+                          {(primary.sample_rate / 1000).toFixed(primary.sample_rate % 1000 === 0 ? 0 : 1)}kHz
+                        </span>
+                      )}
+                      {primary.bitrate && (
+                        <span style={{ fontSize: "0.68rem", padding: "1px 4px", background: "var(--border)", borderRadius: "4px", color: "var(--text-main)" }}>
+                          {Math.round(primary.bitrate / 1000)}kbps
+                        </span>
+                      )}
+                    </>
+                  )}
                   {song.tags.slice(0, 2).map(t => (
                     <span key={t.id} style={{ fontSize: "0.68rem", color: t.color }}>#{t.name}</span>
                   ))}
@@ -249,8 +275,7 @@ export default function MobileLayout({
                   className="ctrl-btn" 
                   onClick={(e) => {
                     e.stopPropagation();
-                    onSelectSong(song);
-                    setIsSongDetailOpen(true);
+                    setContextMenuSong(song);
                   }}
                   style={{ color: "var(--text-muted)" }}
                 >
@@ -296,7 +321,7 @@ export default function MobileLayout({
               <Music size={18} />
             </div>
             <div style={{ display: "flex", flexDirection: "column", overflow: "hidden" }}>
-              <span style={{ fontSize: "0.88rem", fontWeight: 600, color: "var(--text)", textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
+              <span style={{ fontSize: "0.88rem", fontWeight: 600, color: "var(--text-main)", textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
                 {playingSong.title}
               </span>
               <span style={{ fontSize: "0.75rem", color: "var(--text-sub)", textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
@@ -316,16 +341,15 @@ export default function MobileLayout({
         </div>
       )}
 
-      {/* 侧滑歌单抽屉 (Playlist Drawer) */}
+      {/* 侧滑歌单抽屉 (Playlist Drawer) - 从左边滑出，且带背景模糊 */}
       {isPlaylistDrawerOpen && (
         <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 110, display: "flex" }}>
-          <div style={{ flex: 1, background: "rgba(0,0,0,0.5)" }} onClick={() => setIsPlaylistDrawerOpen(false)} />
-          <div style={{ width: "260px", background: "var(--bg-panel)", height: "100%", boxShadow: "-4px 0 20px rgba(0,0,0,0.2)", display: "flex", flexDirection: "column", padding: "16px", animation: "slideRight 0.3s cubic-bezier(0.2, 0.8, 0.2, 1)" }}>
+          <div style={{ width: "260px", background: "var(--bg-panel)", height: "100%", boxShadow: "4px 0 20px rgba(0,0,0,0.2)", display: "flex", flexDirection: "column", padding: "16px", animation: "slideLeft 0.3s cubic-bezier(0.2, 0.8, 0.2, 1)" }}>
             <h2 style={{ fontSize: "1.2rem", fontWeight: "bold", marginBottom: "20px" }}>我的歌单</h2>
             <div style={{ display: "flex", flexDirection: "column", gap: "10px", flex: 1, overflowY: "auto" }}>
               <div 
                 onClick={() => { onSelectPlaylist(null); setIsPlaylistDrawerOpen(false); }}
-                style={{ padding: "12px", borderRadius: "8px", background: activePlaylistId === null ? "var(--bg-hover)" : "transparent", color: activePlaylistId === null ? "var(--accent)" : "var(--text)", fontWeight: activePlaylistId === null ? 600 : 400, cursor: "pointer", display: "flex", justifyContent: "space-between" }}
+                style={{ padding: "12px", borderRadius: "8px", background: activePlaylistId === null ? "var(--bg-hover)" : "transparent", color: activePlaylistId === null ? "var(--accent)" : "var(--text-main)", fontWeight: activePlaylistId === null ? 600 : 400, cursor: "pointer", display: "flex", justifyContent: "space-between" }}
               >
                 <span>全部音乐</span>
                 <span style={{ color: "var(--text-muted)" }}>{songs.length}</span>
@@ -334,19 +358,20 @@ export default function MobileLayout({
                 <div 
                   key={pl.id}
                   onClick={() => { onSelectPlaylist(pl.id); setIsPlaylistDrawerOpen(false); }}
-                  style={{ padding: "12px", borderRadius: "8px", background: activePlaylistId === pl.id ? "var(--bg-hover)" : "transparent", color: activePlaylistId === pl.id ? "var(--accent)" : "var(--text)", fontWeight: activePlaylistId === pl.id ? 600 : 400, cursor: "pointer" }}
+                  style={{ padding: "12px", borderRadius: "8px", background: activePlaylistId === pl.id ? "var(--bg-hover)" : "transparent", color: activePlaylistId === pl.id ? "var(--accent)" : "var(--text-main)", fontWeight: activePlaylistId === pl.id ? 600 : 400, cursor: "pointer" }}
                 >
                   {pl.name}
                 </div>
               ))}
             </div>
           </div>
+          <div style={{ flex: 1, background: "rgba(0,0,0,0.4)", backdropFilter: "blur(8px)" }} onClick={() => setIsPlaylistDrawerOpen(false)} />
         </div>
       )}
 
       {/* 歌曲详情抽屉 (Song Detail Overlay) */}
       {isSongDetailOpen && activeSong && (
-        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "var(--bg-main)", zIndex: 100, display: "flex", flexDirection: "column", animation: "slideUp 0.35s cubic-bezier(0.2, 0.8, 0.2, 1)" }}>
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "var(--bg-app)", zIndex: 100, display: "flex", flexDirection: "column", animation: "slideUp 0.35s cubic-bezier(0.2, 0.8, 0.2, 1)" }}>
           
           <div style={{ display: "flex", justifyContent: "space-between", padding: "16px", alignItems: "center", borderBottom: "1px solid var(--border-light)" }}>
             <button className="ctrl-btn" onClick={() => setIsSongDetailOpen(false)}><ChevronDown size={28} /></button>
@@ -390,7 +415,7 @@ export default function MobileLayout({
               onChange={e => setEditTitle(e.target.value)}
               onBlur={handleSaveMetadata}
               onKeyDown={e => { if (e.key === "Enter") handleSaveMetadata(); }}
-              style={{ width: "85%", textAlign: "center", fontSize: "1.2rem", fontWeight: "bold", background: "transparent", border: "none", borderBottom: "1px dashed transparent", outline: "none", color: "var(--text)", marginTop: "24px" }}
+              style={{ width: "85%", textAlign: "center", fontSize: "1.2rem", fontWeight: "bold", background: "transparent", border: "none", borderBottom: "1px dashed transparent", outline: "none", color: "var(--text-main)", marginTop: "24px" }}
             />
             <input 
               type="text" 
@@ -507,7 +532,7 @@ export default function MobileLayout({
             right: 0,
             bottom: 0,
             zIndex: 9999,
-            background: "var(--bg-main)",
+            background: "var(--bg-app)",
             display: "flex",
             flexDirection: "column",
             animation: "slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1)"
@@ -558,7 +583,7 @@ export default function MobileLayout({
               onChange={e => setEditTitle(e.target.value)}
               onBlur={handleSaveMetadata}
               onKeyDown={e => { if (e.key === "Enter") handleSaveMetadata(); }}
-              style={{ width: "85%", textAlign: "center", fontSize: "1.2rem", fontWeight: "bold", background: "transparent", border: "none", borderBottom: "1px dashed transparent", outline: "none", color: "var(--text)", marginTop: "24px" }}
+              style={{ width: "85%", textAlign: "center", fontSize: "1.2rem", fontWeight: "bold", background: "transparent", border: "none", borderBottom: "1px dashed transparent", outline: "none", color: "var(--text-main)", marginTop: "24px" }}
             />
             <input 
               type="text" 
@@ -710,6 +735,113 @@ export default function MobileLayout({
               style={{ color: volume === 0 ? "var(--text-sub)" : "var(--accent)" }}
             >
               <Volume2 size={20} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 移动端歌曲操作上下文菜单 (Bottom Sheet / Modal) */}
+      {contextMenuSong && (
+        <div 
+          style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 120, display: "flex", flexDirection: "column", justifyContent: "flex-end" }}
+          onClick={() => setContextMenuSong(null)}
+        >
+          <div style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.5)", backdropFilter: "blur(6px)" }} />
+          
+          <div 
+            onClick={e => e.stopPropagation()}
+            style={{ 
+              position: "relative",
+              background: "var(--bg-app)", 
+              borderTop: "1px solid var(--border)", 
+              borderTopLeftRadius: "24px", 
+              borderTopRightRadius: "24px", 
+              padding: "20px 16px 32px 16px",
+              boxShadow: "0 -10px 40px rgba(0,0,0,0.3)",
+              display: "flex",
+              flexDirection: "column",
+              gap: "10px",
+              animation: "slideUp 0.25s cubic-bezier(0.2, 0.8, 0.2, 1)"
+            }}
+          >
+            <div style={{ textAlign: "center", marginBottom: "8px" }}>
+              <div style={{ width: "36px", height: "4px", background: "var(--border)", borderRadius: "2px", margin: "0 auto 12px auto" }} />
+              <h3 style={{ fontSize: "1.05rem", fontWeight: "bold", margin: 0, color: "var(--text-main)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {contextMenuSong.title}
+              </h3>
+              <p style={{ fontSize: "0.8rem", color: "var(--text-sub)", margin: "4px 0 0 0" }}>
+                {contextMenuSong.artist || "未知歌手"}
+              </p>
+            </div>
+
+            <button 
+              className="menu-item-mobile" 
+              onClick={() => {
+                onPlaySong(contextMenuSong);
+                setContextMenuSong(null);
+              }}
+              style={{ display: "flex", alignItems: "center", gap: "12px", width: "100%", padding: "14px 18px", borderRadius: "12px", background: "var(--bg-hover)", border: "none", color: "var(--text-main)", fontSize: "0.95rem", fontWeight: 600, textAlign: "left", cursor: "pointer" }}
+            >
+              <Play size={18} color="var(--accent)" /> 播放歌曲
+            </button>
+
+            <button 
+              className="menu-item-mobile" 
+              onClick={() => {
+                onSelectSong(contextMenuSong);
+                setIsSongDetailOpen(true);
+                setContextMenuSong(null);
+              }}
+              style={{ display: "flex", alignItems: "center", gap: "12px", width: "100%", padding: "14px 18px", borderRadius: "12px", background: "var(--bg-hover)", border: "none", color: "var(--text-main)", fontSize: "0.95rem", fontWeight: 600, textAlign: "left", cursor: "pointer" }}
+            >
+              <Settings size={18} /> 打开详细信息
+            </button>
+
+            {/* 添加到歌单 */}
+            {playlists.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px", padding: "10px 12px", background: "var(--bg-hover)", borderRadius: "12px", border: "1px solid var(--border)" }}>
+                <span style={{ fontSize: "0.78rem", color: "var(--text-sub)", fontWeight: 600, marginBottom: "6px" }}>添加到歌单</span>
+                <div style={{ display: "flex", gap: "8px", overflowX: "auto" }} className="no-scrollbar">
+                  {playlists.map(pl => (
+                    <button
+                      key={pl.id}
+                      onClick={() => {
+                        onAddSongsToPlaylist(pl.id, [contextMenuSong.id]);
+                        setContextMenuSong(null);
+                      }}
+                      style={{ padding: "6px 12px", borderRadius: "20px", background: "var(--bg-hover)", border: "1px solid var(--border)", color: "var(--text-main)", fontSize: "0.80rem", whiteSpace: "nowrap", cursor: "pointer" }}
+                    >
+                      {pl.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {activePlaylistId && (
+              <button 
+                className="menu-item-mobile" 
+                onClick={() => {
+                  onRemoveSongsFromPlaylist(activePlaylistId, [contextMenuSong.id]);
+                  setContextMenuSong(null);
+                }}
+                style={{ display: "flex", alignItems: "center", gap: "12px", width: "100%", padding: "14px 18px", borderRadius: "12px", background: "var(--bg-hover)", border: "none", color: "#f59e0b", fontSize: "0.95rem", fontWeight: 600, textAlign: "left", cursor: "pointer" }}
+              >
+                <Trash2 size={18} /> 从当前歌单移除
+              </button>
+            )}
+
+            <button 
+              className="menu-item-mobile" 
+              onClick={() => {
+                if (confirm(`确定要彻底删除歌曲《${contextMenuSong.title}》吗？这会同时删除本地音乐文件！`)) {
+                  onDeleteSongs([contextMenuSong.id]);
+                }
+                setContextMenuSong(null);
+              }}
+              style={{ display: "flex", alignItems: "center", gap: "12px", width: "100%", padding: "14px 18px", borderRadius: "12px", background: "var(--bg-hover)", border: "none", color: "#ef4444", fontSize: "0.95rem", fontWeight: 600, textAlign: "left", cursor: "pointer" }}
+            >
+              <Trash2 size={18} /> 彻底删除歌曲
             </button>
           </div>
         </div>

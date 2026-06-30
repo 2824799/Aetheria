@@ -299,7 +299,9 @@ function App() {
                 changePlayingVersion(version);
                 
                 if (audioRef.current) {
-                  audioRef.current.crossOrigin = "anonymous";
+                  if (!isMobile) {
+                    audioRef.current.crossOrigin = "anonymous";
+                  }
                   const normalizedPath = (libPath + "/" + version.filepath).replace(/\\/g, "/");
                   const assetUrl = convertFileSrc(normalizedPath);
                   audioRef.current.src = assetUrl;
@@ -533,6 +535,7 @@ function App() {
   }, [isPlaying, theme]);
 
   const initAudioAnalyzer = () => {
+    if (isMobile) return; // Disable analyser on mobile to prevent Android custom protocol CORS/locking issues
     if (!audioRef.current || audioContextRef.current) return;
 
     try {
@@ -839,7 +842,9 @@ function App() {
       
       if (audioRef.current) {
         audioRef.current.pause();
-        audioRef.current.crossOrigin = "anonymous";
+        if (!isMobile) {
+          audioRef.current.crossOrigin = "anonymous";
+        }
         audioRef.current.src = assetUrl;
         audioRef.current.load();
         
@@ -1183,6 +1188,9 @@ function App() {
           onDeleteVersion={handleDeleteVersion}
           onImportVersionForSong={handleImportVersionForSong}
           onUpdateMetadata={handleUpdateSongMetadata}
+          onAddSongsToPlaylist={handleAddSongsToPlaylist}
+          onRemoveSongsFromPlaylist={handleRemoveSongsFromPlaylist}
+          onDeleteSongs={handleDeleteSongs}
         />
       ) : (
         <>
@@ -1388,7 +1396,7 @@ function App() {
 
       <audio
         ref={audioRef}
-        crossOrigin="anonymous"
+        crossOrigin={isMobile ? undefined : "anonymous"}
         onTimeUpdate={handleTimeUpdate}
         onLoadedMetadata={handleLoadedMetadata}
         onEnded={handleEnded}
