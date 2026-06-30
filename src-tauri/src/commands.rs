@@ -1172,9 +1172,12 @@ pub fn scan_directory_for_preview(dir_path: String) -> Result<Vec<String>, Strin
 }
 
 #[tauri::command]
-pub fn read_audio_file_bytes(filepath: String) -> Result<Vec<u8>, String> {
+pub fn read_audio_file_base64(filepath: String) -> Result<String, String> {
+    use base64::{Engine as _, engine::general_purpose};
     let path = Path::new(&filepath);
-    std::fs::read(path).map_err(|e| e.to_string())
+    let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+    let b64 = general_purpose::STANDARD.encode(bytes);
+    Ok(b64)
 }
 
 

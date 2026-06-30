@@ -3,6 +3,7 @@ import {
   Play, Pause, SkipBack, SkipForward, Music, Settings, Tags, FolderPlus, 
   ChevronDown, Volume2, Repeat, Shuffle, Plus, Trash2, Download, Menu, MoreHorizontal
 } from "lucide-react";
+import TagFilter from "./TagFilter";
 
 interface AudioVersion {
   id: string;
@@ -94,6 +95,13 @@ interface MobileLayoutProps {
   onAddSongsToPlaylist: (playlistId: string, songIds: string[]) => void;
   onRemoveSongsFromPlaylist: (playlistId: string, songIds: string[]) => void;
   onDeleteSongs: (songIds: string[]) => void;
+  
+  selectedTags: number[];
+  onToggleTag: (id: number) => void;
+  filterMode: "AND" | "OR";
+  onSetFilterMode: (mode: "AND" | "OR") => void;
+  isTagsExpanded: boolean;
+  onSetTagsExpanded: (expanded: boolean) => void;
 }
 
 export default function MobileLayout({
@@ -134,6 +142,12 @@ export default function MobileLayout({
   onAddSongsToPlaylist,
   onRemoveSongsFromPlaylist,
   onDeleteSongs,
+  selectedTags,
+  onToggleTag,
+  filterMode,
+  onSetFilterMode,
+  isTagsExpanded,
+  onSetTagsExpanded,
 }: MobileLayoutProps) {
   const [isPlayerExpanded, setIsPlayerExpanded] = useState(false);
   const [isSongDetailOpen, setIsSongDetailOpen] = useState(false);
@@ -208,6 +222,20 @@ export default function MobileLayout({
         <button className="import-btn" style={{ flex: 1, padding: "8px", fontSize: "0.8rem", display: "flex", gap: "6px", justifyContent: "center", alignItems: "center" }} onClick={onImportFolder}>
           <FolderPlus size={14} /> 导入目录
         </button>
+      </div>
+
+      {/* 标签折叠多维筛选面板 */}
+      <div style={{ padding: "4px 16px" }}>
+        <TagFilter 
+          tags={allTags}
+          selectedTags={selectedTags}
+          onToggleTag={onToggleTag}
+          filterMode={filterMode}
+          onSetFilterMode={onSetFilterMode}
+          isTagsExpanded={isTagsExpanded}
+          onSetTagsExpanded={onSetTagsExpanded}
+          onOpenTagManager={onOpenTagManager}
+        />
       </div>
 
       {/* 歌曲列表区域 */}

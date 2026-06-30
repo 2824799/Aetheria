@@ -79,7 +79,7 @@ pub fn run() {
             commands::import_song_with_metadata,
             commands::update_song_metadata,
             commands::scan_directory_for_preview,
-            commands::read_audio_file_bytes
+            commands::read_audio_file_base64
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

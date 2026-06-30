@@ -210,8 +210,7 @@ function App() {
   const resolveAudioSource = async (normalizedPath: string, format: string): Promise<string> => {
     if (isMobile) {
       try {
-        const bytes = await invoke<number[]>("read_audio_file_bytes", { filepath: normalizedPath });
-        const arrayBuffer = new Uint8Array(bytes);
+        const b64 = await invoke<string>("read_audio_file_base64", { filepath: normalizedPath });
         
         let mimeType = "audio/mpeg";
         const ext = format.toLowerCase();
@@ -221,7 +220,8 @@ function App() {
         else if (ext === "ogg") mimeType = "audio/ogg";
         else if (ext === "aac") mimeType = "audio/aac";
         
-        const blob = new Blob([arrayBuffer], { type: mimeType });
+        const base64Response = await fetch(`data:${mimeType};base64,${b64}`);
+        const blob = await base64Response.blob();
         const blobUrl = URL.createObjectURL(blob);
         
         if (currentBlobUrlRef.current) {
@@ -230,7 +230,7 @@ function App() {
         currentBlobUrlRef.current = blobUrl;
         return blobUrl;
       } catch (err) {
-        console.error("Failed to read audio file bytes:", err);
+        console.error("Failed to read audio file base64:", err);
         showToast("加载音频文件失败: " + err, "error");
         return "";
       }
@@ -702,9 +702,14 @@ function App() {
     try {
       await invoke("tag_song", { songId, tagId });
       const { loadedSongs: freshSongs } = await loadLibrary();
-      if (activeSong && activeSong.id === songId) {
-        const updated = freshSongs.find(s => s.id === songId);
-        if (updated) setActiveSong(updated);
+      const updated = freshSongs.find(s => s.id === songId);
+      if (updated) {
+        if (activeSong && activeSong.id === songId) {
+          setActiveSong(updated);
+        }
+        if (playingSong && playingSong.id === songId) {
+          changePlayingSong(updated);
+        }
       }
     } catch (err) {
       console.error(err);
@@ -715,9 +720,14 @@ function App() {
     try {
       await invoke("untag_song", { songId, tagId });
       const { loadedSongs: freshSongs } = await loadLibrary();
-      if (activeSong && activeSong.id === songId) {
-        const updated = freshSongs.find(s => s.id === songId);
-        if (updated) setActiveSong(updated);
+      const updated = freshSongs.find(s => s.id === songId);
+      if (updated) {
+        if (activeSong && activeSong.id === songId) {
+          setActiveSong(updated);
+        }
+        if (playingSong && playingSong.id === songId) {
+          changePlayingSong(updated);
+        }
       }
     } catch (err) {
       console.error(err);
@@ -1231,6 +1241,12 @@ function App() {
           onAddSongsToPlaylist={handleAddSongsToPlaylist}
           onRemoveSongsFromPlaylist={handleRemoveSongsFromPlaylist}
           onDeleteSongs={handleDeleteSongs}
+          selectedTags={selectedTags}
+          onToggleTag={handleToggleTag}
+          filterMode={filterMode}
+          onSetFilterMode={setFilterMode}
+          isTagsExpanded={isTagsExpanded}
+          onSetTagsExpanded={setIsTagsExpanded}
         />
       ) : (
         <>
