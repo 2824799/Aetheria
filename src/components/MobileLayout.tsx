@@ -245,7 +245,6 @@ export default function MobileLayout({
           const isCurrentlyPlaying = playingSong?.id === song.id;
           const isActive = activeSong?.id === song.id;
           const primary = song.versions.find(v => v.is_primary);
-          const formatText = primary ? primary.format.toUpperCase() : "无源";
           
           return (
             <div 
@@ -271,28 +270,21 @@ export default function MobileLayout({
                   <span style={{ fontSize: "0.78rem", color: "var(--text-sub)" }}>
                     {song.artist || "未知歌手"}
                   </span>
-                  <span style={{ fontSize: "0.68rem", padding: "1px 4px", background: "var(--border)", borderRadius: "4px", color: "var(--text-main)" }}>
-                    {formatText}
-                  </span>
-                  {primary && (
-                    <>
-                      {primary.bit_depth && (
-                        <span style={{ fontSize: "0.68rem", padding: "1px 4px", background: "var(--border)", borderRadius: "4px", color: "var(--text-main)" }}>
-                          {primary.bit_depth}bit
-                        </span>
-                      )}
-                      {primary.sample_rate && (
-                        <span style={{ fontSize: "0.68rem", padding: "1px 4px", background: "var(--border)", borderRadius: "4px", color: "var(--text-main)" }}>
-                          {(primary.sample_rate / 1000).toFixed(primary.sample_rate % 1000 === 0 ? 0 : 1)}kHz
-                        </span>
-                      )}
-                      {primary.bitrate && (
-                        <span style={{ fontSize: "0.68rem", padding: "1px 4px", background: "var(--border)", borderRadius: "4px", color: "var(--text-main)" }}>
-                          {Math.round(primary.bitrate / 1000)}kbps
-                        </span>
-                      )}
-                    </>
-                  )}
+                  {(() => {
+                    const specs: string[] = [];
+                    if (primary) {
+                      specs.push(primary.format.toUpperCase());
+                      if (primary.bit_depth) specs.push(`${primary.bit_depth}b`);
+                      if (primary.sample_rate) specs.push(`${(primary.sample_rate / 1000).toFixed(primary.sample_rate % 1000 === 0 ? 0 : 1)}k`);
+                      if (primary.bitrate) specs.push(`${Math.round(primary.bitrate / 1000)}kbps`);
+                    }
+                    const specsText = specs.length > 0 ? specs.join("/") : "无源";
+                    return (
+                      <span style={{ fontSize: "0.68rem", padding: "1px 4px", background: "var(--border)", borderRadius: "4px", color: "var(--text-main)" }}>
+                        {specsText}
+                      </span>
+                    );
+                  })()}
                   {song.tags.slice(0, 2).map(t => (
                     <span key={t.id} style={{ fontSize: "0.68rem", color: t.color }}>#{t.name}</span>
                   ))}
