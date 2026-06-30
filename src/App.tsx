@@ -140,10 +140,9 @@ function App() {
   const [filesToPreview, setFilesToPreview] = useState<string[]>([]);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   
-  // 移动端专用选择器
+  // 移动端专用文件夹选择器
   const [isMobileFolderPickerOpen, setIsMobileFolderPickerOpen] = useState(false);
-  const [mobilePickerMode, setMobilePickerMode] = useState<"folder" | "file">("folder");
-  const [pickerCallback, setPickerCallback] = useState<((result: string | string[] | null) => void) | null>(null);
+  const [folderPickerCallback, setFolderPickerCallback] = useState<((path: string | null) => void) | null>(null);
   
   // 标签新建属性
   const [newTagName, setNewTagName] = useState("");
@@ -166,10 +165,9 @@ function App() {
   const openFolderPicker = async (): Promise<string | null> => {
     if (isMobile) {
       return new Promise<string | null>((resolve) => {
-        setMobilePickerMode("folder");
-        setPickerCallback(() => (path: string | string[] | null) => {
+        setFolderPickerCallback(() => (path: string | null) => {
           setIsMobileFolderPickerOpen(false);
-          resolve(path as string | null);
+          resolve(path);
         });
         setIsMobileFolderPickerOpen(true);
       });
@@ -181,26 +179,32 @@ function App() {
   };
 
   const openFilePicker = async (): Promise<string[]> => {
+    const selectedFiles = await open({ 
+      multiple: true,
+      filters: [{ name: "Audio", extensions: ["mp3", "wav", "flac", "m4a", "ogg", "aac"] }]
+    });
+    if (!selectedFiles) return [];
+    const files = Array.isArray(selectedFiles) ? selectedFiles : [selectedFiles];
+
     if (isMobile) {
-      return new Promise<string[]>((resolve) => {
-        setMobilePickerMode("file");
-        setPickerCallback(() => (paths: string | string[] | null) => {
-          setIsMobileFolderPickerOpen(false);
-          if (!paths) resolve([]);
-          else if (Array.isArray(paths)) resolve(paths);
-          else resolve([paths]);
-        });
-        setIsMobileFolderPickerOpen(true);
+      // 在 Android 移动端上，系统选择器返回 SAF (Storage Access Framework) 路径 (如 content://...primary%3AMusic%2Fsong.mp3)
+      // 我们通过 decodeURIComponent 解码并利用正则将其映射回 /storage/emulated/0/... 或外部 SD 卡实际物理路径
+      return files.map(file => {
+        let decoded = decodeURIComponent(file);
+        const match = decoded.match(/(?:^|\/)([^/:]+):(.*)$/);
+        if (match) {
+          const volume = match[1];
+          const subPath = match[2];
+          if (volume === "primary") {
+            return `/storage/emulated/0/${subPath}`;
+          } else {
+            return `/storage/${volume}/${subPath}`;
+          }
+        }
+        return decoded;
       });
-    } else {
-      const selectedFiles = await open({ 
-        multiple: true,
-        filters: [{ name: "Audio", extensions: ["mp3", "wav", "flac", "m4a", "ogg", "aac"] }]
-      });
-      if (!selectedFiles) return [];
-      if (Array.isArray(selectedFiles)) return selectedFiles;
-      return [selectedFiles];
     }
+    return files;
   };
 
   // 播放器 DOM 引用
@@ -1369,10 +1373,8 @@ function App() {
 
       <MobileFolderPickerModal 
         isOpen={isMobileFolderPickerOpen}
-        onClose={() => pickerCallback?.(null)}
-        onSelect={(result) => pickerCallback?.(result)}
-        mode={mobilePickerMode}
-        multiple={true}
+        onClose={() => folderPickerCallback?.(null)}
+        onSelect={(path) => folderPickerCallback?.(path)}
       />
 
       {isImporting && (

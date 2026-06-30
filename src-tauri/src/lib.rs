@@ -12,7 +12,9 @@ pub fn run() {
             #[cfg(any(target_os = "android", target_os = "ios"))]
             {
                 let path = db::load_library_path(app.handle()).unwrap_or_else(|| {
-                    let default_path = std::path::PathBuf::from("/storage/emulated/0/Android/data/com.aetheria.app/files/library");
+                    let default_path = app.handle().path().app_local_data_dir()
+                        .expect("Failed to get local data dir")
+                        .join("library");
                     std::fs::create_dir_all(&default_path).ok();
                     db::save_library_path(app.handle(), default_path.clone()).ok();
                     default_path
