@@ -1,68 +1,17 @@
-# Aetheria (高性能多版本本地音乐管理软件)
+# aetheria
 
-Aetheria 是一款基于 **Tauri 2.0 (Rust) + SQLite + Vite + React (TypeScript)** 开发的高性能、现代化本地音乐播放与管理软件。它专为音乐收藏家、发烧友设计，旨在提供高颜值的 UI 动效、创新的歌曲多版本托管与强大的多维标签搜索矩阵。
+A new Flutter project.
 
----
+## Getting Started
 
-## 🌟 核心功能与特性
+This project is a starting point for a Flutter application.
 
-### 1. 🎵 歌曲-音频解耦核心 (Song-Audio Decoupling)
-* **实体与文件分离**：一首歌在 Aetheria 中是一个独立的“歌曲实体”（拥有统一的歌名、歌手、专辑和歌词），它可以关联**多个不同的音频文件**（例如：FLAC 无损版、AAC 伴奏版、Live 演唱会版、伴奏版等）。
-* **主音频版本设置**：支持自由指定主音频版本。在歌曲列表双击时，软件会自动播放当前主版本；同时支持在右侧抽屉一键启用/禁用特定版本或导出还原原始音频。
+A few resources to get you started if this is your first Flutter project:
 
-### 2. 🏷️ 多维标签池矩阵 (Tag Matrix Filter)
-* **自定义分类标签**：新建标签时支持选择类别（如：*流派、语言、情绪、场景* 或 *自定义*），在 UI 中呈现对应的分类前缀，如 `[流派] 流行`、`[语言] 中文`。
-* **AND/OR 复合条件过滤**：支持交集（AND）和并集（OR）多维过滤器，点击标签池中的多个标签进行复合过滤，瞬间筛选出您想听的音乐类型。
+- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
+- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
+- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
 
-### 3. 📂 资源管理器式高级多选 (Explorer Box-Select)
-* **鼠标划框多选 (Box-Select)**：在歌曲列表空白区域按住鼠标左键并拖动，会拉出一个半透明蓝色选择框。软件运用全局 Viewport 边界相交算法，动态选中所有碰撞到的歌曲行。
-* **键盘组合键选取**：
-  - `Ctrl + 点击`：增量选中或反选单首歌曲。
-  - `Shift + 点击`：首尾范围选中，一秒选取大片音轨。
-* **侧滑抽屉拦截**：当按住 Ctrl/Shift 键进行多选操作时，软件会智能拦截右侧详情抽屉的展开，避免界面高频刷新，保障极致流畅度。
-
-### 4. 🖱️ 拟真自定义级联右键菜单 (Custom Context Menu)
-* **全局屏蔽系统右键**：彻底拦截网页浏览器默认的右键菜单，提供高度拟真的毛玻璃浮层菜单。
-* **剪贴板操作**：支持对选中的歌曲进行 **“复制 (Copy)”**、**“剪切 (Cut)”** 以及在歌单空白处右键 **“粘贴 (Paste)”**。
-* **二级级联菜单**：支持在菜单内悬停直接滑出 **“添加到歌单”** 二级联动列表，一键批量把选中的歌曲归入目标歌单。
-
-### 5. 🗂️ 歌单合集管理与安全防误删
-* **紧凑式歌单管理**：在侧栏“全部歌曲”下方提供内联歌单列表，鼠标悬停即时浮现“重命名”与“删除”按钮，并支持在侧栏一键使用鼠标确定创建新歌单。
-* **三次确认删除机制**：为了防止您误删珍贵的歌单编排，删除歌单时会**连续触发三次警告询问弹窗**（“确定删除吗？” $\rightarrow$ “确定真的是要删除吗？” $\rightarrow$ “真的真的真的确定删除吗？”），防呆防误触体验极佳。
-
-### 6. 🧠 软件状态无缝记忆与精准进度还原
-* **状态持久化**：音量值、播放循环模式（列表/单曲/随机）、激活的歌单、选中的多维标签、正播放歌曲等在关闭软件时会自动保存。
-* **精确进度指针恢复**：解决了 HTML5 Audio 在 src 变更时无法立刻设置进度的固有 Bug。利用 Ref 暂存进度并监听 `loadedmetadata` 事件，待音频元数据准备就绪后立刻对齐进度，实现开机百分百还原上次的听歌进度。
-
-### 7. 📊 Canvas 频谱动画与多主题
-* **实时频谱动效**：基于 Web Audio API 捕捉音频波形，在播放条底部渲染极高帧率的半透明音频柱状频谱。
-* **三套高颜值主题**：支持**暗黑科技蓝 (Dark)**、**极简透亮白 (Light)**、**浪漫樱花粉 (Pink)** 主题，整套 UI（包含输入框、滑块、按钮、Toast）均基于 CSS 变量完全自适应主题颜色。
-
----
-
-## 🚀 运行与构建指南
-
-### 1. 开发环境运行
-```bash
-# 安装依赖
-npm install
-
-# 运行开发环境客户端
-npm run tauri dev
-```
-
-### 2. 编译 Release 绿色版可执行文件
-```bash
-# 编译前端并构建 Tauri 应用程序 (免安装单文件打包)
-npm run tauri build -- --no-bundle
-```
-编译成功后，您可以在本地找到最新的免安装可执行程序：
-👉 `D:\python\app\src-tauri\target\release\Aetheria.exe`
-
----
-
-## 📄 开源许可协议
-
-本项目采用 **GNU Affero General Public License v3 (AGPL-3.0)** 协议进行开源。
-- **使用约束**：任何人均可免费使用、修改和二次分发本软件。但如果您对本项目代码进行了修改并在网络上分发或通过网络提供服务（SaaS），您**必须**将修改后的全部源代码以相同的 AGPLv3 协议对外公开发布。
-
+For help getting started with Flutter development, view the
+[online documentation](https://docs.flutter.dev/), which offers tutorials,
+samples, guidance on mobile development, and a full API reference.
