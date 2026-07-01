@@ -326,10 +326,11 @@ class _SongTableState extends State<SongTable> {
                     _handleRowClick(song, index, isCtrlPressed, isShiftPressed);
                     audioProvider.setActiveSong(song);
                   },
-                  onDoubleTap: () {
+                  onDoubleTap: () async {
                     try {
-                      audioProvider.playSong(song, songs, libraryProvider.libraryPath, audioServerPort: libraryProvider.audioServerPort);
+                      await audioProvider.playSong(song, songs, libraryProvider.libraryPath, audioServerPort: libraryProvider.audioServerPort);
                     } catch (e) {
+                      if (!context.mounted) return;
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(content: Text(e.toString())),
                       );
@@ -370,13 +371,14 @@ class _SongTableState extends State<SongTable> {
                                 size: 18,
                                 color: isCurrentlyPlaying ? const Color(0xFF10B981) : cfg.textSub,
                               ),
-                              onPressed: () {
+                              onPressed: () async {
                                 if (isCurrentlyPlaying) {
                                   audioProvider.playPause();
                                 } else {
                                   try {
-                                    audioProvider.playSong(song, songs, libraryProvider.libraryPath, audioServerPort: libraryProvider.audioServerPort);
+                                    await audioProvider.playSong(song, songs, libraryProvider.libraryPath, audioServerPort: libraryProvider.audioServerPort);
                                   } catch (e) {
+                                    if (!context.mounted) return;
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       SnackBar(content: Text(e.toString())),
                                     );

@@ -151,6 +151,21 @@ class AudioPlayerProvider extends ChangeNotifier {
     
     final path = '$libraryPath/${version.filepath}'.replaceAll('\\', '/');
     
+    // Verify file existence on the local filesystem
+    final file = File(path);
+    final exists = await file.exists();
+    if (!exists) {
+      throw '音频物理文件不存在！\n期望路径: $path\n数据库内记录: ${version.filepath}';
+    }
+    
+    // Verify file readability
+    try {
+      final access = await file.open(mode: FileMode.read);
+      await access.close();
+    } catch (e) {
+      throw '音频文件无法读取，权限不足: $e\n文件路径: $path';
+    }
+    
     String url = path;
     if (Platform.isAndroid && audioServerPort != null && audioServerPort > 0) {
       url = 'http://127.0.0.1:$audioServerPort/audio?path=${Uri.encodeComponent(path)}';

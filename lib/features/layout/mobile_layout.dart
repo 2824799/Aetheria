@@ -462,14 +462,25 @@ class _MobileLayoutState extends State<MobileLayout> {
                 ListTile(
                   leading: Icon(Icons.play_arrow, color: cfg.accent),
                   title: Text('播放歌曲', style: TextStyle(color: cfg.textMain, fontWeight: FontWeight.w600)),
-                  onTap: () {
+                  onTap: () async {
                     Navigator.of(ctx).pop();
-                    audioProvider.playSong(
-                      song,
-                      libraryProvider.displaySongs,
-                      libraryProvider.libraryPath,
-                      audioServerPort: libraryProvider.audioServerPort,
-                    );
+                    try {
+                      await audioProvider.playSong(
+                        song,
+                        libraryProvider.displaySongs,
+                        libraryProvider.libraryPath,
+                        audioServerPort: libraryProvider.audioServerPort,
+                      );
+                    } catch (e) {
+                      if (!context.mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(e.toString()),
+                          backgroundColor: Colors.redAccent,
+                          duration: const Duration(seconds: 5),
+                        ),
+                      );
+                    }
                   },
                 ),
 
@@ -1524,14 +1535,25 @@ class _MobileLayoutState extends State<MobileLayout> {
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 6),
                         child: InkWell(
-                          onTap: () {
+                          onTap: () async {
                             audioProvider.setActiveSong(song);
-                            audioProvider.playSong(
-                              song,
-                              songs,
-                              libraryProvider.libraryPath,
-                              audioServerPort: libraryProvider.audioServerPort,
-                            );
+                            try {
+                              await audioProvider.playSong(
+                                song,
+                                songs,
+                                libraryProvider.libraryPath,
+                                audioServerPort: libraryProvider.audioServerPort,
+                              );
+                            } catch (e) {
+                              if (!context.mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(e.toString()),
+                                  backgroundColor: Colors.redAccent,
+                                  duration: const Duration(seconds: 5),
+                                ),
+                              );
+                            }
                           },
                           onLongPress: () => _showSongContextMenu(context, song, libraryProvider, audioProvider),
                           borderRadius: BorderRadius.circular(8),
