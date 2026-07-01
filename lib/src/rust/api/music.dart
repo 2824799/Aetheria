@@ -145,3 +145,11 @@ Future<String> exportAudioFile({
   versionId: versionId,
   destPath: destPath,
 );
+
+Future<void> updateVersionDuration({
+  required String versionId,
+  required double duration,
+}) => RustLib.instance.api.crateApiMusicUpdateVersionDuration(
+  versionId: versionId,
+  duration: duration,
+);

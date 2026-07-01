@@ -69,7 +69,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.12.0';
 
   @override
-  int get rustContentHash => -507526758;
+  int get rustContentHash => 1881993710;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -172,6 +172,11 @@ abstract class RustLibApi extends BaseApi {
     required String songId,
     required String title,
     required String artist,
+  });
+
+  Future<void> crateApiMusicUpdateVersionDuration({
+    required String versionId,
+    required double duration,
   });
 
   Future<void> crateApiMusicUpdateVersionStatus({
@@ -1048,6 +1053,41 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<void> crateApiMusicUpdateVersionDuration({
+    required String versionId,
+    required double duration,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(versionId, serializer);
+          sse_encode_f_64(duration, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 29,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiMusicUpdateVersionDurationConstMeta,
+        argValues: [versionId, duration],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiMusicUpdateVersionDurationConstMeta =>
+      const TaskConstMeta(
+        debugName: "update_version_duration",
+        argNames: ["versionId", "duration"],
+      );
+
+  @override
   Future<void> crateApiMusicUpdateVersionStatus({
     required String versionId,
     required bool isEnabled,
@@ -1063,7 +1103,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 29,
+            funcId: 30,
             port: port_,
           );
         },
@@ -1094,7 +1134,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 30,
+            funcId: 31,
             port: port_,
           );
         },

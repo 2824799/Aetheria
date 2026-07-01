@@ -927,3 +927,12 @@ pub fn export_audio_file(version_id: String, dest_path: String) -> Result<String
     
     Ok(dest_absolute.to_string_lossy().to_string())
 }
+
+pub fn update_version_duration(version_id: String, duration: f64) -> Result<(), String> {
+    let conn = establish_connection().map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE audio_files SET duration = ?1 WHERE id = ?2",
+        params![duration, version_id],
+    ).map_err(|e| e.to_string())?;
+    Ok(())
+}

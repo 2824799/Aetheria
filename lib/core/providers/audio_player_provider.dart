@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:aetheria/src/rust/models/song.dart';
+import 'package:aetheria/src/rust/api/music.dart' as music;
 import 'dart:io';
 
 enum PlayMode { list, single, shuffle }
@@ -40,6 +41,28 @@ class AudioPlayerProvider extends ChangeNotifier {
     _audioPlayer.onDurationChanged.listen((dur) {
       totalDuration = dur;
       notifyListeners();
+
+      if (playingVersion != null && playingVersion!.duration < 1.0 && dur.inSeconds > 0) {
+        final secs = dur.inMilliseconds / 1000.0;
+        playingVersion = AudioVersion(
+          id: playingVersion!.id,
+          songId: playingVersion!.songId,
+          filepath: playingVersion!.filepath,
+          originalName: playingVersion!.originalName,
+          format: playingVersion!.format,
+          bitrate: playingVersion!.bitrate,
+          sampleRate: playingVersion!.sampleRate,
+          duration: secs,
+          fileSize: playingVersion!.fileSize,
+          isEnabled: playingVersion!.isEnabled,
+          isPrimary: playingVersion!.isPrimary,
+          md5: playingVersion!.md5,
+          bitDepth: playingVersion!.bitDepth,
+        );
+        music.updateVersionDuration(versionId: playingVersion!.id, duration: secs)
+            .then((_) => notifyListeners())
+            .catchError((_){});
+      }
     });
     
     _audioPlayer.onPlayerStateChanged.listen((state) {
@@ -123,6 +146,8 @@ class AudioPlayerProvider extends ChangeNotifier {
     playingVersion = version;
     _cachedLibraryPath = libraryPath;
     _cachedAudioServerPort = audioServerPort;
+    currentPosition = Duration.zero;
+    totalDuration = Duration.zero;
     
     final path = '$libraryPath/${version.filepath}'.replaceAll('\\', '/');
     

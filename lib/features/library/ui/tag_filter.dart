@@ -98,22 +98,23 @@ class _TagFilterState extends State<TagFilter> {
               ),
 
               // Tag Manager Button
-              ElevatedButton.icon(
-                onPressed: () => TagManagerModal.show(context),
-                icon: Icon(Icons.sell_outlined, size: 12, color: cfg.textMain),
-                label: Text(
-                  '标签管理',
-                  style: TextStyle(fontSize: 11, color: cfg.textMain, fontWeight: FontWeight.bold),
+              if (MediaQuery.of(context).size.width >= 768)
+                ElevatedButton.icon(
+                  onPressed: () => TagManagerModal.show(context),
+                  icon: Icon(Icons.sell_outlined, size: 12, color: cfg.textMain),
+                  label: Text(
+                    '标签管理',
+                    style: TextStyle(fontSize: 11, color: cfg.textMain, fontWeight: FontWeight.bold),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: cfg.border,
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                  ),
                 ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: cfg.border,
-                  elevation: 0,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                ),
-              ),
             ],
           ),
 

@@ -7,6 +7,7 @@ import 'package:aetheria/features/sidebar/ui/sidebar.dart';
 import 'package:aetheria/features/library/ui/main_content.dart';
 import 'package:aetheria/features/player/ui/play_bar.dart';
 import 'package:aetheria/features/player/ui/detail_pane.dart';
+import 'package:aetheria/features/layout/mobile_layout.dart';
 
 class MainLayout extends StatefulWidget {
   const MainLayout({super.key});
@@ -39,19 +40,9 @@ class _MainLayoutState extends State<MainLayout> {
     }
 
     if (isMobile) {
-      // Mobile layout fallback for now
       return Container(
         decoration: BoxDecoration(gradient: cfg.bgApp),
-        child: Scaffold(
-          backgroundColor: Colors.transparent,
-          appBar: AppBar(
-            title: const Text('Aetheria Mobile'),
-            backgroundColor: Colors.transparent,
-            elevation: 0,
-          ),
-          body: const MainContent(),
-          bottomNavigationBar: const PlayBar(),
-        ),
+        child: const MobileLayout(),
       );
     }
 
