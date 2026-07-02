@@ -131,30 +131,6 @@ pub fn init_db() -> Result<()> {
         let _ = conn.execute("ALTER TABLE audio_files ADD COLUMN loudness REAL;", []);
     }
 
-    // 自动为已有但 loudness 为空的音频计算听感指标
-    if let Ok(mut stmt) = conn.prepare("SELECT id, filepath FROM audio_files WHERE loudness IS NULL") {
-        let files_dir = super::connection::get_files_dir();
-        if let Ok(rows) = stmt.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        }) {
-            let mut pending_updates = Vec::new();
-            for r in rows {
-                if let Ok((id, filepath)) = r {
-                    let filename = filepath.split('/').last().unwrap_or(&filepath);
-                    let abs_path = files_dir.join(filename);
-                    if abs_path.exists() {
-                        if let Ok(ld) = crate::audio::dsp::calculate_loudness(&abs_path.to_string_lossy()) {
-                            pending_updates.push((id, ld));
-                        }
-                    }
-                }
-            }
-            for (id, ld) in pending_updates {
-                let _ = conn.execute("UPDATE audio_files SET loudness = ?1 WHERE id = ?2", params![ld, id]);
-            }
-        }
-    }
-
     // 插入默认种子标签（若库为空）
     let count: i64 = conn.query_row("SELECT COUNT(*) FROM tags", [], |row| row.get(0))?;
     if count == 0 {

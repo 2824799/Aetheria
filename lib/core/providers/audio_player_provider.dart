@@ -35,6 +35,8 @@ class AudioPlayerProvider extends ChangeNotifier {
   String _cachedLibraryPath = '';
   int? _cachedAudioServerPort;
   Timer? _positionTimer;
+  int _lastPositionMs = -1;
+  int _stallTicks = 0;
 
   AudioPlayerProvider() {
     loadSettings();
@@ -42,21 +44,39 @@ class AudioPlayerProvider extends ChangeNotifier {
 
   void _startPositionTimer() {
     _positionTimer?.cancel();
+    _lastPositionMs = -1;
+    _stallTicks = 0;
     _positionTimer = Timer.periodic(const Duration(milliseconds: 250), (timer) async {
-      if (isPlaying) {
-        final posSec = await music.getRustPlaybackPosition();
-        currentPosition = Duration(milliseconds: (posSec * 1000).round());
-        if (currentPosition >= totalDuration && totalDuration > Duration.zero) {
-          _positionTimer?.cancel();
-          if (playMode == PlayMode.single) {
-            await seek(Duration.zero);
-            await resume();
-          } else {
-            playNext();
-          }
-        }
-        notifyListeners();
+      if (!isPlaying) return;
+      final posSec = await music.getRustPlaybackPosition();
+      currentPosition = Duration(milliseconds: (posSec * 1000).round());
+
+      final reachedEnd =
+          currentPosition >= totalDuration && totalDuration > Duration.zero;
+
+      // Fallback for EOF: the Rust position is derived from samples the hardware
+      // actually consumed, so if the stored duration is slightly overestimated the
+      // position will plateau just below totalDuration once the stream ends. Detect
+      // that stall and advance as well.
+      final posMs = currentPosition.inMilliseconds;
+      if (posMs == _lastPositionMs) {
+        _stallTicks += 1;
+      } else {
+        _stallTicks = 0;
+        _lastPositionMs = posMs;
       }
+      final stalledAtEnd = _stallTicks >= 6 && currentPosition > Duration.zero;
+
+      if (reachedEnd || stalledAtEnd) {
+        _positionTimer?.cancel();
+        if (playMode == PlayMode.single) {
+          await seek(Duration.zero);
+          await resume();
+        } else {
+          playNext();
+        }
+      }
+      notifyListeners();
     });
   }
 
