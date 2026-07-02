@@ -14,6 +14,9 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 lofty = "0.21"
 uuid = { version = "1.8", features = ["v4", "fast-rng", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
+symphonia = { version = "0.5.3", features = ["all"] }
+cpal = "0.15"
+lazy_static = "1.4"
 md5 = "0.7"
 base64 = "0.22"
 

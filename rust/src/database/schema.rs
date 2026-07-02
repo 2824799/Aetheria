@@ -38,6 +38,7 @@ pub fn init_db() -> Result<()> {
             is_primary INTEGER DEFAULT 0,
             md5 TEXT,
             bit_depth INTEGER,
+            loudness REAL,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (song_id) REFERENCES songs(id) ON DELETE CASCADE
         );",
@@ -117,6 +118,41 @@ pub fn init_db() -> Result<()> {
     
     if !has_bit_depth {
         let _ = conn.execute("ALTER TABLE audio_files ADD COLUMN bit_depth INTEGER;", []);
+    }
+
+    // 数据库迁移：自动检查并补全 loudness 列（针对已有旧数据库文件）
+    let has_loudness: bool = conn.query_row(
+        "SELECT COUNT(*) FROM pragma_table_info('audio_files') WHERE name='loudness'",
+        [],
+        |row| row.get::<_, i64>(0).map(|count| count > 0)
+    ).unwrap_or(false);
+    
+    if !has_loudness {
+        let _ = conn.execute("ALTER TABLE audio_files ADD COLUMN loudness REAL;", []);
+    }
+
+    // 自动为已有但 loudness 为空的音频计算听感指标
+    if let Ok(mut stmt) = conn.prepare("SELECT id, filepath FROM audio_files WHERE loudness IS NULL") {
+        let files_dir = super::connection::get_files_dir();
+        if let Ok(rows) = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        }) {
+            let mut pending_updates = Vec::new();
+            for r in rows {
+                if let Ok((id, filepath)) = r {
+                    let filename = filepath.split('/').last().unwrap_or(&filepath);
+                    let abs_path = files_dir.join(filename);
+                    if abs_path.exists() {
+                        if let Ok(ld) = crate::audio::dsp::calculate_loudness(&abs_path.to_string_lossy()) {
+                            pending_updates.push((id, ld));
+                        }
+                    }
+                }
+            }
+            for (id, ld) in pending_updates {
+                let _ = conn.execute("UPDATE audio_files SET loudness = ?1 WHERE id = ?2", params![ld, id]);
+            }
+        }
     }
 
     // 插入默认种子标签（若库为空）

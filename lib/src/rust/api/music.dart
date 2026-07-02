@@ -153,3 +153,41 @@ Future<void> updateVersionDuration({
   versionId: versionId,
   duration: duration,
 );
+
+Future<void> startRustPlayback({
+  required String path,
+  required double volume,
+  required double pitch,
+  required String algo,
+  required double normalizationGain,
+}) => RustLib.instance.api.crateApiMusicStartRustPlayback(
+  path: path,
+  volume: volume,
+  pitch: pitch,
+  algo: algo,
+  normalizationGain: normalizationGain,
+);
+
+Future<void> pauseRustPlayback() =>
+    RustLib.instance.api.crateApiMusicPauseRustPlayback();
+
+Future<void> resumeRustPlayback() =>
+    RustLib.instance.api.crateApiMusicResumeRustPlayback();
+
+Future<void> seekRustPlayback({required double secs}) =>
+    RustLib.instance.api.crateApiMusicSeekRustPlayback(secs: secs);
+
+Future<void> stopRustPlayback() =>
+    RustLib.instance.api.crateApiMusicStopRustPlayback();
+
+Future<void> setRustVolume({required double vol}) =>
+    RustLib.instance.api.crateApiMusicSetRustVolume(vol: vol);
+
+Future<void> setRustPitch({required double pitch, required String algo}) =>
+    RustLib.instance.api.crateApiMusicSetRustPitch(pitch: pitch, algo: algo);
+
+Future<double> getRustPlaybackPosition() =>
+    RustLib.instance.api.crateApiMusicGetRustPlaybackPosition();
+
+Future<void> refreshSongDatabase() =>
+    RustLib.instance.api.crateApiMusicRefreshSongDatabase();

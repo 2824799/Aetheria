@@ -1235,6 +1235,9 @@ class _MobileLayoutState extends State<MobileLayout> {
                         if (primary.bitrate != null) {
                           specs.add('${(primary.bitrate! / 1000).round()}kbps');
                         }
+                        if (primary.loudness != null) {
+                          specs.add('${primary.loudness!.toStringAsFixed(1)}dB');
+                        }
                         if (specs.isNotEmpty) {
                           specsText = specs.join('/');
                         }

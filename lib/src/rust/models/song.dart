@@ -20,6 +20,7 @@ class AudioVersion {
   final bool isPrimary;
   final String? md5;
   final int? bitDepth;
+  final double? loudness;
 
   const AudioVersion({
     required this.id,
@@ -35,6 +36,7 @@ class AudioVersion {
     required this.isPrimary,
     this.md5,
     this.bitDepth,
+    this.loudness,
   });
 
   @override
@@ -51,7 +53,8 @@ class AudioVersion {
       isEnabled.hashCode ^
       isPrimary.hashCode ^
       md5.hashCode ^
-      bitDepth.hashCode;
+      bitDepth.hashCode ^
+      loudness.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -70,7 +73,8 @@ class AudioVersion {
           isEnabled == other.isEnabled &&
           isPrimary == other.isPrimary &&
           md5 == other.md5 &&
-          bitDepth == other.bitDepth;
+          bitDepth == other.bitDepth &&
+          loudness == other.loudness;
 }
 
 class PreviewInfo {

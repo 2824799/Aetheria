@@ -8,3 +8,5 @@
 //! - Exposes a simple `start_server` method and `get_port` to return the HTTP port.
 
 pub mod server;
+pub mod dsp;
+pub mod player;

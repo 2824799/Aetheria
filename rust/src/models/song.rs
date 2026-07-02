@@ -29,6 +29,7 @@ pub struct AudioVersion {
     pub is_primary: bool,
     pub md5: Option<String>,
     pub bit_depth: Option<i32>,
+    pub loudness: Option<f64>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

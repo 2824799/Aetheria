@@ -78,6 +78,22 @@ class LibraryProvider extends ChangeNotifier {
     }
   }
 
+  bool isRefreshingDatabase = false;
+
+  Future<void> refreshDatabase() async {
+    isRefreshingDatabase = true;
+    notifyListeners();
+    try {
+      await music.refreshSongDatabase();
+      await loadLibrary();
+    } catch (e) {
+      error = e.toString();
+    } finally {
+      isRefreshingDatabase = false;
+      notifyListeners();
+    }
+  }
+
   Future<void> importSong(String filepath) async {
     try {
       await music.importSong(filepath: filepath);
