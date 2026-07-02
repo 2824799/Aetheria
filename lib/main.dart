@@ -24,21 +24,27 @@ Future<void> main() async {
     libPath = directory.path;
   }
   await music.initializeLibraryPath(path: libPath);
-  
-  // Start the background local audio streaming server
-  final port = await music.startAudioServer();
-  print('Rust audio server running on port $port');
 
   runApp(
     MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => UIThemeProvider()),
-        ChangeNotifierProvider(create: (_) => LibraryProvider()..audioServerPort = port),
+        ChangeNotifierProvider(create: (_) => LibraryProvider()),
         ChangeNotifierProvider(create: (_) => AudioPlayerProvider()),
       ],
       child: const AetheriaApp(),
     ),
   );
+
+  // Start the background audio server AFTER runApp so it never blocks the UI.
+  // The cpal-based Rust engine handles playback directly; this server is only
+  // kept for legacy/fallback streaming and can start lazily.
+  try {
+    final port = await music.startAudioServer();
+    debugPrint('Rust audio server running on port $port');
+  } catch (e) {
+    debugPrint('Audio server start failed (non-fatal): $e');
+  }
 }
 
 class AetheriaApp extends StatelessWidget {
