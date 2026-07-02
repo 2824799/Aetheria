@@ -11,6 +11,8 @@ import 'package:aetheria/features/library/ui/settings_modal.dart';
 import 'package:aetheria/src/rust/models/song.dart';
 import 'package:aetheria/src/rust/models/playlist.dart';
 import 'package:aetheria/src/rust/api/music.dart' as music;
+import 'dart:io';
+import 'package:aetheria/services/native_audio_helper.dart';
 
 class MobileLayout extends StatefulWidget {
   const MobileLayout({super.key});
@@ -473,11 +475,19 @@ class _MobileLayoutState extends State<MobileLayout> {
                       );
                     } catch (e) {
                       if (!context.mounted) return;
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(e.toString()),
-                          backgroundColor: Colors.redAccent,
-                          duration: const Duration(seconds: 5),
+                      showDialog(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          title: const Text('播放失败 - 诊断报告'),
+                          content: SingleChildScrollView(
+                            child: SelectableText(
+                              e.toString(),
+                              style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
+                            ),
+                          ),
+                          actions: [
+                            TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('关闭')),
+                          ],
                         ),
                       );
                     }
@@ -642,27 +652,45 @@ class _MobileLayoutState extends State<MobileLayout> {
   // Export audio file
   Future<void> _exportVersion(BuildContext context, AudioVersion version) async {
     try {
-      String? destPath = await FilePicker.platform.saveFile(
-        fileName: version.originalName,
-        dialogTitle: '选择保存音频的位置',
-      );
+      if (Platform.isAndroid) {
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => const Center(child: CircularProgressIndicator()),
+        );
+        final libraryPath = context.read<LibraryProvider>().libraryPath;
+        final srcPath = '$libraryPath/${version.filepath}'.replaceAll('\\', '/');
+        
+        await NativeAudioHelper.saveToDownloads(srcPath, version.originalName);
+        
+        if (!context.mounted) return;
+        Navigator.of(context).pop(); // pop progress indicator
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('已成功导出至系统 Downloads/Aetheria 文件夹！')),
+        );
+      } else {
+        String? destPath = await FilePicker.platform.saveFile(
+          fileName: version.originalName,
+          dialogTitle: '选择保存音频的位置',
+        );
 
-      if (destPath == null) return;
+        if (destPath == null) return;
 
-      if (!context.mounted) return;
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (ctx) => const Center(child: CircularProgressIndicator()),
-      );
+        if (!context.mounted) return;
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => const Center(child: CircularProgressIndicator()),
+        );
 
-      await music.exportAudioFile(versionId: version.id, destPath: destPath);
+        await music.exportAudioFile(versionId: version.id, destPath: destPath);
 
-      if (!context.mounted) return;
-      Navigator.of(context).pop(); // pop progress indicator
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('音频文件导出还原成功！')),
-      );
+        if (!context.mounted) return;
+        Navigator.of(context).pop(); // pop progress indicator
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('音频文件导出还原成功！')),
+        );
+      }
     } catch (e) {
       if (!context.mounted) return;
       Navigator.of(context).pop();
@@ -674,335 +702,13 @@ class _MobileLayoutState extends State<MobileLayout> {
 
   // Full Screen Detail Sheet (Editable Metadata, Version settings, Tag binding, Lyrics, Seeker, Controls)
   void _showSongDetailSheet(BuildContext context, Song initialSong) {
+    context.read<AudioPlayerProvider>().setActiveSong(initialSong);
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) {
-        String activeTab = 'versions';
-        final titleController = TextEditingController(text: initialSong.title);
-        final artistController = TextEditingController(text: initialSong.artist ?? '未知歌手');
-
-        final focusNodeTitle = FocusNode();
-        final focusNodeArtist = FocusNode();
-
-        return Consumer2<LibraryProvider, AudioPlayerProvider>(
-          builder: (context, libraryProvider, audioProvider, child) {
-            final cfg = context.read<UIThemeProvider>().currentTheme;
-
-            // Fetch latest song data from library provider
-            final song = libraryProvider.songs.firstWhere(
-              (s) => s.id == initialSong.id,
-              orElse: () => initialSong,
-            );
-
-            // Audio Player related state
-            final isPlayingThisSong = audioProvider.playingSong?.id == song.id;
-            final durationMin = (audioProvider.totalDuration.inSeconds / 60).floor();
-            final durationSec = (audioProvider.totalDuration.inSeconds % 60).toString().padLeft(2, '0');
-            final curMin = (audioProvider.currentPosition.inSeconds / 60).floor();
-            final curSec = (audioProvider.currentPosition.inSeconds % 60).toString().padLeft(2, '0');
-
-            final curMs = audioProvider.currentPosition.inMilliseconds.toDouble();
-            final totMs = audioProvider.totalDuration.inMilliseconds.toDouble();
-            final progress = totMs > 0 ? (curMs / totMs).clamp(0.0, 1.0) : 0.0;
-
-            Future<void> saveMetadata() async {
-              final newTitle = titleController.text.trim();
-              final newArtistText = artistController.text.trim();
-              final newArtist = newArtistText == '未知歌手' ? '' : newArtistText;
-
-              if (newTitle.isNotEmpty && (newTitle != song.title || newArtist != (song.artist ?? ''))) {
-                try {
-                  await libraryProvider.updateSongMetadata(song.id, newTitle, newArtist);
-                } catch (e) {
-                  if (!context.mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('保存元数据失败: $e')),
-                  );
-                }
-              }
-            }
-
-            focusNodeTitle.addListener(() {
-              if (!focusNodeTitle.hasFocus) {
-                saveMetadata();
-              }
-            });
-
-            focusNodeArtist.addListener(() {
-              if (!focusNodeArtist.hasFocus) {
-                saveMetadata();
-              }
-            });
-
-            return Container(
-              height: MediaQuery.of(context).size.height * 0.95,
-              decoration: BoxDecoration(
-                gradient: cfg.bgApp,
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-              ),
-              child: SafeArea(
-                child: Column(
-                  children: [
-                    // Pull bar / Top close button row
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          IconButton(
-                            icon: Icon(Icons.keyboard_arrow_down, size: 28, color: cfg.textMain),
-                            onPressed: () {
-                              saveMetadata();
-                              Navigator.of(context).pop();
-                            },
-                          ),
-                          Text(
-                            isPlayingThisSong ? '正在播放' : '歌曲详情',
-                            style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: cfg.textSub, letterSpacing: 1),
-                          ),
-                          const SizedBox(width: 48), // Spacer
-                        ],
-                      ),
-                    ),
-
-                    // Cover section with radial-glow
-                    Container(
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Container(
-                            width: 110,
-                            height: 110,
-                            decoration: BoxDecoration(
-                              color: cfg.accentGlow,
-                              borderRadius: BorderRadius.circular(16),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: cfg.accent.withOpacity(0.12),
-                                  blurRadius: 20,
-                                  spreadRadius: 2,
-                                )
-                              ],
-                              border: Border.all(color: cfg.border),
-                            ),
-                            child: Icon(Icons.music_note, size: 45, color: cfg.accent),
-                          ),
-                          const SizedBox(height: 8),
-
-                          // Editable Title field
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 40),
-                            child: TextField(
-                              controller: titleController,
-                              focusNode: focusNodeTitle,
-                              textAlign: TextAlign.center,
-                              onSubmitted: (_) => saveMetadata(),
-                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: cfg.textMain),
-                              decoration: const InputDecoration(
-                                border: InputBorder.none,
-                                isDense: true,
-                                contentPadding: EdgeInsets.symmetric(vertical: 2),
-                              ),
-                            ),
-                          ),
-
-                          // Editable Artist field
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 40),
-                            child: TextField(
-                              controller: artistController,
-                              focusNode: focusNodeArtist,
-                              textAlign: TextAlign.center,
-                              onSubmitted: (_) => saveMetadata(),
-                              style: TextStyle(fontSize: 12, color: cfg.textSub),
-                              decoration: const InputDecoration(
-                                border: InputBorder.none,
-                                isDense: true,
-                                contentPadding: EdgeInsets.symmetric(vertical: 2),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    // Three tab buttons, expanded to fill available height
-                    Expanded(
-                      child: StatefulBuilder(
-                        builder: (context, setTabState) {
-                          Widget buildTabButton(String label, String tabId) {
-                            final isActive = activeTab == tabId;
-                            return Expanded(
-                              child: InkWell(
-                                onTap: () {
-                                  setTabState(() {
-                                    activeTab = tabId;
-                                  });
-                                },
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(vertical: 10),
-                                  decoration: BoxDecoration(
-                                    border: Border(
-                                      bottom: BorderSide(
-                                        color: isActive ? cfg.accent : Colors.transparent,
-                                        width: 2,
-                                      ),
-                                    ),
-                                  ),
-                                  child: Text(
-                                    label,
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
-                                      color: isActive ? cfg.textMain : cfg.textSub,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            );
-                          }
-
-                          return Column(
-                            children: [
-                              Row(
-                                children: [
-                                  buildTabButton('音频源 (${song.versions.length})', 'versions'),
-                                  buildTabButton('关联标签 (${song.tags.length})', 'tags'),
-                                  buildTabButton('滚动歌词', 'lyrics'),
-                                ],
-                              ),
-                              Divider(height: 1, color: cfg.border),
-                              
-                              // Scrollable list tab content is now Expanded
-                              Expanded(
-                                child: _buildTabContent(context, song, activeTab, libraryProvider, audioProvider, cfg),
-                              ),
-                            ],
-                          );
-                        },
-                      ),
-                    ),
-
-                    // Bottom Seeker & Control Area
-                    if (isPlayingThisSong) ...[
-                      // Seeker
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-                        child: Column(
-                          children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text('$curMin:$curSec', style: TextStyle(fontSize: 11, color: cfg.textSub)),
-                                Text('$durationMin:$durationSec', style: TextStyle(fontSize: 11, color: cfg.textSub)),
-                              ],
-                            ),
-                            SliderTheme(
-                              data: SliderTheme.of(context).copyWith(
-                                trackHeight: 3,
-                                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                                overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
-                                activeTrackColor: cfg.accent,
-                                inactiveTrackColor: cfg.sliderTrack,
-                                thumbColor: cfg.accent,
-                              ),
-                              child: Slider(
-                                value: progress,
-                                onChanged: (val) {
-                                  final targetMs = (audioProvider.totalDuration.inMilliseconds * val).toInt();
-                                  audioProvider.seek(Duration(milliseconds: targetMs));
-                                },
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-
-                      // Control Buttons Row
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 24, left: 16, right: 16),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceAround,
-                          children: [
-                            // Play Mode Button
-                            IconButton(
-                              icon: Icon(
-                                audioProvider.playMode == PlayMode.shuffle
-                                    ? Icons.shuffle
-                                    : audioProvider.playMode == PlayMode.single
-                                        ? Icons.repeat_one
-                                        : Icons.repeat,
-                                size: 20,
-                                color: audioProvider.playMode != PlayMode.list ? cfg.accent : cfg.textSub,
-                              ),
-                              onPressed: () => audioProvider.togglePlayMode(),
-                            ),
-
-                            // Skip Back
-                            IconButton(
-                              icon: Icon(Icons.skip_previous, size: 28, color: cfg.textMain),
-                              onPressed: () => audioProvider.playPrevious(),
-                            ),
-
-                            // Large center play/pause circle
-                            GestureDetector(
-                              onTap: () => audioProvider.playPause(),
-                              child: Container(
-                                width: 56,
-                                height: 56,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: cfg.accent,
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: cfg.accentGlow,
-                                      blurRadius: 15,
-                                      offset: const Offset(0, 5),
-                                    ),
-                                  ],
-                                ),
-                                alignment: Alignment.center,
-                                child: Icon(
-                                  audioProvider.isPlaying ? Icons.pause : Icons.play_arrow,
-                                  color: Colors.white,
-                                  size: 26,
-                                ),
-                              ),
-                            ),
-
-                            // Skip Next
-                            IconButton(
-                              icon: Icon(Icons.skip_next, size: 28, color: cfg.textMain),
-                              onPressed: () => audioProvider.playNext(),
-                            ),
-
-                            // Volume/Mute button
-                            IconButton(
-                              icon: Icon(
-                                audioProvider.volume == 0 ? Icons.volume_off : Icons.volume_up,
-                                size: 20,
-                                color: audioProvider.volume == 0 ? cfg.textSub : cfg.accent,
-                              ),
-                              onPressed: () {
-                                audioProvider.setVolume(audioProvider.volume == 0 ? 0.8 : 0);
-                              },
-                            ),
-                          ],
-                        ),
-                      ),
-                    ] else ...[
-                      const SizedBox(height: 24),
-                    ],
-                  ],
-                ),
-              ),
-            );
-          },
-        );
+        return _SongDetailSheetBody(state: this, initialSong: initialSong);
       },
     );
   }
@@ -1519,7 +1225,9 @@ class _MobileLayoutState extends State<MobileLayout> {
                       if (primary != null) {
                         final specs = <String>[];
                         if (primary.format != null) specs.add(primary.format!.toUpperCase());
-                        if (primary.bitDepth != null) specs.add('${primary.bitDepth}b');
+                        if (primary.format?.toLowerCase() == 'flac' && primary.bitDepth != null) {
+                          specs.add('${primary.bitDepth}b');
+                        }
                         if (primary.sampleRate != null) {
                           final rateK = primary.sampleRate! / 1000;
                           specs.add('${rateK.toStringAsFixed(primary.sampleRate! % 1000 == 0 ? 0 : 1)}k');
@@ -1546,11 +1254,19 @@ class _MobileLayoutState extends State<MobileLayout> {
                               );
                             } catch (e) {
                               if (!context.mounted) return;
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(e.toString()),
-                                  backgroundColor: Colors.redAccent,
-                                  duration: const Duration(seconds: 5),
+                              showDialog(
+                                context: context,
+                                builder: (ctx) => AlertDialog(
+                                  title: const Text('播放失败 - 诊断报告'),
+                                  content: SingleChildScrollView(
+                                    child: SelectableText(
+                                      e.toString(),
+                                      style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
+                                    ),
+                                  ),
+                                  actions: [
+                                    TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('关闭')),
+                                  ],
                                 ),
                               );
                             }
@@ -1767,6 +1483,481 @@ class _MobileLayoutState extends State<MobileLayout> {
             ),
           ),
       ],
+    );
+  }
+}
+
+class _SongDetailSheetBody extends StatefulWidget {
+  final _MobileLayoutState state;
+  final Song initialSong;
+
+  const _SongDetailSheetBody({
+    required this.state,
+    required this.initialSong,
+  });
+
+  @override
+  State<_SongDetailSheetBody> createState() => _SongDetailSheetBodyState();
+}
+
+class _SongDetailSheetBodyState extends State<_SongDetailSheetBody> {
+  String activeTab = 'versions';
+  bool showVolumeSlider = false;
+  late TextEditingController titleController;
+  late TextEditingController artistController;
+  late FocusNode focusNodeTitle;
+  late FocusNode focusNodeArtist;
+  String? lastSongId;
+
+  @override
+  void initState() {
+    super.initState();
+    titleController = TextEditingController(text: widget.initialSong.title);
+    artistController = TextEditingController(text: widget.initialSong.artist ?? '未知歌手');
+    focusNodeTitle = FocusNode();
+    focusNodeArtist = FocusNode();
+    lastSongId = widget.initialSong.id;
+
+    focusNodeTitle.addListener(_onTitleFocusChange);
+    focusNodeArtist.addListener(_onArtistFocusChange);
+  }
+
+  @override
+  void dispose() {
+    titleController.dispose();
+    artistController.dispose();
+    focusNodeTitle.dispose();
+    focusNodeArtist.dispose();
+    super.dispose();
+  }
+
+  void _onTitleFocusChange() {
+    if (!focusNodeTitle.hasFocus) {
+      _saveMetadata();
+    }
+  }
+
+  void _onArtistFocusChange() {
+    if (!focusNodeArtist.hasFocus) {
+      _saveMetadata();
+    }
+  }
+
+  Future<void> _saveMetadata() async {
+    if (lastSongId == null) return;
+    final libraryProvider = context.read<LibraryProvider>();
+    final song = libraryProvider.songs.firstWhere(
+      (s) => s.id == lastSongId,
+      orElse: () => widget.initialSong,
+    );
+    final newTitle = titleController.text.trim();
+    final newArtistText = artistController.text.trim();
+    final newArtist = newArtistText == '未知歌手' ? '' : newArtistText;
+
+    if (newTitle.isNotEmpty && (newTitle != song.title || newArtist != (song.artist ?? ''))) {
+      try {
+        await libraryProvider.updateSongMetadata(song.id, newTitle, newArtist);
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('保存元数据失败: $e')),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final libraryProvider = context.watch<LibraryProvider>();
+    final audioProvider = context.watch<AudioPlayerProvider>();
+    final cfg = context.read<UIThemeProvider>().currentTheme;
+
+    // Follow the player's active song if detail view is open
+    final currentActiveSong = audioProvider.activeSong ?? widget.initialSong;
+
+    if (currentActiveSong.id != lastSongId) {
+      lastSongId = currentActiveSong.id;
+      final songData = libraryProvider.songs.firstWhere(
+        (s) => s.id == currentActiveSong.id,
+        orElse: () => currentActiveSong,
+      );
+      titleController.text = songData.title;
+      artistController.text = songData.artist ?? '未知歌手';
+    }
+
+    final song = libraryProvider.songs.firstWhere(
+      (s) => s.id == currentActiveSong.id,
+      orElse: () => currentActiveSong,
+    );
+
+    final isPlayingThisSong = audioProvider.playingSong?.id == song.id;
+    final durationMin = (audioProvider.totalDuration.inSeconds / 60).floor();
+    final durationSec = (audioProvider.totalDuration.inSeconds % 60).toString().padLeft(2, '0');
+    final curMin = (audioProvider.currentPosition.inSeconds / 60).floor();
+    final curSec = (audioProvider.currentPosition.inSeconds % 60).toString().padLeft(2, '0');
+
+    final curMs = audioProvider.currentPosition.inMilliseconds.toDouble();
+    final totMs = audioProvider.totalDuration.inMilliseconds.toDouble();
+    final progress = totMs > 0 ? (curMs / totMs).clamp(0.0, 1.0) : 0.0;
+
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.95,
+      decoration: BoxDecoration(
+        gradient: cfg.bgApp,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: SafeArea(
+        child: Column(
+          children: [
+            // Pull bar / Top close button row
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  IconButton(
+                    icon: Icon(Icons.keyboard_arrow_down, size: 28, color: cfg.textMain),
+                    onPressed: () {
+                      _saveMetadata();
+                      Navigator.of(context).pop();
+                    },
+                  ),
+                  Text(
+                    isPlayingThisSong ? '正在播放' : '歌曲详情',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: cfg.textSub, letterSpacing: 1),
+                  ),
+                  const SizedBox(width: 48), // Spacer
+                ],
+              ),
+            ),
+
+            // Cover section with radial-glow
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 110,
+                    height: 110,
+                    decoration: BoxDecoration(
+                      color: cfg.accentGlow,
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(
+                          color: cfg.accent.withOpacity(0.12),
+                          blurRadius: 20,
+                          spreadRadius: 2,
+                        )
+                      ],
+                      border: Border.all(color: cfg.border),
+                    ),
+                    child: Icon(Icons.music_note, size: 45, color: cfg.accent),
+                  ),
+                  const SizedBox(height: 8),
+
+                  // Editable Title field
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 40),
+                    child: TextField(
+                      controller: titleController,
+                      focusNode: focusNodeTitle,
+                      textAlign: TextAlign.center,
+                      onSubmitted: (_) => _saveMetadata(),
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: cfg.textMain),
+                      decoration: const InputDecoration(
+                        border: InputBorder.none,
+                        isDense: true,
+                        contentPadding: EdgeInsets.symmetric(vertical: 2),
+                      ),
+                    ),
+                  ),
+
+                  // Editable Artist field
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 40),
+                    child: TextField(
+                      controller: artistController,
+                      focusNode: focusNodeArtist,
+                      textAlign: TextAlign.center,
+                      onSubmitted: (_) => _saveMetadata(),
+                      style: TextStyle(fontSize: 12, color: cfg.textSub),
+                      decoration: const InputDecoration(
+                        border: InputBorder.none,
+                        isDense: true,
+                        contentPadding: EdgeInsets.symmetric(vertical: 2),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // Three tab buttons, expanded to fill available height
+            Expanded(
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: InkWell(
+                          onTap: () {
+                            setState(() {
+                              activeTab = 'versions';
+                            });
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                            decoration: BoxDecoration(
+                              border: Border(
+                                bottom: BorderSide(
+                                  color: activeTab == 'versions' ? cfg.accent : Colors.transparent,
+                                  width: 2,
+                                ),
+                              ),
+                            ),
+                            child: Text(
+                              '音频源 (${song.versions.length})',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: activeTab == 'versions' ? FontWeight.bold : FontWeight.normal,
+                                color: activeTab == 'versions' ? cfg.textMain : cfg.textSub,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: InkWell(
+                          onTap: () {
+                            setState(() {
+                              activeTab = 'tags';
+                            });
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                            decoration: BoxDecoration(
+                              border: Border(
+                                bottom: BorderSide(
+                                  color: activeTab == 'tags' ? cfg.accent : Colors.transparent,
+                                  width: 2,
+                                ),
+                              ),
+                            ),
+                            child: Text(
+                              '关联标签 (${song.tags.length})',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: activeTab == 'tags' ? FontWeight.bold : FontWeight.normal,
+                                color: activeTab == 'tags' ? cfg.textMain : cfg.textSub,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: InkWell(
+                          onTap: () {
+                            setState(() {
+                              activeTab = 'lyrics';
+                            });
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                            decoration: BoxDecoration(
+                              border: Border(
+                                bottom: BorderSide(
+                                  color: activeTab == 'lyrics' ? cfg.accent : Colors.transparent,
+                                  width: 2,
+                                ),
+                              ),
+                            ),
+                            child: Text(
+                              '滚动歌词',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: activeTab == 'lyrics' ? FontWeight.bold : FontWeight.normal,
+                                color: activeTab == 'lyrics' ? cfg.textMain : cfg.textSub,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  Divider(height: 1, color: cfg.border),
+                  
+                  // Scrollable list tab content is now Expanded
+                  Expanded(
+                    child: widget.state._buildTabContent(context, song, activeTab, libraryProvider, audioProvider, cfg),
+                  ),
+                ],
+              ),
+            ),
+
+            // Bottom Seeker & Control Area
+            if (isPlayingThisSong) ...[
+              // Seeker
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+                child: Column(
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('$curMin:$curSec', style: TextStyle(fontSize: 11, color: cfg.textSub)),
+                        Text('$durationMin:$durationSec', style: TextStyle(fontSize: 11, color: cfg.textSub)),
+                      ],
+                    ),
+                    SliderTheme(
+                      data: SliderTheme.of(context).copyWith(
+                        trackHeight: 3,
+                        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                        overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+                        activeTrackColor: cfg.accent,
+                        inactiveTrackColor: cfg.sliderTrack,
+                        thumbColor: cfg.accent,
+                      ),
+                      child: Slider(
+                        value: progress,
+                        onChanged: (val) {
+                          final targetMs = (audioProvider.totalDuration.inMilliseconds * val).toInt();
+                          audioProvider.seek(Duration(milliseconds: targetMs));
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              // Control Buttons Row / Volume Slider Row
+              if (showVolumeSlider)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 24, left: 16, right: 16),
+                  child: Row(
+                    children: [
+                      IconButton(
+                        icon: Icon(
+                          audioProvider.volume == 0 ? Icons.volume_off : Icons.volume_up,
+                          size: 20,
+                          color: audioProvider.volume == 0 ? cfg.textSub : cfg.accent,
+                        ),
+                        onPressed: () {
+                          audioProvider.setVolume(audioProvider.volume == 0 ? 0.8 : 0);
+                        },
+                      ),
+                      Expanded(
+                        child: SliderTheme(
+                          data: SliderTheme.of(context).copyWith(
+                            trackHeight: 3,
+                            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                            overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+                            activeTrackColor: cfg.accent,
+                            inactiveTrackColor: cfg.sliderTrack,
+                            thumbColor: cfg.accent,
+                          ),
+                          child: Slider(
+                            value: audioProvider.volume,
+                            onChanged: (val) {
+                              audioProvider.setVolume(val);
+                            },
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        icon: Icon(Icons.close, size: 20, color: cfg.textSub),
+                        onPressed: () {
+                          setState(() {
+                            showVolumeSlider = false;
+                          });
+                        },
+                      ),
+                    ],
+                  ),
+                )
+              else
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 24, left: 16, right: 16),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    children: [
+                      // Play Mode Button
+                      IconButton(
+                        icon: Icon(
+                          audioProvider.playMode == PlayMode.shuffle
+                              ? Icons.shuffle
+                              : audioProvider.playMode == PlayMode.single
+                                  ? Icons.repeat_one
+                                  : Icons.repeat,
+                          size: 20,
+                          color: audioProvider.playMode != PlayMode.list ? cfg.accent : cfg.textSub,
+                        ),
+                        onPressed: () => audioProvider.togglePlayMode(),
+                      ),
+
+                      // Skip Back
+                      IconButton(
+                        icon: Icon(Icons.skip_previous, size: 28, color: cfg.textMain),
+                        onPressed: () => audioProvider.playPrevious(),
+                      ),
+
+                      // Large center play/pause circle
+                      GestureDetector(
+                        onTap: () => audioProvider.playPause(),
+                        child: Container(
+                          width: 56,
+                          height: 56,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: cfg.accent,
+                            boxShadow: [
+                              BoxShadow(
+                                color: cfg.accentGlow,
+                                blurRadius: 15,
+                                offset: const Offset(0, 5),
+                              ),
+                            ],
+                          ),
+                          alignment: Alignment.center,
+                          child: Icon(
+                            audioProvider.isPlaying ? Icons.pause : Icons.play_arrow,
+                            color: Colors.white,
+                            size: 26,
+                          ),
+                        ),
+                      ),
+
+                      // Skip Next
+                      IconButton(
+                        icon: Icon(Icons.skip_next, size: 28, color: cfg.textMain),
+                        onPressed: () => audioProvider.playNext(),
+                      ),
+
+                      // Volume button
+                      IconButton(
+                        icon: Icon(
+                          audioProvider.volume == 0 ? Icons.volume_off : Icons.volume_up,
+                          size: 20,
+                          color: audioProvider.volume == 0 ? cfg.textSub : cfg.accent,
+                        ),
+                        onPressed: () {
+                          setState(() {
+                            showVolumeSlider = true;
+                          });
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+            ] else ...[
+              const SizedBox(height: 24),
+            ],
+          ],
+        ),
+      ),
     );
   }
 }

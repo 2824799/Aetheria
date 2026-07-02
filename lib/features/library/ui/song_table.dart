@@ -309,7 +309,9 @@ class _SongTableState extends State<SongTable> {
                 final freq = primaryVersion.sampleRate != null 
                     ? '${(primaryVersion.sampleRate! / 1000).toStringAsFixed(1).replaceAll('.0', '')}k' 
                     : '';
-                final depth = primaryVersion.bitDepth != null ? '${primaryVersion.bitDepth}b' : '';
+                final depth = (primaryVersion.format?.toLowerCase() == 'flac' && primaryVersion.bitDepth != null)
+                    ? '${primaryVersion.bitDepth}b'
+                    : '';
                 final rate = primaryVersion.bitrate != null ? '${(primaryVersion.bitrate! / 1000).round()}kbps' : '';
                 specText = [freq, depth, rate].where((e) => e.isNotEmpty).join('/') ;
                 if (specText.isEmpty) specText = '未知';

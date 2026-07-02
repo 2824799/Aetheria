@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:audioplayers/audioplayers.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:aetheria/src/rust/models/song.dart';
 import 'package:aetheria/src/rust/api/music.dart' as music;
+import 'package:aetheria/services/native_audio_helper.dart';
 import 'dart:io';
+import 'package:audio_session/audio_session.dart' hide AndroidAudioFocus, AVAudioSessionCategory, AVAudioSessionOptions;
 
 enum PlayMode { list, single, shuffle }
 
@@ -21,6 +24,7 @@ class AudioPlayerProvider extends ChangeNotifier {
   
   double volume = 0.8;
   PlayMode playMode = PlayMode.list;
+  bool playAlongside = false;
   
   bool isDetailOpen = false;
   String activeTab = 'versions';
@@ -29,7 +33,96 @@ class AudioPlayerProvider extends ChangeNotifier {
   int? _cachedAudioServerPort;
 
   AudioPlayerProvider() {
+    _initAudioSession();
     _initListeners();
+    loadSettings();
+  }
+
+  Future<void> _initAudioSession() async {
+    try {
+      final session = await AudioSession.instance;
+      await session.configure(const AudioSessionConfiguration.music());
+
+      session.interruptionEventStream.listen((event) async {
+        if (event.begin) {
+          switch (event.type) {
+            case AudioInterruptionType.duck:
+            case AudioInterruptionType.pause:
+            case AudioInterruptionType.unknown:
+              if (isPlaying) {
+                await _audioPlayer.pause();
+              }
+              break;
+          }
+        }
+      });
+
+      session.becomingNoisyEventStream.listen((_) async {
+        if (isPlaying) {
+          await _audioPlayer.pause();
+        }
+      });
+    } catch (e) {
+      debugPrint('初始化 AudioSession 失败: $e');
+    }
+  }
+
+  Future<void> loadSettings() async {
+    try {
+      if (Platform.isAndroid) {
+        await NativeAudioHelper.requestNotificationPermission();
+      }
+      final prefs = await SharedPreferences.getInstance();
+      playAlongside = prefs.getBool('play-alongside') ?? false;
+      await _updateAudioContext();
+      notifyListeners();
+    } catch (_) {}
+  }
+
+  Future<void> setPlayAlongside(bool value) async {
+    playAlongside = value;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('play-alongside', value);
+      await _updateAudioContext();
+    } catch (_) {}
+  }
+
+  Future<void> _updateAudioContext() async {
+    try {
+      if (playAlongside) {
+        await _audioPlayer.setAudioContext(
+          AudioContext(
+            android: const AudioContextAndroid(
+              audioFocus: AndroidAudioFocus.none,
+              stayAwake: true,
+              contentType: AndroidContentType.music,
+              usageType: AndroidUsageType.media,
+            ),
+            iOS: AudioContextIOS(
+              category: AVAudioSessionCategory.playback,
+              options: {AVAudioSessionOptions.mixWithOthers},
+            ),
+          ),
+        );
+      } else {
+        await _audioPlayer.setAudioContext(
+          AudioContext(
+            android: const AudioContextAndroid(
+              audioFocus: AndroidAudioFocus.gain,
+              stayAwake: true,
+              contentType: AndroidContentType.music,
+              usageType: AndroidUsageType.media,
+            ),
+            iOS: AudioContextIOS(
+              category: AVAudioSessionCategory.playback,
+              options: const {},
+            ),
+          ),
+        );
+      }
+    } catch (_) {}
   }
 
   void _initListeners() {
@@ -68,6 +161,7 @@ class AudioPlayerProvider extends ChangeNotifier {
     _audioPlayer.onPlayerStateChanged.listen((state) {
       isPlaying = state == PlayerState.playing;
       notifyListeners();
+      _updateNotification();
     });
     
     _audioPlayer.onPlayerComplete.listen((_) {
@@ -151,11 +245,45 @@ class AudioPlayerProvider extends ChangeNotifier {
     
     final path = '$libraryPath/${version.filepath}'.replaceAll('\\', '/');
     
-    // Verify file existence on the local filesystem
+    // Comprehensive filesystem diagnostics
     final file = File(path);
+    final parentDir = file.parent;
+    final diag = StringBuffer();
+    
+    diag.writeln('【诊断报告】');
+    diag.writeln('libraryPath: $libraryPath');
+    diag.writeln('version.filepath: ${version.filepath}');
+    diag.writeln('拼接完整路径: $path');
+    
+    final parentExists = await parentDir.exists();
+    diag.writeln('父目录存在: $parentExists (${parentDir.path})');
+    
+    if (parentExists) {
+      try {
+        final entries = await parentDir.list().take(5).toList();
+        diag.writeln('父目录前5项:');
+        for (var e in entries) {
+          final name = e.path.split('/').last;
+          final stat = await e.stat();
+          diag.writeln('  $name (${stat.type}, ${stat.size}bytes)');
+        }
+      } catch (e) {
+        diag.writeln('列目录失败: $e');
+      }
+    }
+    
     final exists = await file.exists();
+    diag.writeln('File.exists(): $exists');
+    
+    try {
+      final stat = await file.stat();
+      diag.writeln('FileStat: type=${stat.type}, size=${stat.size}, modified=${stat.modified}');
+    } catch (e) {
+      diag.writeln('file.stat()失败: $e');
+    }
+    
     if (!exists) {
-      throw '音频物理文件不存在！\n期望路径: $path\n数据库内记录: ${version.filepath}';
+      throw diag.toString();
     }
     
     // Verify file readability
@@ -163,7 +291,8 @@ class AudioPlayerProvider extends ChangeNotifier {
       final access = await file.open(mode: FileMode.read);
       await access.close();
     } catch (e) {
-      throw '音频文件无法读取，权限不足: $e\n文件路径: $path';
+      diag.writeln('file.open()失败: $e');
+      throw diag.toString();
     }
     
     String url = path;
@@ -175,6 +304,7 @@ class AudioPlayerProvider extends ChangeNotifier {
     }
     
     notifyListeners();
+    _updateNotification();
   }
 
   void playNext() {
@@ -226,8 +356,21 @@ class AudioPlayerProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  void _updateNotification() {
+    if (Platform.isAndroid && playingSong != null) {
+      NativeAudioHelper.showNotification(
+        playingSong!.title,
+        playingSong!.artist ?? '未知歌手',
+        isPlaying,
+      );
+    }
+  }
+
   @override
   void dispose() {
+    if (Platform.isAndroid) {
+      NativeAudioHelper.hideNotification();
+    }
     _audioPlayer.dispose();
     super.dispose();
   }

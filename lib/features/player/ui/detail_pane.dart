@@ -7,6 +7,8 @@ import 'package:aetheria/core/providers/library_provider.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
 import 'package:aetheria/src/rust/models/song.dart';
 import 'package:aetheria/src/rust/api/music.dart' as music;
+import 'package:aetheria/services/native_audio_helper.dart';
+import 'dart:io';
 
 class DetailPane extends StatelessWidget {
   const DetailPane({super.key});
@@ -63,26 +65,47 @@ class DetailPane extends StatelessWidget {
 
   Future<void> _exportVersion(BuildContext context, AudioVersion version) async {
     try {
-      String? destPath = await FilePicker.platform.saveFile(
-        fileName: version.originalName,
-        dialogTitle: '选择保存音频的位置',
-      );
+      if (Platform.isAndroid) {
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => const Center(child: CircularProgressIndicator()),
+        );
+        final libraryPath = context.read<LibraryProvider>().libraryPath;
+        final srcPath = '$libraryPath/${version.filepath}'.replaceAll('\\', '/');
+        
+        await NativeAudioHelper.saveToDownloads(srcPath, version.originalName);
+        
+        if (!context.mounted) return;
+        Navigator.of(context).pop(); // pop progress indicator
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('已成功导出至系统 Downloads/Aetheria 文件夹！')),
+        );
+      } else {
+        String? destPath = await FilePicker.platform.saveFile(
+          fileName: version.originalName,
+          dialogTitle: '选择保存音频的位置',
+        );
 
-      if (destPath == null) return;
+        if (destPath == null) return;
 
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (ctx) => const Center(child: CircularProgressIndicator()),
-      );
+        if (!context.mounted) return;
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => const Center(child: CircularProgressIndicator()),
+        );
 
-      await music.exportAudioFile(versionId: version.id, destPath: destPath);
+        await music.exportAudioFile(versionId: version.id, destPath: destPath);
 
-      Navigator.of(context).pop(); // pop progress indicator
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('音频文件导出还原成功！')),
-      );
+        if (!context.mounted) return;
+        Navigator.of(context).pop(); // pop progress indicator
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('音频文件导出还原成功！')),
+        );
+      }
     } catch (e) {
+      if (!context.mounted) return;
       Navigator.of(context).pop();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('导出失败: $e')),

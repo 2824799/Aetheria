@@ -14,6 +14,7 @@ class LibraryProvider extends ChangeNotifier {
   
   String searchQuery = '';
   List<PlatformInt64> selectedTags = [];
+  List<PlatformInt64> excludedTags = [];
   String filterMode = 'AND'; // 'AND' or 'OR'
   
   String libraryPath = '';
@@ -256,6 +257,7 @@ class LibraryProvider extends ChangeNotifier {
       await music.resetLibrary();
       activePlaylistId = null;
       selectedTags.clear();
+      excludedTags.clear();
       searchQuery = '';
       await loadLibrary();
     } catch (e) {
@@ -273,6 +275,9 @@ class LibraryProvider extends ChangeNotifier {
   void toggleTag(PlatformInt64 tagId) {
     if (selectedTags.contains(tagId)) {
       selectedTags.remove(tagId);
+      excludedTags.add(tagId);
+    } else if (excludedTags.contains(tagId)) {
+      excludedTags.remove(tagId);
     } else {
       selectedTags.add(tagId);
     }
@@ -323,14 +328,24 @@ class LibraryProvider extends ChangeNotifier {
     }
     
     // Filter by tags
-    if (selectedTags.isNotEmpty) {
+    if (selectedTags.isNotEmpty || excludedTags.isNotEmpty) {
       list = list.where((song) {
         final songTagIds = song.tags.map((t) => t.id).toSet();
-        if (filterMode == 'AND') {
-          return selectedTags.every((id) => songTagIds.contains(id));
-        } else {
-          return selectedTags.any((id) => songTagIds.contains(id));
+        
+        if (excludedTags.isNotEmpty) {
+          final hasExcluded = excludedTags.any((id) => songTagIds.contains(id));
+          if (hasExcluded) return false;
         }
+        
+        if (selectedTags.isNotEmpty) {
+          if (filterMode == 'AND') {
+            return selectedTags.every((id) => songTagIds.contains(id));
+          } else {
+            return selectedTags.any((id) => songTagIds.contains(id));
+          }
+        }
+        
+        return true;
       }).toList();
     }
     

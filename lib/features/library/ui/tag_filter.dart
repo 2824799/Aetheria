@@ -53,10 +53,10 @@ class _TagFilterState extends State<TagFilter> {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    _buildToggleBtn('交集 (AND)', libraryProvider.filterMode == 'AND', () {
+                    _buildToggleBtn('全部包含', libraryProvider.filterMode == 'AND', () {
                       libraryProvider.setFilterMode('AND');
                     }, cfg),
-                    _buildToggleBtn('并集 (OR)', libraryProvider.filterMode == 'OR', () {
+                    _buildToggleBtn('任意包含', libraryProvider.filterMode == 'OR', () {
                       libraryProvider.setFilterMode('OR');
                     }, cfg),
                   ],
@@ -78,7 +78,7 @@ class _TagFilterState extends State<TagFilter> {
                       Icon(Icons.sell, size: 14, color: cfg.textSub),
                       const SizedBox(width: 8),
                       Text(
-                        '标签多维过滤器',
+                        '标签过滤器',
                         style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
@@ -138,9 +138,15 @@ class _TagFilterState extends State<TagFilter> {
                         runSpacing: 8,
                         children: libraryProvider.tags.map((tag) {
                           final isSelected = libraryProvider.selectedTags.contains(tag.id);
-                          final tagColor = tag.color != null 
+                          final isExcluded = libraryProvider.excludedTags.contains(tag.id);
+                          
+                          Color tagColor = tag.color != null 
                               ? _parseHexColor(tag.color!, cfg.textSub) 
                               : cfg.textSub;
+                          
+                          if (isExcluded) {
+                            tagColor = Colors.redAccent;
+                          }
                           
                           return InkWell(
                             onTap: () => libraryProvider.toggleTag(tag.id),
@@ -149,13 +155,13 @@ class _TagFilterState extends State<TagFilter> {
                               duration: const Duration(milliseconds: 150),
                               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
                               decoration: BoxDecoration(
-                                color: isSelected ? cfg.bgHover : cfg.bgPanel,
+                                color: (isSelected || isExcluded) ? cfg.bgHover : cfg.bgPanel,
                                 borderRadius: BorderRadius.circular(14),
                                 border: Border.all(
-                                  color: isSelected ? tagColor : cfg.border,
+                                  color: (isSelected || isExcluded) ? tagColor : cfg.border,
                                   width: 1.0,
                                 ),
-                                boxShadow: isSelected
+                                boxShadow: (isSelected || isExcluded)
                                     ? [
                                         BoxShadow(
                                           color: tagColor.withOpacity(0.25),
@@ -179,10 +185,13 @@ class _TagFilterState extends State<TagFilter> {
                                   Text(
                                     tag.name,
                                     style: TextStyle(
-                                      color: isSelected ? cfg.textMain : tagColor,
+                                      color: (isSelected || isExcluded) ? cfg.textMain : tagColor,
                                       fontSize: 12,
                                       fontWeight: FontWeight.w500,
                                       fontFamily: 'Outfit',
+                                      decoration: isExcluded ? TextDecoration.lineThrough : null,
+                                      decorationColor: Colors.redAccent,
+                                      decorationThickness: 2.0,
                                     ),
                                   ),
                                 ],

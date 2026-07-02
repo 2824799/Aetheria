@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:aetheria/src/rust/api/music.dart' as music;
 import 'package:aetheria/src/rust/frb_generated.dart';
 import 'package:path_provider/path_provider.dart';
@@ -13,8 +14,16 @@ Future<void> main() async {
   await RustLib.init();
   
   // Initialize library path for Rust backend
-  final directory = await getApplicationDocumentsDirectory();
-  await music.initializeLibraryPath(path: directory.path);
+  final prefs = await SharedPreferences.getInstance();
+  final savedPath = prefs.getString('aetheria-library-path');
+  String libPath;
+  if (savedPath != null && savedPath.isNotEmpty) {
+    libPath = savedPath;
+  } else {
+    final directory = await getApplicationDocumentsDirectory();
+    libPath = directory.path;
+  }
+  await music.initializeLibraryPath(path: libPath);
   
   // Start the background local audio streaming server
   final port = await music.startAudioServer();

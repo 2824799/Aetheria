@@ -33,7 +33,7 @@ class _MainLayoutState extends State<MainLayout> {
     final themeProvider = context.watch<UIThemeProvider>();
     final cfg = themeProvider.currentTheme;
 
-    if (libraryProvider.isLoading) {
+    if (libraryProvider.isLoading && libraryProvider.songs.isEmpty) {
       return const Scaffold(
         body: Center(child: CircularProgressIndicator()),
       );
