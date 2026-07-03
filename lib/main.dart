@@ -11,39 +11,80 @@ import 'package:aetheria/features/layout/main_layout.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await RustLib.init();
-  
-  // Initialize library path for Rust backend
-  final prefs = await SharedPreferences.getInstance();
-  final savedPath = prefs.getString('aetheria-library-path');
-  String libPath;
-  if (savedPath != null && savedPath.isNotEmpty) {
-    libPath = savedPath;
-  } else {
-    final directory = await getApplicationDocumentsDirectory();
-    libPath = directory.path;
-  }
-  await music.initializeLibraryPath(path: libPath);
 
+  String? initError;
+
+  try {
+    await RustLib.init();
+  } catch (e, st) {
+    initError = 'RustLib.init() failed: $e\n$st';
+    debugPrint(initError);
+  }
+
+  if (initError == null) {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedPath = prefs.getString('aetheria-library-path');
+      String libPath;
+      if (savedPath != null && savedPath.isNotEmpty) {
+        libPath = savedPath;
+      } else {
+        final directory = await getApplicationDocumentsDirectory();
+        libPath = directory.path;
+      }
+      await music.initializeLibraryPath(path: libPath);
+    } catch (e, st) {
+      initError = 'initializeLibraryPath() failed: $e\n$st';
+      debugPrint(initError);
+    }
+  }
+
+  // ALWAYS run the app — even if Rust init failed, show something on screen
+  // so we can diagnose the error instead of a blank white screen.
   runApp(
-    MultiProvider(
-      providers: [
-        ChangeNotifierProvider(create: (_) => UIThemeProvider()),
-        ChangeNotifierProvider(create: (_) => LibraryProvider()),
-        ChangeNotifierProvider(create: (_) => AudioPlayerProvider()),
-      ],
-      child: const AetheriaApp(),
-    ),
+    initError != null
+        ? MaterialApp(
+            home: Scaffold(
+              backgroundColor: const Color(0xFF1a1a2e),
+              body: SafeArea(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Aetheria 启动失败',
+                          style: TextStyle(
+                              color: Colors.redAccent,
+                              fontSize: 22,
+                              fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 16),
+                      SelectableText(initError!,
+                          style: const TextStyle(
+                              color: Colors.white70, fontSize: 13)),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          )
+        : MultiProvider(
+            providers: [
+              ChangeNotifierProvider(create: (_) => UIThemeProvider()),
+              ChangeNotifierProvider(create: (_) => LibraryProvider()),
+              ChangeNotifierProvider(create: (_) => AudioPlayerProvider()),
+            ],
+            child: const AetheriaApp(),
+          ),
   );
 
   // Start the background audio server AFTER runApp so it never blocks the UI.
-  // The cpal-based Rust engine handles playback directly; this server is only
-  // kept for legacy/fallback streaming and can start lazily.
-  try {
-    final port = await music.startAudioServer();
-    debugPrint('Rust audio server running on port $port');
-  } catch (e) {
-    debugPrint('Audio server start failed (non-fatal): $e');
+  if (initError == null) {
+    try {
+      final port = await music.startAudioServer();
+      debugPrint('Rust audio server running on port $port');
+    } catch (e) {
+      debugPrint('Audio server start failed (non-fatal): $e');
+    }
   }
 }
 
