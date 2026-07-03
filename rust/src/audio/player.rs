@@ -30,20 +30,20 @@ impl AudioBuffer {
     /// the block) if `stop_flag` becomes set, so the decode thread can always be joined even
     /// when the output stream is paused and therefore not draining the buffer.
     pub fn push(&self, samples: &[f32], stop_flag: &AtomicBool) {
-        let mut queue = self.data.lock().unwrap();
+        let mut queue = self.data.lock().unwrap_or_else(|e| e.into_inner());
         while queue.len() + samples.len() > self.capacity {
             drop(queue);
             if stop_flag.load(Ordering::SeqCst) {
                 return;
             }
             thread::sleep(Duration::from_millis(5));
-            queue = self.data.lock().unwrap();
+            queue = self.data.lock().unwrap_or_else(|e| e.into_inner());
         }
         queue.extend(samples.iter().cloned());
     }
 
     pub fn pop(&self, out: &mut [f32]) -> usize {
-        let mut queue = self.data.lock().unwrap();
+        let mut queue = self.data.lock().unwrap_or_else(|e| e.into_inner());
         let len = out.len().min(queue.len());
         for i in 0..len {
             out[i] = queue.pop_front().unwrap_or(0.0);
@@ -52,11 +52,11 @@ impl AudioBuffer {
     }
 
     pub fn clear(&self) {
-        self.data.lock().unwrap().clear();
+        self.data.lock().unwrap_or_else(|e| e.into_inner()).clear();
     }
 
     pub fn len(&self) -> usize {
-        self.data.lock().unwrap().len()
+        self.data.lock().unwrap_or_else(|e| e.into_inner()).len()
     }
 }
 
@@ -169,7 +169,9 @@ fn build_output(
                         for i in n..data.len() {
                             data[i] = 0.0;
                         }
-                        fp.fetch_add((n / ch) as u64, Ordering::Relaxed);
+                        if ch > 0 {
+                            fp.fetch_add((n / ch) as u64, Ordering::Relaxed);
+                        }
                     },
                     err_fn,
                     None,
@@ -191,7 +193,9 @@ fn build_output(
                         for i in n..data.len() {
                             data[i] = 0;
                         }
-                        fp.fetch_add((n / ch) as u64, Ordering::Relaxed);
+                        if ch > 0 {
+                            fp.fetch_add((n / ch) as u64, Ordering::Relaxed);
+                        }
                     },
                     err_fn,
                     None,
@@ -213,7 +217,9 @@ fn build_output(
                         for i in n..data.len() {
                             data[i] = 0;
                         }
-                        fp.fetch_add((n / ch) as u64, Ordering::Relaxed);
+                        if ch > 0 {
+                            fp.fetch_add((n / ch) as u64, Ordering::Relaxed);
+                        }
                     },
                     err_fn,
                     None,
@@ -235,7 +241,9 @@ fn build_output(
                         for i in n..data.len() {
                             data[i] = 0;
                         }
-                        fp.fetch_add((n / ch) as u64, Ordering::Relaxed);
+                        if ch > 0 {
+                            fp.fetch_add((n / ch) as u64, Ordering::Relaxed);
+                        }
                     },
                     err_fn,
                     None,
@@ -257,7 +265,9 @@ fn build_output(
                         for i in n..data.len() {
                             data[i] = 0;
                         }
-                        fp.fetch_add((n / ch) as u64, Ordering::Relaxed);
+                        if ch > 0 {
+                            fp.fetch_add((n / ch) as u64, Ordering::Relaxed);
+                        }
                     },
                     err_fn,
                     None,
@@ -279,7 +289,9 @@ fn build_output(
                         for i in n..data.len() {
                             data[i] = 0.0;
                         }
-                        fp.fetch_add((n / ch) as u64, Ordering::Relaxed);
+                        if ch > 0 {
+                            fp.fetch_add((n / ch) as u64, Ordering::Relaxed);
+                        }
                     },
                     err_fn,
                     None,
@@ -303,7 +315,7 @@ pub fn start_playback(
     pitch_algo: String,
     normalization_gain: f32,
 ) -> Result<(), String> {
-    let mut state = GLOBAL_PLAYER.lock().unwrap();
+    let mut state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
 
     // Stop any existing playback.
     state.stop_flag.store(true, Ordering::SeqCst);
@@ -354,7 +366,7 @@ pub fn start_playback(
 
             // Handle seek requests.
             {
-                let mut req = seek_request.lock().unwrap();
+                let mut req = seek_request.lock().unwrap_or_else(|e| e.into_inner());
                 if let Some(sec) = req.take() {
                     if let Err(e) = decoder.seek(sec) {
                         eprintln!("Seek error: {}", e);
@@ -381,7 +393,7 @@ pub fn start_playback(
             }
 
             // 1. Master volume * loudness normalization gain.
-            let total_gain = *volume.lock().unwrap() * *norm_gain.lock().unwrap();
+            let total_gain = *volume.lock().unwrap_or_else(|e| e.into_inner()) * *norm_gain.lock().unwrap_or_else(|e| e.into_inner());
             if (total_gain - 1.0).abs() > 0.001 {
                 for sample in block.iter_mut() {
                     *sample *= total_gain;
@@ -389,9 +401,9 @@ pub fn start_playback(
             }
 
             // 2. Pitch shift (block-based; only meaningful for stereo output).
-            let current_pitch = *pitch.lock().unwrap();
+            let current_pitch = *pitch.lock().unwrap_or_else(|e| e.into_inner());
             if current_pitch.abs() > 0.01 && channels == 2 {
-                let current_algo = algo.lock().unwrap().clone();
+                let current_algo = algo.lock().unwrap_or_else(|e| e.into_inner()).clone();
                 let pitch_factor = 2.0f64.powf(current_pitch / 12.0);
                 let processed = match current_algo.as_str() {
                     "resample" => dsp::pitch_shift_resample(&block, pitch_factor),
@@ -410,7 +422,7 @@ pub fn start_playback(
 }
 
 pub fn pause_playback() -> Result<(), String> {
-    let state = GLOBAL_PLAYER.lock().unwrap();
+    let state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(s) = &state.stream {
         s.0.pause().map_err(|e| e.to_string())?;
     }
@@ -418,7 +430,7 @@ pub fn pause_playback() -> Result<(), String> {
 }
 
 pub fn resume_playback() -> Result<(), String> {
-    let state = GLOBAL_PLAYER.lock().unwrap();
+    let state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(s) = &state.stream {
         s.0.play().map_err(|e| e.to_string())?;
     }
@@ -426,13 +438,13 @@ pub fn resume_playback() -> Result<(), String> {
 }
 
 pub fn seek_playback(secs: f64) -> Result<(), String> {
-    let state = GLOBAL_PLAYER.lock().unwrap();
+    let state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
     // Clear buffered audio immediately so resume/seek is responsive and stale samples
     // are never played. The decode thread will refill from the requested position.
     if let Some(b) = &state.buffer {
         b.clear();
     }
-    *state.seek_request.lock().unwrap() = Some(secs);
+    *state.seek_request.lock().unwrap_or_else(|e| e.into_inner()) = Some(secs);
     state
         .frames_played
         .store((secs * state.sample_rate as f64).round() as u64, Ordering::SeqCst);
@@ -440,7 +452,7 @@ pub fn seek_playback(secs: f64) -> Result<(), String> {
 }
 
 pub fn stop_playback() -> Result<(), String> {
-    let mut state = GLOBAL_PLAYER.lock().unwrap();
+    let mut state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
     state.stop_flag.store(true, Ordering::SeqCst);
     if let Some(handle) = state.thread_handle.take() {
         let _ = handle.join();
@@ -451,15 +463,15 @@ pub fn stop_playback() -> Result<(), String> {
 }
 
 pub fn set_volume(vol: f32) -> Result<(), String> {
-    let state = GLOBAL_PLAYER.lock().unwrap();
-    *state.volume.lock().unwrap() = vol;
+    let state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
+    *state.volume.lock().unwrap_or_else(|e| e.into_inner()) = vol;
     Ok(())
 }
 
 pub fn set_pitch(pitch_val: f64, pitch_algo: String) -> Result<(), String> {
-    let state = GLOBAL_PLAYER.lock().unwrap();
-    *state.pitch.lock().unwrap() = pitch_val;
-    *state.algo.lock().unwrap() = pitch_algo;
+    let state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
+    *state.pitch.lock().unwrap_or_else(|e| e.into_inner()) = pitch_val;
+    *state.algo.lock().unwrap_or_else(|e| e.into_inner()) = pitch_algo;
     Ok(())
 }
 
@@ -467,7 +479,7 @@ pub fn set_pitch(pitch_val: f64, pitch_algo: String) -> Result<(), String> {
 /// hardware (not samples queued in the buffer), so it stays accurate regardless of
 /// buffering or pitch shifting.
 pub fn get_position() -> f64 {
-    let state = GLOBAL_PLAYER.lock().unwrap();
+    let state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
     let frames = state.frames_played.load(Ordering::Relaxed);
     if state.sample_rate == 0 {
         0.0

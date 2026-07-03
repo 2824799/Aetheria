@@ -19,6 +19,8 @@ cpal = { version = "0.15", features = ["oboe-shared-stdcxx"] }
 lazy_static = "1.4"
 md5 = "0.7"
 base64 = "0.22"
+jni = "0.21.1"
+ndk-context = "0.1.1"
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }

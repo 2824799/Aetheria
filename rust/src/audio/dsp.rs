@@ -560,12 +560,16 @@ pub fn time_stretch_wsola(input: &[f32], stretch_factor: f64) -> Vec<f32> {
     }
 
     while in_pos + window_size + tolerance < num_samples && out_pos + window_size < target_num_samples {
-        let natural_pos = (in_pos as isize - hop_a as isize + last_delta + hop_s as isize) as usize;
+        let natural_pos = (in_pos as isize - hop_a as isize + last_delta + hop_s as isize).max(0) as usize;
         let mut best_offset = 0isize;
         let mut min_diff = f32::MAX;
 
         for delta in -(tolerance as isize)..=(tolerance as isize) {
-            let candidate_pos = (in_pos as isize + delta) as usize;
+            let candidate_pos_val = in_pos as isize + delta;
+            if candidate_pos_val < 0 {
+                continue;
+            }
+            let candidate_pos = candidate_pos_val as usize;
             let mut diff = 0.0f32;
             for n in 0..hop_s {
                 let natural_idx = (natural_pos + n) * 2;
@@ -580,7 +584,7 @@ pub fn time_stretch_wsola(input: &[f32], stretch_factor: f64) -> Vec<f32> {
         }
 
         last_delta = best_offset;
-        let actual_in_pos = (in_pos as isize + best_offset) as usize;
+        let actual_in_pos = (in_pos as isize + best_offset).max(0) as usize;
 
         for n in 0..window_size {
             let win = hanning[n];

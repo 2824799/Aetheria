@@ -27,9 +27,18 @@ class MainActivity : FlutterActivity() {
     private val NOTIFICATION_ID = 1001
     private val CHANNEL_ID = "music_playback"
 
+    private external fun initAudioContext(context: Context)
+
+    companion object {
+        init {
+            System.loadLibrary("rust_lib_aetheria")
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setHighRefreshRate()
+        initAudioContext(applicationContext)
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
