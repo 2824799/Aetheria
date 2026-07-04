@@ -38,7 +38,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.12.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 990999681;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 93470937;
 
 // Section: executor
 
@@ -1185,6 +1185,39 @@ fn wire__crate__api__music__set_rust_output_buffer_ms_impl(
         },
     )
 }
+fn wire__crate__api__music__set_rust_output_latency_mode_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "set_rust_output_latency_mode",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_mode = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::api::music::set_rust_output_latency_mode(api_mode)?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
 fn wire__crate__api__music__set_rust_pitch_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -1601,6 +1634,7 @@ impl SseDecode for crate::audio::player::AudioOutputInfo {
         let mut var_channels = <u32>::sse_decode(deserializer);
         let mut var_sampleFormat = <String>::sse_decode(deserializer);
         let mut var_bufferSize = <String>::sse_decode(deserializer);
+        let mut var_outputLatencyMode = <String>::sse_decode(deserializer);
         let mut var_outputBufferMs = <u32>::sse_decode(deserializer);
         let mut var_underruns = <u64>::sse_decode(deserializer);
         let mut var_clippedSamples = <u64>::sse_decode(deserializer);
@@ -1611,6 +1645,7 @@ impl SseDecode for crate::audio::player::AudioOutputInfo {
             channels: var_channels,
             sample_format: var_sampleFormat,
             buffer_size: var_bufferSize,
+            output_latency_mode: var_outputLatencyMode,
             output_buffer_ms: var_outputBufferMs,
             underruns: var_underruns,
             clipped_samples: var_clippedSamples,
@@ -2012,21 +2047,27 @@ fn pde_ffi_dispatcher_primary_impl(
             rust_vec_len,
             data_len,
         ),
-        35 => wire__crate__api__music__set_rust_pitch_impl(port, ptr, rust_vec_len, data_len),
-        36 => wire__crate__api__music__set_rust_volume_impl(port, ptr, rust_vec_len, data_len),
-        37 => wire__crate__api__music__start_audio_server_impl(port, ptr, rust_vec_len, data_len),
-        38 => wire__crate__api__music__start_rust_playback_impl(port, ptr, rust_vec_len, data_len),
-        39 => wire__crate__api__music__stop_rust_playback_impl(port, ptr, rust_vec_len, data_len),
-        40 => wire__crate__api__music__tag_song_impl(port, ptr, rust_vec_len, data_len),
-        41 => wire__crate__api__music__update_song_metadata_impl(port, ptr, rust_vec_len, data_len),
-        42 => wire__crate__api__music__update_tag_impl(port, ptr, rust_vec_len, data_len),
-        43 => {
+        35 => wire__crate__api__music__set_rust_output_latency_mode_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        36 => wire__crate__api__music__set_rust_pitch_impl(port, ptr, rust_vec_len, data_len),
+        37 => wire__crate__api__music__set_rust_volume_impl(port, ptr, rust_vec_len, data_len),
+        38 => wire__crate__api__music__start_audio_server_impl(port, ptr, rust_vec_len, data_len),
+        39 => wire__crate__api__music__start_rust_playback_impl(port, ptr, rust_vec_len, data_len),
+        40 => wire__crate__api__music__stop_rust_playback_impl(port, ptr, rust_vec_len, data_len),
+        41 => wire__crate__api__music__tag_song_impl(port, ptr, rust_vec_len, data_len),
+        42 => wire__crate__api__music__update_song_metadata_impl(port, ptr, rust_vec_len, data_len),
+        43 => wire__crate__api__music__update_tag_impl(port, ptr, rust_vec_len, data_len),
+        44 => {
             wire__crate__api__music__update_version_duration_impl(port, ptr, rust_vec_len, data_len)
         }
-        44 => {
+        45 => {
             wire__crate__api__music__update_version_status_impl(port, ptr, rust_vec_len, data_len)
         }
-        45 => wire__crate__api__music__verify_audio_file_impl(port, ptr, rust_vec_len, data_len),
+        46 => wire__crate__api__music__verify_audio_file_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -2056,6 +2097,7 @@ impl flutter_rust_bridge::IntoDart for crate::audio::player::AudioOutputInfo {
             self.channels.into_into_dart().into_dart(),
             self.sample_format.into_into_dart().into_dart(),
             self.buffer_size.into_into_dart().into_dart(),
+            self.output_latency_mode.into_into_dart().into_dart(),
             self.output_buffer_ms.into_into_dart().into_dart(),
             self.underruns.into_into_dart().into_dart(),
             self.clipped_samples.into_into_dart().into_dart(),
@@ -2212,6 +2254,7 @@ impl SseEncode for crate::audio::player::AudioOutputInfo {
         <u32>::sse_encode(self.channels, serializer);
         <String>::sse_encode(self.sample_format, serializer);
         <String>::sse_encode(self.buffer_size, serializer);
+        <String>::sse_encode(self.output_latency_mode, serializer);
         <u32>::sse_encode(self.output_buffer_ms, serializer);
         <u64>::sse_encode(self.underruns, serializer);
         <u64>::sse_encode(self.clipped_samples, serializer);

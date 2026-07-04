@@ -7,7 +7,7 @@ use std::thread;
 use std::time::Duration;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{BufferSize, SampleFormat, StreamConfig};
+use cpal::{BufferSize, SampleFormat, StreamConfig, SupportedBufferSize};
 
 use crate::audio::dsp::{self, StreamDecoder};
 use crate::audio::rubberband::RubberBandPitchShifter;
@@ -47,6 +47,7 @@ pub struct AudioOutputInfo {
     pub channels: u32,
     pub sample_format: String,
     pub buffer_size: String,
+    pub output_latency_mode: String,
     pub output_buffer_ms: u32,
     pub underruns: u64,
     pub clipped_samples: u64,
@@ -60,6 +61,7 @@ struct OutputDeviceInfo {
     channels: u32,
     sample_format: String,
     buffer_size: String,
+    output_latency_mode: String,
 }
 
 impl Default for OutputDeviceInfo {
@@ -70,6 +72,7 @@ impl Default for OutputDeviceInfo {
             channels: 0,
             sample_format: "unknown".to_string(),
             buffer_size: "unknown".to_string(),
+            output_latency_mode: "shared-default".to_string(),
         }
     }
 }
@@ -137,6 +140,7 @@ struct PlayerState {
     algo: Arc<Mutex<String>>,
     loudness_normalization_gain: Arc<Mutex<f32>>,
     output_buffer_ms: u32,
+    output_latency_mode: String,
     quality_settings: Arc<Mutex<AudioQualitySettings>>,
     output_info: Arc<Mutex<OutputDeviceInfo>>,
     underrun_count: Arc<AtomicU64>,
@@ -159,6 +163,7 @@ lazy_static::lazy_static! {
         algo: Arc::new(Mutex::new("rubberband".to_string())),
         loudness_normalization_gain: Arc::new(Mutex::new(1.0)),
         output_buffer_ms: 240,
+        output_latency_mode: "shared-default".to_string(),
         quality_settings: Arc::new(Mutex::new(AudioQualitySettings::default())),
         output_info: Arc::new(Mutex::new(OutputDeviceInfo::default())),
         underrun_count: Arc::new(AtomicU64::new(0)),
@@ -251,6 +256,42 @@ fn update_atomic_peak(peak_bits: &AtomicU64, peak: f64) {
     }
 }
 
+fn normalize_output_latency_mode(value: &str) -> String {
+    match value {
+        "shared-low-latency" | "shared-stable" => value.to_string(),
+        _ => "shared-default".to_string(),
+    }
+}
+
+fn select_output_buffer_size(
+    latency_mode: &str,
+    supported: &SupportedBufferSize,
+) -> (BufferSize, String) {
+    let target_frames = match normalize_output_latency_mode(latency_mode).as_str() {
+        "shared-low-latency" => Some(256),
+        "shared-stable" => Some(1024),
+        _ => None,
+    };
+
+    let Some(target_frames) = target_frames else {
+        return (BufferSize::Default, "Default".to_string());
+    };
+
+    match supported {
+        SupportedBufferSize::Range { min, max } => {
+            let frames = target_frames.clamp(*min, *max);
+            (
+                BufferSize::Fixed(frames),
+                format!("Fixed({frames} frames, supported {min}-{max})"),
+            )
+        }
+        SupportedBufferSize::Unknown => (
+            BufferSize::Default,
+            "Default (fixed unsupported)".to_string(),
+        ),
+    }
+}
+
 /// Negotiate an output config, preferring f32 at the device's default rate/channels so we
 /// can feed the callback without per-callback allocation. Returns the live stream plus the
 /// negotiated sample rate, channel count and the shared ring buffer.
@@ -259,6 +300,7 @@ fn build_output(
     underrun_count: Arc<AtomicU64>,
     quality_settings: Arc<Mutex<AudioQualitySettings>>,
     output_buffer_ms: u32,
+    output_latency_mode: String,
 ) -> Result<(SendStream, OutputDeviceInfo, Arc<AudioBuffer>), String> {
     let host = cpal::default_host();
     let device = host
@@ -272,12 +314,13 @@ fn build_output(
     let want_rate = default_cfg.sample_rate();
     let want_ch = default_cfg.channels();
     let default_fmt = default_cfg.sample_format();
+    let mut supported_buffer_size = *default_cfg.buffer_size();
 
     // Prefer an f32 config (zero-allocation callback). Fall back to the device default format.
     let sample_format = if default_fmt == SampleFormat::F32 {
         SampleFormat::F32
     } else {
-        let mut found_f32 = false;
+        let mut f32_buffer_size = None;
         if let Ok(supported) = device.supported_output_configs() {
             for cfg in supported {
                 if cfg.channels() == want_ch
@@ -285,22 +328,26 @@ fn build_output(
                     && cfg.min_sample_rate() <= want_rate
                     && cfg.max_sample_rate() >= want_rate
                 {
-                    found_f32 = true;
+                    f32_buffer_size = Some(*cfg.buffer_size());
                     break;
                 }
             }
         }
-        if found_f32 {
+        if let Some(buffer_size) = f32_buffer_size {
+            supported_buffer_size = buffer_size;
             SampleFormat::F32
         } else {
             default_fmt
         }
     };
+    let output_latency_mode = normalize_output_latency_mode(&output_latency_mode);
+    let (device_buffer_size, mut buffer_size_label) =
+        select_output_buffer_size(&output_latency_mode, &supported_buffer_size);
 
     let config = StreamConfig {
         channels: want_ch,
         sample_rate: want_rate,
-        buffer_size: BufferSize::Default,
+        buffer_size: device_buffer_size,
     };
 
     let sample_rate = config.sample_rate.0;
@@ -310,218 +357,242 @@ fn build_output(
     let buffer_ms = output_buffer_ms.clamp(60, 1500) as usize;
     let capacity = ((sample_rate as usize * ch * buffer_ms) / 1000).max(8192);
     let buffer = Arc::new(AudioBuffer::new(capacity));
+
+    macro_rules! build_stream_for_config {
+        ($stream_config:expr) => {{
+            match sample_format {
+                SampleFormat::F32 => {
+                    let buf = buffer.clone();
+                    let fp = frames_played.clone();
+                    let uc = underrun_count.clone();
+                    device
+                        .build_output_stream(
+                            $stream_config,
+                            move |data: &mut [f32], _| {
+                                let n = buf.pop(data);
+                                if n < data.len() {
+                                    uc.fetch_add(1, Ordering::Relaxed);
+                                }
+                                for i in n..data.len() {
+                                    data[i] = 0.0;
+                                }
+                                if ch > 0 {
+                                    fp.fetch_add((n / ch) as u64, Ordering::Relaxed);
+                                }
+                            },
+                            err_fn,
+                            None,
+                        )
+                        .map_err(|e| e.to_string())
+                }
+                SampleFormat::I16 => {
+                    let buf = buffer.clone();
+                    let fp = frames_played.clone();
+                    let uc = underrun_count.clone();
+                    let qs = quality_settings.clone();
+                    let mut dither = TpdfDither::new(0xA17E_51A3_59C3_0D42);
+                    device
+                        .build_output_stream(
+                            $stream_config,
+                            move |data: &mut [i16], _| {
+                                let mut tmp = vec![0.0f32; data.len()];
+                                let n = buf.pop(&mut tmp);
+                                if n < data.len() {
+                                    uc.fetch_add(1, Ordering::Relaxed);
+                                }
+                                let dither_enabled =
+                                    qs.lock().unwrap_or_else(|e| e.into_inner()).dither_enabled;
+                                for i in 0..n {
+                                    let v = if dither_enabled {
+                                        dither.apply(tmp[i], 1.0 / 32768.0)
+                                    } else {
+                                        tmp[i]
+                                    };
+                                    data[i] = (v.clamp(-1.0, 1.0) * 32767.0) as i16;
+                                }
+                                for i in n..data.len() {
+                                    data[i] = 0;
+                                }
+                                if ch > 0 {
+                                    fp.fetch_add((n / ch) as u64, Ordering::Relaxed);
+                                }
+                            },
+                            err_fn,
+                            None,
+                        )
+                        .map_err(|e| e.to_string())
+                }
+                SampleFormat::U16 => {
+                    let buf = buffer.clone();
+                    let fp = frames_played.clone();
+                    let uc = underrun_count.clone();
+                    let qs = quality_settings.clone();
+                    let mut dither = TpdfDither::new(0x9E37_79B9_7F4A_7C15);
+                    device
+                        .build_output_stream(
+                            $stream_config,
+                            move |data: &mut [u16], _| {
+                                let mut tmp = vec![0.0f32; data.len()];
+                                let n = buf.pop(&mut tmp);
+                                if n < data.len() {
+                                    uc.fetch_add(1, Ordering::Relaxed);
+                                }
+                                let dither_enabled =
+                                    qs.lock().unwrap_or_else(|e| e.into_inner()).dither_enabled;
+                                for i in 0..n {
+                                    let v = if dither_enabled {
+                                        dither.apply(tmp[i], 1.0 / 65536.0)
+                                    } else {
+                                        tmp[i]
+                                    };
+                                    data[i] = ((v.clamp(-1.0, 1.0) * 0.5 + 0.5) * 65535.0) as u16;
+                                }
+                                for i in n..data.len() {
+                                    data[i] = 0;
+                                }
+                                if ch > 0 {
+                                    fp.fetch_add((n / ch) as u64, Ordering::Relaxed);
+                                }
+                            },
+                            err_fn,
+                            None,
+                        )
+                        .map_err(|e| e.to_string())
+                }
+                SampleFormat::I32 => {
+                    let buf = buffer.clone();
+                    let fp = frames_played.clone();
+                    let uc = underrun_count.clone();
+                    let qs = quality_settings.clone();
+                    let mut dither = TpdfDither::new(0xD1B5_4A32_D192_ED03);
+                    device
+                        .build_output_stream(
+                            $stream_config,
+                            move |data: &mut [i32], _| {
+                                let mut tmp = vec![0.0f32; data.len()];
+                                let n = buf.pop(&mut tmp);
+                                if n < data.len() {
+                                    uc.fetch_add(1, Ordering::Relaxed);
+                                }
+                                let dither_enabled =
+                                    qs.lock().unwrap_or_else(|e| e.into_inner()).dither_enabled;
+                                for i in 0..n {
+                                    let v = if dither_enabled {
+                                        dither.apply(tmp[i], 1.0 / 2_147_483_648.0)
+                                    } else {
+                                        tmp[i]
+                                    };
+                                    data[i] = (v.clamp(-1.0, 1.0) * 2147483647.0) as i32;
+                                }
+                                for i in n..data.len() {
+                                    data[i] = 0;
+                                }
+                                if ch > 0 {
+                                    fp.fetch_add((n / ch) as u64, Ordering::Relaxed);
+                                }
+                            },
+                            err_fn,
+                            None,
+                        )
+                        .map_err(|e| e.to_string())
+                }
+                SampleFormat::U8 => {
+                    let buf = buffer.clone();
+                    let fp = frames_played.clone();
+                    let uc = underrun_count.clone();
+                    let qs = quality_settings.clone();
+                    let mut dither = TpdfDither::new(0x94D0_49BB_1331_11EB);
+                    device
+                        .build_output_stream(
+                            $stream_config,
+                            move |data: &mut [u8], _| {
+                                let mut tmp = vec![0.0f32; data.len()];
+                                let n = buf.pop(&mut tmp);
+                                if n < data.len() {
+                                    uc.fetch_add(1, Ordering::Relaxed);
+                                }
+                                let dither_enabled =
+                                    qs.lock().unwrap_or_else(|e| e.into_inner()).dither_enabled;
+                                for i in 0..n {
+                                    let v = if dither_enabled {
+                                        dither.apply(tmp[i], 1.0 / 256.0)
+                                    } else {
+                                        tmp[i]
+                                    };
+                                    data[i] = ((v.clamp(-1.0, 1.0) * 0.5 + 0.5) * 255.0) as u8;
+                                }
+                                for i in n..data.len() {
+                                    data[i] = 0;
+                                }
+                                if ch > 0 {
+                                    fp.fetch_add((n / ch) as u64, Ordering::Relaxed);
+                                }
+                            },
+                            err_fn,
+                            None,
+                        )
+                        .map_err(|e| e.to_string())
+                }
+                SampleFormat::F64 => {
+                    let buf = buffer.clone();
+                    let fp = frames_played.clone();
+                    let uc = underrun_count.clone();
+                    device
+                        .build_output_stream(
+                            $stream_config,
+                            move |data: &mut [f64], _| {
+                                let mut tmp = vec![0.0f32; data.len()];
+                                let n = buf.pop(&mut tmp);
+                                if n < data.len() {
+                                    uc.fetch_add(1, Ordering::Relaxed);
+                                }
+                                for i in 0..n {
+                                    data[i] = tmp[i] as f64;
+                                }
+                                for i in n..data.len() {
+                                    data[i] = 0.0;
+                                }
+                                if ch > 0 {
+                                    fp.fetch_add((n / ch) as u64, Ordering::Relaxed);
+                                }
+                            },
+                            err_fn,
+                            None,
+                        )
+                        .map_err(|e| e.to_string())
+                }
+                other => Err(format!("Unsupported output sample format: {:?}", other)),
+            }
+        }};
+    }
+
+    let stream = match build_stream_for_config!(&config) {
+        Ok(stream) => stream,
+        Err(err) if config.buffer_size != BufferSize::Default => {
+            eprintln!(
+                "Requested output buffer {:?} failed ({}); falling back to default buffer",
+                config.buffer_size, err
+            );
+            let fallback_config = StreamConfig {
+                buffer_size: BufferSize::Default,
+                ..config.clone()
+            };
+            buffer_size_label = format!("{buffer_size_label} -> Default fallback");
+            build_stream_for_config!(&fallback_config).map_err(|fallback_err| {
+                format!(
+                    "Failed to build output stream with fixed buffer ({err}) and default buffer ({fallback_err})"
+                )
+            })?
+        }
+        Err(err) => return Err(err.to_string()),
+    };
     let output_info = OutputDeviceInfo {
         device_name,
         sample_rate,
         channels,
         sample_format: format!("{:?}", sample_format),
-        buffer_size: "Default".to_string(),
-    };
-
-    let stream = match sample_format {
-        SampleFormat::F32 => {
-            let buf = buffer.clone();
-            let fp = frames_played.clone();
-            let uc = underrun_count.clone();
-            device
-                .build_output_stream(
-                    &config,
-                    move |data: &mut [f32], _| {
-                        let n = buf.pop(data);
-                        if n < data.len() {
-                            uc.fetch_add(1, Ordering::Relaxed);
-                        }
-                        for i in n..data.len() {
-                            data[i] = 0.0;
-                        }
-                        if ch > 0 {
-                            fp.fetch_add((n / ch) as u64, Ordering::Relaxed);
-                        }
-                    },
-                    err_fn,
-                    None,
-                )
-                .map_err(|e| e.to_string())?
-        }
-        SampleFormat::I16 => {
-            let buf = buffer.clone();
-            let fp = frames_played.clone();
-            let uc = underrun_count.clone();
-            let qs = quality_settings.clone();
-            let mut dither = TpdfDither::new(0xA17E_51A3_59C3_0D42);
-            device
-                .build_output_stream(
-                    &config,
-                    move |data: &mut [i16], _| {
-                        let mut tmp = vec![0.0f32; data.len()];
-                        let n = buf.pop(&mut tmp);
-                        if n < data.len() {
-                            uc.fetch_add(1, Ordering::Relaxed);
-                        }
-                        let dither_enabled =
-                            qs.lock().unwrap_or_else(|e| e.into_inner()).dither_enabled;
-                        for i in 0..n {
-                            let v = if dither_enabled {
-                                dither.apply(tmp[i], 1.0 / 32768.0)
-                            } else {
-                                tmp[i]
-                            };
-                            data[i] = (v.clamp(-1.0, 1.0) * 32767.0) as i16;
-                        }
-                        for i in n..data.len() {
-                            data[i] = 0;
-                        }
-                        if ch > 0 {
-                            fp.fetch_add((n / ch) as u64, Ordering::Relaxed);
-                        }
-                    },
-                    err_fn,
-                    None,
-                )
-                .map_err(|e| e.to_string())?
-        }
-        SampleFormat::U16 => {
-            let buf = buffer.clone();
-            let fp = frames_played.clone();
-            let uc = underrun_count.clone();
-            let qs = quality_settings.clone();
-            let mut dither = TpdfDither::new(0x9E37_79B9_7F4A_7C15);
-            device
-                .build_output_stream(
-                    &config,
-                    move |data: &mut [u16], _| {
-                        let mut tmp = vec![0.0f32; data.len()];
-                        let n = buf.pop(&mut tmp);
-                        if n < data.len() {
-                            uc.fetch_add(1, Ordering::Relaxed);
-                        }
-                        let dither_enabled =
-                            qs.lock().unwrap_or_else(|e| e.into_inner()).dither_enabled;
-                        for i in 0..n {
-                            let v = if dither_enabled {
-                                dither.apply(tmp[i], 1.0 / 65536.0)
-                            } else {
-                                tmp[i]
-                            };
-                            data[i] = ((v.clamp(-1.0, 1.0) * 0.5 + 0.5) * 65535.0) as u16;
-                        }
-                        for i in n..data.len() {
-                            data[i] = 0;
-                        }
-                        if ch > 0 {
-                            fp.fetch_add((n / ch) as u64, Ordering::Relaxed);
-                        }
-                    },
-                    err_fn,
-                    None,
-                )
-                .map_err(|e| e.to_string())?
-        }
-        SampleFormat::I32 => {
-            let buf = buffer.clone();
-            let fp = frames_played.clone();
-            let uc = underrun_count.clone();
-            let qs = quality_settings.clone();
-            let mut dither = TpdfDither::new(0xD1B5_4A32_D192_ED03);
-            device
-                .build_output_stream(
-                    &config,
-                    move |data: &mut [i32], _| {
-                        let mut tmp = vec![0.0f32; data.len()];
-                        let n = buf.pop(&mut tmp);
-                        if n < data.len() {
-                            uc.fetch_add(1, Ordering::Relaxed);
-                        }
-                        let dither_enabled =
-                            qs.lock().unwrap_or_else(|e| e.into_inner()).dither_enabled;
-                        for i in 0..n {
-                            let v = if dither_enabled {
-                                dither.apply(tmp[i], 1.0 / 2_147_483_648.0)
-                            } else {
-                                tmp[i]
-                            };
-                            data[i] = (v.clamp(-1.0, 1.0) * 2147483647.0) as i32;
-                        }
-                        for i in n..data.len() {
-                            data[i] = 0;
-                        }
-                        if ch > 0 {
-                            fp.fetch_add((n / ch) as u64, Ordering::Relaxed);
-                        }
-                    },
-                    err_fn,
-                    None,
-                )
-                .map_err(|e| e.to_string())?
-        }
-        SampleFormat::U8 => {
-            let buf = buffer.clone();
-            let fp = frames_played.clone();
-            let uc = underrun_count.clone();
-            let qs = quality_settings.clone();
-            let mut dither = TpdfDither::new(0x94D0_49BB_1331_11EB);
-            device
-                .build_output_stream(
-                    &config,
-                    move |data: &mut [u8], _| {
-                        let mut tmp = vec![0.0f32; data.len()];
-                        let n = buf.pop(&mut tmp);
-                        if n < data.len() {
-                            uc.fetch_add(1, Ordering::Relaxed);
-                        }
-                        let dither_enabled =
-                            qs.lock().unwrap_or_else(|e| e.into_inner()).dither_enabled;
-                        for i in 0..n {
-                            let v = if dither_enabled {
-                                dither.apply(tmp[i], 1.0 / 256.0)
-                            } else {
-                                tmp[i]
-                            };
-                            data[i] = ((v.clamp(-1.0, 1.0) * 0.5 + 0.5) * 255.0) as u8;
-                        }
-                        for i in n..data.len() {
-                            data[i] = 0;
-                        }
-                        if ch > 0 {
-                            fp.fetch_add((n / ch) as u64, Ordering::Relaxed);
-                        }
-                    },
-                    err_fn,
-                    None,
-                )
-                .map_err(|e| e.to_string())?
-        }
-        SampleFormat::F64 => {
-            let buf = buffer.clone();
-            let fp = frames_played.clone();
-            let uc = underrun_count.clone();
-            device
-                .build_output_stream(
-                    &config,
-                    move |data: &mut [f64], _| {
-                        let mut tmp = vec![0.0f32; data.len()];
-                        let n = buf.pop(&mut tmp);
-                        if n < data.len() {
-                            uc.fetch_add(1, Ordering::Relaxed);
-                        }
-                        for i in 0..n {
-                            data[i] = tmp[i] as f64;
-                        }
-                        for i in n..data.len() {
-                            data[i] = 0.0;
-                        }
-                        if ch > 0 {
-                            fp.fetch_add((n / ch) as u64, Ordering::Relaxed);
-                        }
-                    },
-                    err_fn,
-                    None,
-                )
-                .map_err(|e| e.to_string())?
-        }
-        other => {
-            return Err(format!("Unsupported output sample format: {:?}", other));
-        }
+        buffer_size: buffer_size_label,
+        output_latency_mode,
     };
 
     stream.play().map_err(|e| e.to_string())?;
@@ -555,6 +626,7 @@ pub fn start_playback(
     let algo = Arc::new(Mutex::new(pitch_algo));
     let norm_gain = Arc::new(Mutex::new(normalization_gain));
     let output_buffer_ms = state.output_buffer_ms;
+    let output_latency_mode = state.output_latency_mode.clone();
     let quality_settings = state.quality_settings.clone();
     let underrun_count = Arc::new(AtomicU64::new(0));
     let clipped_sample_count = Arc::new(AtomicU64::new(0));
@@ -565,6 +637,7 @@ pub fn start_playback(
         underrun_count.clone(),
         quality_settings.clone(),
         output_buffer_ms,
+        output_latency_mode,
     )?;
     let sample_rate = output_info.sample_rate;
     let channels = output_info.channels;
@@ -786,6 +859,18 @@ pub fn set_output_buffer_ms(ms: i32) -> Result<(), String> {
     Ok(())
 }
 
+pub fn set_output_latency_mode(mode: String) -> Result<(), String> {
+    let mut state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
+    let normalized = normalize_output_latency_mode(&mode);
+    state.output_latency_mode = normalized.clone();
+    state
+        .output_info
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .output_latency_mode = normalized;
+    Ok(())
+}
+
 pub fn set_quality_settings(
     peak_protection_enabled: bool,
     dither_enabled: bool,
@@ -827,6 +912,7 @@ pub fn get_output_info() -> AudioOutputInfo {
         channels: info.channels,
         sample_format: info.sample_format,
         buffer_size: info.buffer_size,
+        output_latency_mode: info.output_latency_mode,
         output_buffer_ms: state.output_buffer_ms,
         underruns: state.underrun_count.load(Ordering::Relaxed),
         clipped_samples: state.clipped_sample_count.load(Ordering::Relaxed),

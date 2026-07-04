@@ -202,6 +202,9 @@ Future<void> setRustPitch({required double pitch, required String algo}) =>
 Future<void> setRustOutputBufferMs({required int ms}) =>
     RustLib.instance.api.crateApiMusicSetRustOutputBufferMs(ms: ms);
 
+Future<void> setRustOutputLatencyMode({required String mode}) =>
+    RustLib.instance.api.crateApiMusicSetRustOutputLatencyMode(mode: mode);
+
 Future<void> setRustAudioQualitySettings({
   required bool peakProtectionEnabled,
   required bool ditherEnabled,

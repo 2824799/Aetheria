@@ -1268,6 +1268,10 @@ pub fn set_rust_output_buffer_ms(ms: i32) -> Result<(), String> {
     crate::audio::player::set_output_buffer_ms(ms)
 }
 
+pub fn set_rust_output_latency_mode(mode: String) -> Result<(), String> {
+    crate::audio::player::set_output_latency_mode(mode)
+}
+
 pub fn set_rust_audio_quality_settings(
     peak_protection_enabled: bool,
     dither_enabled: bool,

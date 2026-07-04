@@ -12,6 +12,7 @@ class AudioOutputInfo {
   final int channels;
   final String sampleFormat;
   final String bufferSize;
+  final String outputLatencyMode;
   final int outputBufferMs;
   final BigInt underruns;
   final BigInt clippedSamples;
@@ -23,6 +24,7 @@ class AudioOutputInfo {
     required this.channels,
     required this.sampleFormat,
     required this.bufferSize,
+    required this.outputLatencyMode,
     required this.outputBufferMs,
     required this.underruns,
     required this.clippedSamples,
@@ -36,6 +38,7 @@ class AudioOutputInfo {
       channels.hashCode ^
       sampleFormat.hashCode ^
       bufferSize.hashCode ^
+      outputLatencyMode.hashCode ^
       outputBufferMs.hashCode ^
       underruns.hashCode ^
       clippedSamples.hashCode ^
@@ -51,6 +54,7 @@ class AudioOutputInfo {
           channels == other.channels &&
           sampleFormat == other.sampleFormat &&
           bufferSize == other.bufferSize &&
+          outputLatencyMode == other.outputLatencyMode &&
           outputBufferMs == other.outputBufferMs &&
           underruns == other.underruns &&
           clippedSamples == other.clippedSamples &&

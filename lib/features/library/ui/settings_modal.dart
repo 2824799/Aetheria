@@ -24,10 +24,7 @@ class SettingsModal extends StatefulWidget {
 }
 
 class _AudioOutputInfoView extends StatelessWidget {
-  const _AudioOutputInfoView({
-    required this.cfg,
-    required this.audioProvider,
-  });
+  const _AudioOutputInfoView({required this.cfg, required this.audioProvider});
 
   final AppThemeConfig cfg;
   final AudioPlayerProvider audioProvider;
@@ -41,6 +38,8 @@ class _AudioOutputInfoView extends StatelessWidget {
         ? '-inf'
         : '${info.peakDb.toStringAsFixed(1)} dBFS';
     final hasUnderrun = (info?.underruns ?? BigInt.zero) > BigInt.zero;
+    final latencyMode =
+        info?.outputLatencyMode ?? audioProvider.outputLatencyMode;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -49,11 +48,7 @@ class _AudioOutputInfoView extends StatelessWidget {
           spacing: 8,
           runSpacing: 8,
           children: [
-            _InfoPill(
-              cfg: cfg,
-              label: '设备',
-              value: info?.deviceName ?? '未连接',
-            ),
+            _InfoPill(cfg: cfg, label: '设备', value: info?.deviceName ?? '未连接'),
             _InfoPill(
               cfg: cfg,
               label: '格式',
@@ -64,12 +59,18 @@ class _AudioOutputInfoView extends StatelessWidget {
             _InfoPill(
               cfg: cfg,
               label: '队列缓冲',
-              value: '${info?.outputBufferMs ?? audioProvider.pitchBufferMs} ms',
+              value:
+                  '${info?.outputBufferMs ?? audioProvider.pitchBufferMs} ms',
             ),
             _InfoPill(
               cfg: cfg,
               label: '设备缓冲',
               value: info?.bufferSize ?? 'unknown',
+            ),
+            _InfoPill(
+              cfg: cfg,
+              label: '延迟模式',
+              value: _outputLatencyModeLabel(latencyMode),
             ),
             _InfoPill(cfg: cfg, label: '峰值', value: peakDb),
             _InfoPill(cfg: cfg, label: '保护计数', value: clippedSamples),
@@ -86,6 +87,14 @@ class _AudioOutputInfoView extends StatelessWidget {
       ],
     );
   }
+}
+
+String _outputLatencyModeLabel(String mode) {
+  return switch (mode) {
+    'shared-low-latency' => '共享低延迟',
+    'shared-stable' => '共享稳定',
+    _ => '共享默认',
+  };
 }
 
 class _InfoPill extends StatelessWidget {
@@ -580,6 +589,63 @@ class _SettingsModalState extends State<SettingsModal> {
             ),
             const SizedBox(height: 8),
             _AudioOutputInfoView(cfg: cfg, audioProvider: audioProvider),
+            const SizedBox(height: 10),
+            Text(
+              '设备输出延迟:',
+              style: TextStyle(
+                color: cfg.textMain,
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                ChoiceChip(
+                  label: const Text('共享默认', style: TextStyle(fontSize: 10)),
+                  selected: audioProvider.outputLatencyMode == 'shared-default',
+                  onSelected: (_) =>
+                      audioProvider.setOutputLatencyMode('shared-default'),
+                  selectedColor: cfg.accent.withOpacity(0.2),
+                  checkmarkColor: cfg.accent,
+                  labelStyle: TextStyle(
+                    color: audioProvider.outputLatencyMode == 'shared-default'
+                        ? cfg.accent
+                        : cfg.textMain,
+                  ),
+                ),
+                ChoiceChip(
+                  label: const Text('共享低延迟', style: TextStyle(fontSize: 10)),
+                  selected:
+                      audioProvider.outputLatencyMode == 'shared-low-latency',
+                  onSelected: (_) =>
+                      audioProvider.setOutputLatencyMode('shared-low-latency'),
+                  selectedColor: cfg.accent.withOpacity(0.2),
+                  checkmarkColor: cfg.accent,
+                  labelStyle: TextStyle(
+                    color:
+                        audioProvider.outputLatencyMode == 'shared-low-latency'
+                        ? cfg.accent
+                        : cfg.textMain,
+                  ),
+                ),
+                ChoiceChip(
+                  label: const Text('共享稳定', style: TextStyle(fontSize: 10)),
+                  selected: audioProvider.outputLatencyMode == 'shared-stable',
+                  onSelected: (_) =>
+                      audioProvider.setOutputLatencyMode('shared-stable'),
+                  selectedColor: cfg.accent.withOpacity(0.2),
+                  checkmarkColor: cfg.accent,
+                  labelStyle: TextStyle(
+                    color: audioProvider.outputLatencyMode == 'shared-stable'
+                        ? cfg.accent
+                        : cfg.textMain,
+                  ),
+                ),
+              ],
+            ),
             const SizedBox(height: 12),
             Divider(height: 1, color: cfg.border),
             const SizedBox(height: 12),
@@ -651,7 +717,10 @@ class _SettingsModalState extends State<SettingsModal> {
               runSpacing: 8,
               children: [
                 ChoiceChip(
-                  label: const Text('超低延迟 120ms', style: TextStyle(fontSize: 10)),
+                  label: const Text(
+                    '超低延迟 120ms',
+                    style: TextStyle(fontSize: 10),
+                  ),
                   selected: audioProvider.pitchBufferMs == 120,
                   onSelected: (_) => audioProvider.setPitchBufferMs(120),
                   selectedColor: cfg.accent.withOpacity(0.2),
@@ -687,7 +756,10 @@ class _SettingsModalState extends State<SettingsModal> {
                   ),
                 ),
                 ChoiceChip(
-                  label: const Text('高容错 960ms', style: TextStyle(fontSize: 10)),
+                  label: const Text(
+                    '高容错 960ms',
+                    style: TextStyle(fontSize: 10),
+                  ),
                   selected: audioProvider.pitchBufferMs == 960,
                   onSelected: (_) => audioProvider.setPitchBufferMs(960),
                   selectedColor: cfg.accent.withOpacity(0.2),
@@ -763,7 +835,8 @@ class _SettingsModalState extends State<SettingsModal> {
                 ChoiceChip(
                   label: const Text('低延迟', style: TextStyle(fontSize: 10)),
                   selected: audioProvider.rubberbandWindow == 'latency',
-                  onSelected: audioProvider.pitchEnabled &&
+                  onSelected:
+                      audioProvider.pitchEnabled &&
                           audioProvider.pitchAlgorithm == 'rubberband'
                       ? (_) => audioProvider.setRubberbandWindow('latency')
                       : null,
@@ -778,7 +851,8 @@ class _SettingsModalState extends State<SettingsModal> {
                 ChoiceChip(
                   label: const Text('高质量', style: TextStyle(fontSize: 10)),
                   selected: audioProvider.rubberbandWindow == 'quality',
-                  onSelected: audioProvider.pitchEnabled &&
+                  onSelected:
+                      audioProvider.pitchEnabled &&
                           audioProvider.pitchAlgorithm == 'rubberband'
                       ? (_) => audioProvider.setRubberbandWindow('quality')
                       : null,
@@ -808,10 +882,11 @@ class _SettingsModalState extends State<SettingsModal> {
                 style: TextStyle(color: cfg.textSub, fontSize: 11),
               ),
               activeColor: cfg.accent,
-              onChanged: audioProvider.pitchEnabled &&
+              onChanged:
+                  audioProvider.pitchEnabled &&
                       audioProvider.pitchAlgorithm == 'rubberband'
                   ? (value) =>
-                      audioProvider.setRubberbandFormantPreserved(value)
+                        audioProvider.setRubberbandFormantPreserved(value)
                   : null,
             ),
             const SizedBox(height: 8),
@@ -1032,7 +1107,7 @@ class _SettingsModalState extends State<SettingsModal> {
                   minHeight: 6,
                   value: libraryProvider.refreshProgressTotal > 0
                       ? libraryProvider.refreshProgressCurrent /
-                          libraryProvider.refreshProgressTotal
+                            libraryProvider.refreshProgressTotal
                       : null,
                   color: cfg.accent,
                   backgroundColor: cfg.border.withOpacity(0.45),
@@ -1055,11 +1130,7 @@ class _SettingsModalState extends State<SettingsModal> {
                 libraryProvider.refreshProgressLabel.isNotEmpty
                     ? libraryProvider.refreshProgressLabel
                     : '正在深度重扫音频属性与响度信息，旧库里解析失败的 M4A 时长也会在这一轮里重新校正。',
-                style: TextStyle(
-                  fontSize: 10,
-                  color: cfg.textSub,
-                  height: 1.5,
-                ),
+                style: TextStyle(fontSize: 10, color: cfg.textSub, height: 1.5),
               ),
             ],
             const SizedBox(height: 8),

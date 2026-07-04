@@ -22,6 +22,7 @@ class AudioPlayerProvider extends ChangeNotifier {
   static const String _rubberbandWindowKey = 'rubberband-window';
   static const String _rubberbandFormantKey = 'rubberband-formant-preserved';
   static const String _resamplerQualityKey = 'resampler-quality';
+  static const String _outputLatencyModeKey = 'output-latency-mode';
 
   Song? activeSong;
   Song? playingSong;
@@ -48,6 +49,7 @@ class AudioPlayerProvider extends ChangeNotifier {
   String rubberbandWindow = 'latency';
   bool rubberbandFormantPreserved = false;
   String resamplerQuality = 'standard';
+  String outputLatencyMode = 'shared-default';
   AudioOutputInfo? audioOutputInfo;
 
   bool isDetailOpen = false;
@@ -158,7 +160,11 @@ class AudioPlayerProvider extends ChangeNotifier {
       resamplerQuality = _normalizeResamplerQuality(
         prefs.getString(_resamplerQualityKey),
       );
+      outputLatencyMode = _normalizeOutputLatencyMode(
+        prefs.getString(_outputLatencyModeKey),
+      );
       await music.setRustOutputBufferMs(ms: pitchBufferMs);
+      await music.setRustOutputLatencyMode(mode: outputLatencyMode);
       await _syncAudioQualitySettings();
       await music.setRustPitch(
         pitch: _effectivePitchSemitones,
@@ -304,6 +310,19 @@ class AudioPlayerProvider extends ChangeNotifier {
     } catch (_) {}
   }
 
+  Future<void> setOutputLatencyMode(String value) async {
+    final normalized = _normalizeOutputLatencyMode(value);
+    outputLatencyMode = normalized;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_outputLatencyModeKey, normalized);
+      await music.setRustOutputLatencyMode(mode: normalized);
+      await _hotReloadDSP();
+      await refreshAudioOutputInfo();
+    } catch (_) {}
+  }
+
   Future<void> refreshAudioOutputInfo() async {
     try {
       audioOutputInfo = await music.getRustAudioOutputInfo();
@@ -336,6 +355,12 @@ class AudioPlayerProvider extends ChangeNotifier {
 
   String _normalizeResamplerQuality(String? value) {
     return value == 'high' ? 'high' : 'standard';
+  }
+
+  String _normalizeOutputLatencyMode(String? value) {
+    return value == 'shared-low-latency' || value == 'shared-stable'
+        ? value!
+        : 'shared-default';
   }
 
   Future<void> _syncAudioQualitySettings() {
@@ -469,7 +494,10 @@ class AudioPlayerProvider extends ChangeNotifier {
       throw Exception('当前没有可播放的音频版本。');
     }
 
-    final path = '$_cachedLibraryPath/${version.filepath}'.replaceAll('\\', '/');
+    final path = '$_cachedLibraryPath/${version.filepath}'.replaceAll(
+      '\\',
+      '/',
+    );
     final file = File(path);
     if (!await file.exists()) {
       throw Exception('音频文件不存在: $path');
@@ -477,8 +505,8 @@ class AudioPlayerProvider extends ChangeNotifier {
 
     final clampedPosition =
         totalDuration > Duration.zero && startPosition > totalDuration
-            ? totalDuration
-            : startPosition;
+        ? totalDuration
+        : startPosition;
 
     await music.startRustPlayback(
       path: path,
@@ -529,22 +557,32 @@ class AudioPlayerProvider extends ChangeNotifier {
   }
 
   Future<void> _hotReloadDSP() async {
-    if (playingSong != null && playingVersion != null && isPlaying) {
-      final pos = currentPosition;
-      final path = '$_cachedLibraryPath/${playingVersion!.filepath}'.replaceAll(
-        '\\',
-        '/',
-      );
+    if (playingSong == null ||
+        playingVersion == null ||
+        !_hasPreparedPlayback) {
+      return;
+    }
 
-      await music.startRustPlayback(
-        path: path,
-        volume: volume,
-        pitch: _effectivePitchSemitones,
-        algo: pitchAlgorithm,
-        normalizationGain: _computeNormalizationGain(playingVersion!),
-      );
-      await music.seekRustPlayback(secs: pos.inMilliseconds / 1000.0);
+    final wasPlaying = isPlaying;
+    final pos = currentPosition;
+    final path = '$_cachedLibraryPath/${playingVersion!.filepath}'.replaceAll(
+      '\\',
+      '/',
+    );
+
+    await music.startRustPlayback(
+      path: path,
+      volume: volume,
+      pitch: _effectivePitchSemitones,
+      algo: pitchAlgorithm,
+      normalizationGain: _computeNormalizationGain(playingVersion!),
+    );
+    await music.seekRustPlayback(secs: pos.inMilliseconds / 1000.0);
+    if (wasPlaying) {
       _startOutputInfoTimer();
+    } else {
+      await music.pauseRustPlayback();
+      await refreshAudioOutputInfo();
     }
   }
 
@@ -614,9 +652,11 @@ class AudioPlayerProvider extends ChangeNotifier {
   Future<void> seek(Duration position) async {
     final targetPosition =
         totalDuration > Duration.zero && position > totalDuration
-            ? totalDuration
-            : position;
-    if (!_hasPreparedPlayback && playingSong != null && playingVersion != null) {
+        ? totalDuration
+        : position;
+    if (!_hasPreparedPlayback &&
+        playingSong != null &&
+        playingVersion != null) {
       currentPosition = targetPosition;
       _pendingRestorePosition = targetPosition;
       notifyListeners();

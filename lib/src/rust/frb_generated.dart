@@ -70,7 +70,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.12.0';
 
   @override
-  int get rustContentHash => 990999681;
+  int get rustContentHash => 93470937;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -186,6 +186,8 @@ abstract class RustLibApi extends BaseApi {
   });
 
   Future<void> crateApiMusicSetRustOutputBufferMs({required int ms});
+
+  Future<void> crateApiMusicSetRustOutputLatencyMode({required String mode});
 
   Future<void> crateApiMusicSetRustPitch({
     required double pitch,
@@ -1290,6 +1292,37 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<void> crateApiMusicSetRustOutputLatencyMode({required String mode}) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(mode, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 35,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiMusicSetRustOutputLatencyModeConstMeta,
+        argValues: [mode],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiMusicSetRustOutputLatencyModeConstMeta =>
+      const TaskConstMeta(
+        debugName: "set_rust_output_latency_mode",
+        argNames: ["mode"],
+      );
+
+  @override
   Future<void> crateApiMusicSetRustPitch({
     required double pitch,
     required String algo,
@@ -1303,7 +1336,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 35,
+            funcId: 36,
             port: port_,
           );
         },
@@ -1333,7 +1366,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 36,
+            funcId: 37,
             port: port_,
           );
         },
@@ -1360,7 +1393,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 37,
+            funcId: 38,
             port: port_,
           );
         },
@@ -1398,7 +1431,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 38,
+            funcId: 39,
             port: port_,
           );
         },
@@ -1428,7 +1461,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 39,
+            funcId: 40,
             port: port_,
           );
         },
@@ -1462,7 +1495,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 40,
+            funcId: 41,
             port: port_,
           );
         },
@@ -1498,7 +1531,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 41,
+            funcId: 42,
             port: port_,
           );
         },
@@ -1537,7 +1570,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 42,
+            funcId: 43,
             port: port_,
           );
         },
@@ -1571,7 +1604,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 43,
+            funcId: 44,
             port: port_,
           );
         },
@@ -1608,7 +1641,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 44,
+            funcId: 45,
             port: port_,
           );
         },
@@ -1639,7 +1672,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 45,
+            funcId: 46,
             port: port_,
           );
         },
@@ -1670,18 +1703,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   AudioOutputInfo dco_decode_audio_output_info(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 9)
-      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
+    if (arr.length != 10)
+      throw Exception('unexpected arr length: expect 10 but see ${arr.length}');
     return AudioOutputInfo(
       deviceName: dco_decode_String(arr[0]),
       sampleRate: dco_decode_u_32(arr[1]),
       channels: dco_decode_u_32(arr[2]),
       sampleFormat: dco_decode_String(arr[3]),
       bufferSize: dco_decode_String(arr[4]),
-      outputBufferMs: dco_decode_u_32(arr[5]),
-      underruns: dco_decode_u_64(arr[6]),
-      clippedSamples: dco_decode_u_64(arr[7]),
-      peakDb: dco_decode_f_64(arr[8]),
+      outputLatencyMode: dco_decode_String(arr[5]),
+      outputBufferMs: dco_decode_u_32(arr[6]),
+      underruns: dco_decode_u_64(arr[7]),
+      clippedSamples: dco_decode_u_64(arr[8]),
+      peakDb: dco_decode_f_64(arr[9]),
     );
   }
 
@@ -1918,6 +1952,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_channels = sse_decode_u_32(deserializer);
     var var_sampleFormat = sse_decode_String(deserializer);
     var var_bufferSize = sse_decode_String(deserializer);
+    var var_outputLatencyMode = sse_decode_String(deserializer);
     var var_outputBufferMs = sse_decode_u_32(deserializer);
     var var_underruns = sse_decode_u_64(deserializer);
     var var_clippedSamples = sse_decode_u_64(deserializer);
@@ -1928,6 +1963,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       channels: var_channels,
       sampleFormat: var_sampleFormat,
       bufferSize: var_bufferSize,
+      outputLatencyMode: var_outputLatencyMode,
       outputBufferMs: var_outputBufferMs,
       underruns: var_underruns,
       clippedSamples: var_clippedSamples,
@@ -2244,6 +2280,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_u_32(self.channels, serializer);
     sse_encode_String(self.sampleFormat, serializer);
     sse_encode_String(self.bufferSize, serializer);
+    sse_encode_String(self.outputLatencyMode, serializer);
     sse_encode_u_32(self.outputBufferMs, serializer);
     sse_encode_u_64(self.underruns, serializer);
     sse_encode_u_64(self.clippedSamples, serializer);
