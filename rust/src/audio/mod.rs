@@ -9,4 +9,5 @@
 
 pub mod dsp;
 pub mod player;
+pub mod rubberband;
 pub mod server;

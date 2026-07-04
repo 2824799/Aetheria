@@ -592,34 +592,17 @@ class _SettingsModalState extends State<SettingsModal> {
               children: [
                 ChoiceChip(
                   label: const Text(
-                    '波形相似 (WSOLA)',
+                    '专业保速 (Rubber Band)',
                     style: TextStyle(fontSize: 10),
                   ),
-                  selected: audioProvider.pitchAlgorithm == 'wsola',
+                  selected: audioProvider.pitchAlgorithm == 'rubberband',
                   onSelected: audioProvider.pitchEnabled
-                      ? (_) => audioProvider.setPitchAlgorithm('wsola')
+                      ? (_) => audioProvider.setPitchAlgorithm('rubberband')
                       : null,
                   selectedColor: cfg.accent.withOpacity(0.2),
                   checkmarkColor: cfg.accent,
                   labelStyle: TextStyle(
-                    color: audioProvider.pitchAlgorithm == 'wsola'
-                        ? cfg.accent
-                        : cfg.textMain,
-                  ),
-                ),
-                ChoiceChip(
-                  label: const Text(
-                    '时域叠加 (OLA)',
-                    style: TextStyle(fontSize: 10),
-                  ),
-                  selected: audioProvider.pitchAlgorithm == 'ola',
-                  onSelected: audioProvider.pitchEnabled
-                      ? (_) => audioProvider.setPitchAlgorithm('ola')
-                      : null,
-                  selectedColor: cfg.accent.withOpacity(0.2),
-                  checkmarkColor: cfg.accent,
-                  labelStyle: TextStyle(
-                    color: audioProvider.pitchAlgorithm == 'ola'
+                    color: audioProvider.pitchAlgorithm == 'rubberband'
                         ? cfg.accent
                         : cfg.textMain,
                   ),

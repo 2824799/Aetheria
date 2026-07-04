@@ -22,5 +22,8 @@ base64 = "0.22"
 jni = "0.21.1"
 ndk-context = "0.1.1"
 
+[build-dependencies]
+cc = "1.0"
+
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }

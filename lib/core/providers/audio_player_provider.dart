@@ -35,7 +35,7 @@ class AudioPlayerProvider extends ChangeNotifier {
   double volumeBalanceStrength = 0.5;
   bool pitchEnabled = false;
   double pitchSemitones = 0.0;
-  String pitchAlgorithm = 'wsola';
+  String pitchAlgorithm = 'rubberband';
   int pitchBufferMs = 240;
 
   bool isDetailOpen = false;
@@ -116,7 +116,12 @@ class AudioPlayerProvider extends ChangeNotifier {
       volumeBalanceStrength = prefs.getDouble('volume-balance-strength') ?? 0.5;
       pitchEnabled = prefs.getBool(_pitchEnabledKey) ?? false;
       pitchSemitones = prefs.getDouble('pitch-semitones') ?? 0.0;
-      pitchAlgorithm = prefs.getString('pitch-algorithm') ?? 'wsola';
+      pitchAlgorithm = _normalizePitchAlgorithm(
+        prefs.getString('pitch-algorithm'),
+      );
+      if (prefs.getString('pitch-algorithm') != pitchAlgorithm) {
+        await prefs.setString('pitch-algorithm', pitchAlgorithm);
+      }
       pitchBufferMs = prefs.getInt(_pitchBufferMsKey) ?? 240;
       await music.setRustOutputBufferMs(ms: pitchBufferMs);
       await music.setRustPitch(
@@ -170,14 +175,15 @@ class AudioPlayerProvider extends ChangeNotifier {
   }
 
   Future<void> setPitchAlgorithm(String value) async {
-    pitchAlgorithm = value;
+    final normalized = _normalizePitchAlgorithm(value);
+    pitchAlgorithm = normalized;
     notifyListeners();
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('pitch-algorithm', value);
+      await prefs.setString('pitch-algorithm', normalized);
       await music.setRustPitch(
         pitch: _effectivePitchSemitones,
-        algo: value,
+        algo: normalized,
       );
     } catch (_) {}
   }
@@ -221,6 +227,10 @@ class AudioPlayerProvider extends ChangeNotifier {
   }
 
   double get _effectivePitchSemitones => pitchEnabled ? pitchSemitones : 0.0;
+
+  String _normalizePitchAlgorithm(String? value) {
+    return value == 'resample' ? 'resample' : 'rubberband';
+  }
 
   Future<void> _clearPersistedPlaybackState(SharedPreferences prefs) async {
     await prefs.remove(_playbackSongIdKey);

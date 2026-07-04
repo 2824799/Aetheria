@@ -1256,6 +1256,7 @@ name = "rust_lib_aetheria"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "cc",
  "chrono",
  "cpal",
  "flutter_rust_bridge",

@@ -10,6 +10,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{BufferSize, SampleFormat, StreamConfig};
 
 use crate::audio::dsp::{self, StreamDecoder};
+use crate::audio::rubberband::RubberBandPitchShifter;
 
 // Thread-safe ring buffer / FIFO used to bridge the decode thread and the cpal
 // hardware callback thread.
@@ -363,6 +364,7 @@ pub fn start_playback(
         };
 
         let block_frames = 2048usize;
+        let mut rubberband_shifter: Option<RubberBandPitchShifter> = None;
 
         loop {
             if stop_flag.load(Ordering::SeqCst) {
@@ -375,6 +377,9 @@ pub fn start_playback(
                 if let Some(sec) = req.take() {
                     if let Err(e) = decoder.seek(sec) {
                         eprintln!("Seek error: {}", e);
+                    }
+                    if let Some(shifter) = &mut rubberband_shifter {
+                        shifter.reset();
                     }
                     buffer.clear();
                     frames_played
@@ -391,6 +396,12 @@ pub fn start_playback(
             };
 
             if block.is_empty() {
+                if let Some(shifter) = &mut rubberband_shifter {
+                    let tail = shifter.finish();
+                    if !tail.is_empty() {
+                        buffer.push(&tail, &stop_flag);
+                    }
+                }
                 // End of stream: let the hardware drain whatever is still buffered.
                 while buffer.len() > 0 && !stop_flag.load(Ordering::SeqCst) {
                     thread::sleep(Duration::from_millis(20));
@@ -415,9 +426,28 @@ pub fn start_playback(
                 let processed = match current_algo.as_str() {
                     "resample" => dsp::pitch_shift_resample(&block, pitch_factor),
                     "ola" => dsp::pitch_shift_ola(&block, pitch_factor),
-                    _ => dsp::pitch_shift_wsola(&block, pitch_factor),
+                    "wsola" => dsp::pitch_shift_wsola(&block, pitch_factor),
+                    _ => {
+                        if rubberband_shifter.is_none() {
+                            match RubberBandPitchShifter::new(sample_rate, channels, pitch_factor) {
+                                Ok(shifter) => {
+                                    rubberband_shifter = Some(shifter);
+                                }
+                                Err(e) => {
+                                    eprintln!("Rubber Band initialization failed: {}", e);
+                                }
+                            }
+                        }
+                        if let Some(shifter) = &mut rubberband_shifter {
+                            shifter.process(&block, pitch_factor)
+                        } else {
+                            block.clone()
+                        }
+                    }
                 };
-                buffer.push(&processed, &stop_flag);
+                if !processed.is_empty() {
+                    buffer.push(&processed, &stop_flag);
+                }
             } else {
                 buffer.push(&block, &stop_flag);
             }
