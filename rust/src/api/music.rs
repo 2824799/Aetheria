@@ -1,5 +1,5 @@
 use crate::database::connection::{
-    establish_connection, get_files_dir, get_library_dir, init_storage, set_library_dir,
+    establish_connection, get_files_dir, get_library_dir, set_library_dir,
 };
 use crate::database::schema::init_db;
 use crate::models::{AudioVersion, Playlist, PreviewInfo, Song, Tag};
@@ -1267,8 +1267,69 @@ pub fn set_rust_pitch(pitch: f64, algo: String) -> Result<(), String> {
     crate::audio::player::set_pitch(pitch, algo)
 }
 
+pub fn set_rust_output_buffer_ms(ms: i32) -> Result<(), String> {
+    crate::audio::player::set_output_buffer_ms(ms)
+}
+
 pub fn get_rust_playback_position() -> f64 {
     crate::audio::player::get_position()
+}
+
+fn refresh_audio_file_metadata_impl(
+    conn: &rusqlite::Connection,
+    id: &str,
+    abs_path: &Path,
+) -> Result<(), String> {
+    if !abs_path.exists() {
+        return Err("Audio file does not exist".to_string());
+    }
+
+    let loudness = crate::audio::dsp::calculate_loudness_full(&abs_path.to_string_lossy())
+        .unwrap_or(-15.0);
+
+    if let Ok(tagged_file) = Probe::open(abs_path)
+        .map_err(|e| e.to_string())
+        .and_then(|p| p.read().map_err(|e| e.to_string()))
+    {
+        let properties = tagged_file.properties();
+        let duration = reliable_duration(
+            abs_path,
+            properties.duration().as_secs_f64(),
+            properties.audio_bitrate().map(|b| b as u32),
+        );
+        let bitrate = properties.audio_bitrate().map(|b| (b * 1000) as i32);
+        let sample_rate = properties.sample_rate().map(|s| s as i32);
+        let bit_depth = properties.bit_depth().map(|d| d as i32);
+
+        conn.execute(
+            "UPDATE audio_files SET bitrate = ?1, sample_rate = ?2, duration = ?3, bit_depth = ?4, loudness = ?5 WHERE id = ?6",
+            params![bitrate, sample_rate, duration, bit_depth, loudness, id],
+        )
+        .map_err(|e| e.to_string())?;
+    } else {
+        conn.execute(
+            "UPDATE audio_files SET loudness = ?1 WHERE id = ?2",
+            params![loudness, id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
+pub fn refresh_audio_file_metadata(version_id: String) -> Result<(), String> {
+    let conn = establish_connection().map_err(|e| e.to_string())?;
+    let filepath: String = conn
+        .query_row(
+            "SELECT filepath FROM audio_files WHERE id = ?1",
+            params![version_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+
+    let filename = filepath.split('/').last().unwrap_or(&filepath);
+    let abs_path = get_files_dir().join(filename);
+    refresh_audio_file_metadata_impl(&conn, &version_id, &abs_path)
 }
 
 pub fn refresh_song_database() -> Result<(), String> {
@@ -1294,37 +1355,7 @@ pub fn refresh_song_database() -> Result<(), String> {
     }
 
     for (id, abs_path) in entries {
-        if abs_path.exists() {
-            // Calculate full loudness
-            let loudness = crate::audio::dsp::calculate_loudness_full(&abs_path.to_string_lossy())
-                .unwrap_or(-15.0);
-
-            // Parse properties using Lofty
-            if let Ok(tagged_file) = Probe::open(&abs_path)
-                .map_err(|e| e.to_string())
-                .and_then(|p| p.read().map_err(|e| e.to_string()))
-            {
-                let properties = tagged_file.properties();
-                let duration = reliable_duration(
-                    &abs_path,
-                    properties.duration().as_secs_f64(),
-                    properties.audio_bitrate().map(|b| b as u32),
-                );
-                let bitrate = properties.audio_bitrate().map(|b| (b * 1000) as i32);
-                let sample_rate = properties.sample_rate().map(|s| s as i32);
-                let bit_depth = properties.bit_depth().map(|d| d as i32);
-
-                let _ = conn.execute(
-                    "UPDATE audio_files SET bitrate = ?1, sample_rate = ?2, duration = ?3, bit_depth = ?4, loudness = ?5 WHERE id = ?6",
-                    params![bitrate, sample_rate, duration, bit_depth, loudness, id]
-                );
-            } else {
-                let _ = conn.execute(
-                    "UPDATE audio_files SET loudness = ?1 WHERE id = ?2",
-                    params![loudness, id],
-                );
-            }
-        }
+        let _ = refresh_audio_file_metadata_impl(&conn, &id, &abs_path);
     }
 
     Ok(())

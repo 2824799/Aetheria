@@ -109,30 +109,36 @@ class _TagManagerModalState extends State<TagManagerModal> {
     final themeProvider = context.watch<UIThemeProvider>();
     final libraryProvider = context.watch<LibraryProvider>();
     final cfg = themeProvider.currentTheme;
+    final media = MediaQuery.of(context);
+    final isCompact = media.size.width < 768;
 
     return Center(
       child: Material(
         color: Colors.transparent,
         child: Container(
-          width: 560,
-          margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
+          width: isCompact ? media.size.width - 24 : 560,
+          height: isCompact ? media.size.height * 0.9 : 720,
+          margin: EdgeInsets.symmetric(
+            horizontal: isCompact ? 12 : 24,
+            vertical: isCompact ? 12 : 40,
+          ),
           child: GlassPanel(
             blur: 30,
             borderRadius: BorderRadius.circular(16),
             padding: const EdgeInsets.all(24),
             child: Column(
-              mainAxisSize: MainAxisSize.min,
+              mainAxisSize: MainAxisSize.max,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 // Header
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(
-                      '管理已有标签',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
+                      Text(
+                        isCompact ? '标签管理' : '管理已有标签',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
                         color: cfg.textMain,
                       ),
                     ),
@@ -166,93 +172,91 @@ class _TagManagerModalState extends State<TagManagerModal> {
                         ),
                       ),
                       const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: SizedBox(
-                              height: 38,
-                              child: TextField(
-                                controller: _tagNameController,
-                                style: TextStyle(
-                                  color: cfg.textMain,
-                                  fontSize: 13,
-                                ),
-                                decoration: InputDecoration(
-                                  hintText: '标签名, 如: 抒情',
-                                  hintStyle: TextStyle(
-                                    color: cfg.textSub.withOpacity(0.5),
-                                  ),
-                                  filled: true,
-                                  fillColor: Colors.black.withOpacity(0.06),
-                                  contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                  ),
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(6),
-                                    borderSide: BorderSide(color: cfg.border),
-                                  ),
-                                  enabledBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(6),
-                                    borderSide: BorderSide(color: cfg.border),
-                                  ),
-                                ),
-                              ),
+                      SizedBox(
+                        height: 38,
+                        child: TextField(
+                          controller: _tagNameController,
+                          style: TextStyle(
+                            color: cfg.textMain,
+                            fontSize: 13,
+                          ),
+                          decoration: InputDecoration(
+                            hintText: '标签名, 如: 抒情',
+                            hintStyle: TextStyle(
+                              color: cfg.textSub.withOpacity(0.5),
+                            ),
+                            filled: true,
+                            fillColor: Colors.black.withOpacity(0.06),
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                            ),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(6),
+                              borderSide: BorderSide(color: cfg.border),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(6),
+                              borderSide: BorderSide(color: cfg.border),
                             ),
                           ),
-                          const SizedBox(width: 8),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      if (isCompact) ...[
+                        SizedBox(
+                          height: 38,
+                          child: DropdownButtonFormField<String>(
+                            initialValue: _selectedCategory,
+                            style: TextStyle(color: cfg.textMain, fontSize: 13),
+                            dropdownColor: cfg.bgPanel,
+                            decoration: InputDecoration(
+                              filled: true,
+                              fillColor: Colors.black.withOpacity(0.06),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: cfg.border)),
+                              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: cfg.border)),
+                            ),
+                            items: ['流派', '语言', '情绪', '场景', '自定义']
+                                .map((cat) => DropdownMenuItem(value: cat, child: Text(cat, style: const TextStyle(fontSize: 13))))
+                                .toList(),
+                            onChanged: (val) {
+                              if (val != null) {
+                                setState(() {
+                                  _selectedCategory = val;
+                                  _isCustomCategory = val == '自定义';
+                                  if (_isCustomCategory) {
+                                    _categoryController.clear();
+                                  }
+                                });
+                              }
+                            },
+                          ),
+                        ),
+                        if (_isCustomCategory) ...[
+                          const SizedBox(height: 8),
                           SizedBox(
-                            width: 136,
                             height: 38,
-                            child: DropdownButtonFormField<String>(
-                              initialValue: _selectedCategory,
+                            child: TextField(
+                              controller: _categoryController,
                               style: TextStyle(color: cfg.textMain, fontSize: 13),
-                              dropdownColor: cfg.bgPanel,
                               decoration: InputDecoration(
+                                hintText: '输入类别',
+                                hintStyle: TextStyle(color: cfg.textSub.withOpacity(0.5)),
                                 filled: true,
                                 fillColor: Colors.black.withOpacity(0.06),
                                 contentPadding: const EdgeInsets.symmetric(horizontal: 12),
                                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: cfg.border)),
                                 enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: cfg.border)),
                               ),
-                              items: ['流派', '语言', '情绪', '场景', '自定义']
-                                  .map((cat) => DropdownMenuItem(value: cat, child: Text(cat, style: TextStyle(fontSize: 13))))
-                                  .toList(),
-                              onChanged: (val) {
-                                if (val != null) {
-                                  setState(() {
-                                    _selectedCategory = val;
-                                    _isCustomCategory = val == '自定义';
-                                    if (_isCustomCategory) {
-                                      _categoryController.clear();
-                                    }
-                                  });
-                                }
-                              },
+                              onChanged: (value) => _selectedCategory = value,
                             ),
                           ),
-                          if (_isCustomCategory) ...[
-                            const SizedBox(width: 8),
-                            SizedBox(
-                              width: 110,
-                              height: 38,
-                              child: TextField(
-                                controller: _categoryController,
-                                style: TextStyle(color: cfg.textMain, fontSize: 13),
-                                decoration: InputDecoration(
-                                  hintText: '输入类别',
-                                  hintStyle: TextStyle(color: cfg.textSub.withOpacity(0.5)),
-                                  filled: true,
-                                  fillColor: Colors.black.withOpacity(0.06),
-                                  contentPadding: const EdgeInsets.symmetric(horizontal: 12),
-                                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: cfg.border)),
-                                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: cfg.border)),
-                                ),
-                                onChanged: (value) => _selectedCategory = value,
-                              ),
-                            ),
-                          ],
-                          const SizedBox(width: 8),
-                          ElevatedButton.icon(
+                        ],
+                        const SizedBox(height: 8),
+                        SizedBox(
+                          height: 38,
+                          width: double.infinity,
+                          child: ElevatedButton.icon(
                             onPressed: () => _submitTag(libraryProvider),
                             icon: Icon(
                               _editingTagId == null
@@ -261,23 +265,100 @@ class _TagManagerModalState extends State<TagManagerModal> {
                               size: 14,
                             ),
                             label: Text(
-                              _editingTagId == null ? '创建' : '保存',
+                              _editingTagId == null ? '创建标签' : '保存修改',
                               style: const TextStyle(fontSize: 12),
                             ),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: cfg.accent,
                               foregroundColor: Colors.white,
                               elevation: 0,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                              ),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(6),
                               ),
                             ),
                           ),
-                        ],
-                      ),
+                        ),
+                      ] else
+                        Row(
+                          children: [
+                            SizedBox(
+                              width: 136,
+                              height: 38,
+                              child: DropdownButtonFormField<String>(
+                                initialValue: _selectedCategory,
+                                style: TextStyle(color: cfg.textMain, fontSize: 13),
+                                dropdownColor: cfg.bgPanel,
+                                decoration: InputDecoration(
+                                  filled: true,
+                                  fillColor: Colors.black.withOpacity(0.06),
+                                  contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: cfg.border)),
+                                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: cfg.border)),
+                                ),
+                                items: ['流派', '语言', '情绪', '场景', '自定义']
+                                    .map((cat) => DropdownMenuItem(value: cat, child: Text(cat, style: const TextStyle(fontSize: 13))))
+                                    .toList(),
+                                onChanged: (val) {
+                                  if (val != null) {
+                                    setState(() {
+                                      _selectedCategory = val;
+                                      _isCustomCategory = val == '自定义';
+                                      if (_isCustomCategory) {
+                                        _categoryController.clear();
+                                      }
+                                    });
+                                  }
+                                },
+                              ),
+                            ),
+                            if (_isCustomCategory) ...[
+                              const SizedBox(width: 8),
+                              SizedBox(
+                                width: 110,
+                                height: 38,
+                                child: TextField(
+                                  controller: _categoryController,
+                                  style: TextStyle(color: cfg.textMain, fontSize: 13),
+                                  decoration: InputDecoration(
+                                    hintText: '输入类别',
+                                    hintStyle: TextStyle(color: cfg.textSub.withOpacity(0.5)),
+                                    filled: true,
+                                    fillColor: Colors.black.withOpacity(0.06),
+                                    contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: cfg.border)),
+                                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: cfg.border)),
+                                  ),
+                                  onChanged: (value) => _selectedCategory = value,
+                                ),
+                              ),
+                            ],
+                            const SizedBox(width: 8),
+                            ElevatedButton.icon(
+                              onPressed: () => _submitTag(libraryProvider),
+                              icon: Icon(
+                                _editingTagId == null
+                                    ? Icons.add
+                                    : Icons.save_outlined,
+                                size: 14,
+                              ),
+                              label: Text(
+                                _editingTagId == null ? '创建' : '保存',
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: cfg.accent,
+                                foregroundColor: Colors.white,
+                                elevation: 0,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                       if (_editingTagId != null) ...[
                         const SizedBox(height: 8),
                         Align(

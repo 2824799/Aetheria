@@ -72,6 +72,8 @@ class _SongTableState extends State<SongTable> {
   bool _isBoxSelecting = false;
   bool _isPointerDownForSelection = false;
   bool _boxSelectionAdditive = false;
+  DateTime? _lastPrimaryTapAt;
+  String? _lastPrimaryTapSongId;
 
   @override
   void initState() {
@@ -169,6 +171,58 @@ class _SongTableState extends State<SongTable> {
         ..add(song.id);
       _lastSelectedIndex = index;
     });
+  }
+
+  Future<void> _handleRowPrimaryTap(
+    Song song,
+    int index,
+    List<Song> songs,
+    LibraryProvider libraryProvider,
+    AudioPlayerProvider audioProvider,
+  ) async {
+    final isCtrlPressed = _isMultiSelectModifierPressed();
+    final isShiftPressed = HardwareKeyboard.instance.isShiftPressed;
+
+    _handleRowClick(song, index, isCtrlPressed, isShiftPressed, songs);
+
+    if (isCtrlPressed || isShiftPressed) {
+      _lastPrimaryTapAt = null;
+      _lastPrimaryTapSongId = null;
+      return;
+    }
+
+    audioProvider.setActiveSong(song);
+    audioProvider.setDetailOpen(true);
+
+    final now = DateTime.now();
+    final isDoubleTap =
+        _lastPrimaryTapSongId == song.id &&
+        _lastPrimaryTapAt != null &&
+        now.difference(_lastPrimaryTapAt!) <
+            const Duration(milliseconds: 260);
+
+    _lastPrimaryTapSongId = song.id;
+    _lastPrimaryTapAt = now;
+
+    if (!isDoubleTap) {
+      return;
+    }
+
+    try {
+      await audioProvider.playSong(
+        song,
+        songs,
+        libraryProvider.libraryPath,
+        audioServerPort: libraryProvider.audioServerPort,
+      );
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(e.toString())));
+    }
   }
 
   Future<void> _showContextMenu(
@@ -912,36 +966,14 @@ class _SongTableState extends State<SongTable> {
                                 height: _rowHeight,
                                 child: GestureDetector(
                                   behavior: HitTestBehavior.opaque,
-                                  onTapUp: (_) {
-                                    _handleRowClick(
+                                  onTapUp: (_) async {
+                                    await _handleRowPrimaryTap(
                                       song,
                                       index,
-                                      _isMultiSelectModifierPressed(),
-                                      HardwareKeyboard.instance.isShiftPressed,
                                       songs,
+                                      libraryProvider,
+                                      audioProvider,
                                     );
-                                    audioProvider.setActiveSong(song);
-                                    audioProvider.setDetailOpen(true);
-                                  },
-                                  onDoubleTap: () async {
-                                    try {
-                                      await audioProvider.playSong(
-                                        song,
-                                        songs,
-                                        libraryProvider.libraryPath,
-                                        audioServerPort:
-                                            libraryProvider.audioServerPort,
-                                      );
-                                    } catch (e) {
-                                      if (!context.mounted) {
-                                        return;
-                                      }
-                                      ScaffoldMessenger.of(
-                                        context,
-                                      ).showSnackBar(
-                                        SnackBar(content: Text(e.toString())),
-                                      );
-                                    }
                                   },
                                   onSecondaryTapUp: (details) {
                                     _showContextMenu(

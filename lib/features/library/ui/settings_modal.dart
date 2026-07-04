@@ -469,6 +469,27 @@ class _SettingsModalState extends State<SettingsModal> {
               ),
             ),
             const SizedBox(height: 8),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: audioProvider.pitchEnabled,
+              title: Text(
+                audioProvider.pitchEnabled ? '已启用输出变调' : '已关闭输出变调',
+                style: TextStyle(
+                  color: cfg.textMain,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              subtitle: Text(
+                audioProvider.pitchEnabled
+                    ? '启用后可调整播放输出音高，但会带来额外处理延迟。'
+                    : '关闭后会绕过变调处理，保留当前半音设置供后续再次启用。',
+                style: TextStyle(color: cfg.textSub, fontSize: 11),
+              ),
+              activeColor: cfg.accent,
+              onChanged: (value) => audioProvider.setPitchEnabled(value),
+            ),
+            const SizedBox(height: 4),
             Row(
               children: [
                 Text(
@@ -483,9 +504,75 @@ class _SettingsModalState extends State<SettingsModal> {
                     divisions: 24,
                     activeColor: cfg.accent,
                     inactiveColor: cfg.border,
-                    onChanged: (val) {
-                      audioProvider.setPitchSemitones(val);
-                    },
+                    onChanged: audioProvider.pitchEnabled
+                        ? (val) {
+                            audioProvider.setPitchSemitones(val);
+                          }
+                        : null,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '处理缓冲: ${audioProvider.pitchBufferMs} ms',
+              style: TextStyle(
+                color: cfg.textMain,
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                ChoiceChip(
+                  label: const Text('超低延迟 120ms', style: TextStyle(fontSize: 10)),
+                  selected: audioProvider.pitchBufferMs == 120,
+                  onSelected: (_) => audioProvider.setPitchBufferMs(120),
+                  selectedColor: cfg.accent.withOpacity(0.2),
+                  checkmarkColor: cfg.accent,
+                  labelStyle: TextStyle(
+                    color: audioProvider.pitchBufferMs == 120
+                        ? cfg.accent
+                        : cfg.textMain,
+                  ),
+                ),
+                ChoiceChip(
+                  label: const Text('平衡 240ms', style: TextStyle(fontSize: 10)),
+                  selected: audioProvider.pitchBufferMs == 240,
+                  onSelected: (_) => audioProvider.setPitchBufferMs(240),
+                  selectedColor: cfg.accent.withOpacity(0.2),
+                  checkmarkColor: cfg.accent,
+                  labelStyle: TextStyle(
+                    color: audioProvider.pitchBufferMs == 240
+                        ? cfg.accent
+                        : cfg.textMain,
+                  ),
+                ),
+                ChoiceChip(
+                  label: const Text('稳定 480ms', style: TextStyle(fontSize: 10)),
+                  selected: audioProvider.pitchBufferMs == 480,
+                  onSelected: (_) => audioProvider.setPitchBufferMs(480),
+                  selectedColor: cfg.accent.withOpacity(0.2),
+                  checkmarkColor: cfg.accent,
+                  labelStyle: TextStyle(
+                    color: audioProvider.pitchBufferMs == 480
+                        ? cfg.accent
+                        : cfg.textMain,
+                  ),
+                ),
+                ChoiceChip(
+                  label: const Text('高容错 960ms', style: TextStyle(fontSize: 10)),
+                  selected: audioProvider.pitchBufferMs == 960,
+                  onSelected: (_) => audioProvider.setPitchBufferMs(960),
+                  selectedColor: cfg.accent.withOpacity(0.2),
+                  checkmarkColor: cfg.accent,
+                  labelStyle: TextStyle(
+                    color: audioProvider.pitchBufferMs == 960
+                        ? cfg.accent
+                        : cfg.textMain,
                   ),
                 ),
               ],
@@ -509,7 +596,9 @@ class _SettingsModalState extends State<SettingsModal> {
                     style: TextStyle(fontSize: 10),
                   ),
                   selected: audioProvider.pitchAlgorithm == 'wsola',
-                  onSelected: (_) => audioProvider.setPitchAlgorithm('wsola'),
+                  onSelected: audioProvider.pitchEnabled
+                      ? (_) => audioProvider.setPitchAlgorithm('wsola')
+                      : null,
                   selectedColor: cfg.accent.withOpacity(0.2),
                   checkmarkColor: cfg.accent,
                   labelStyle: TextStyle(
@@ -524,7 +613,9 @@ class _SettingsModalState extends State<SettingsModal> {
                     style: TextStyle(fontSize: 10),
                   ),
                   selected: audioProvider.pitchAlgorithm == 'ola',
-                  onSelected: (_) => audioProvider.setPitchAlgorithm('ola'),
+                  onSelected: audioProvider.pitchEnabled
+                      ? (_) => audioProvider.setPitchAlgorithm('ola')
+                      : null,
                   selectedColor: cfg.accent.withOpacity(0.2),
                   checkmarkColor: cfg.accent,
                   labelStyle: TextStyle(
@@ -536,8 +627,9 @@ class _SettingsModalState extends State<SettingsModal> {
                 ChoiceChip(
                   label: const Text('重采样变速', style: TextStyle(fontSize: 10)),
                   selected: audioProvider.pitchAlgorithm == 'resample',
-                  onSelected: (_) =>
-                      audioProvider.setPitchAlgorithm('resample'),
+                  onSelected: audioProvider.pitchEnabled
+                      ? (_) => audioProvider.setPitchAlgorithm('resample')
+                      : null,
                   selectedColor: cfg.accent.withOpacity(0.2),
                   checkmarkColor: cfg.accent,
                   labelStyle: TextStyle(
@@ -686,13 +778,31 @@ class _SettingsModalState extends State<SettingsModal> {
                 borderRadius: BorderRadius.circular(999),
                 child: LinearProgressIndicator(
                   minHeight: 6,
+                  value: libraryProvider.refreshProgressTotal > 0
+                      ? libraryProvider.refreshProgressCurrent /
+                          libraryProvider.refreshProgressTotal
+                      : null,
                   color: cfg.accent,
                   backgroundColor: cfg.border.withOpacity(0.45),
                 ),
               ),
               const SizedBox(height: 8),
               Text(
-                '正在深度重扫音频属性与响度信息，旧库里解析失败的 M4A 时长也会在这一轮里重新校正。',
+                libraryProvider.refreshProgressTotal > 0
+                    ? '已完成 ${libraryProvider.refreshProgressCurrent} / ${libraryProvider.refreshProgressTotal} 首歌曲'
+                    : '正在准备刷新任务...',
+                style: TextStyle(
+                  fontSize: 10,
+                  color: cfg.textMain,
+                  fontWeight: FontWeight.w600,
+                  height: 1.5,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                libraryProvider.refreshProgressLabel.isNotEmpty
+                    ? libraryProvider.refreshProgressLabel
+                    : '正在深度重扫音频属性与响度信息，旧库里解析失败的 M4A 时长也会在这一轮里重新校正。',
                 style: TextStyle(
                   fontSize: 10,
                   color: cfg.textSub,

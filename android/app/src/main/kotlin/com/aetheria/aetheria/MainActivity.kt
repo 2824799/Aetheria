@@ -4,12 +4,15 @@ import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.BroadcastReceiver
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.MediaStore
 import android.view.WindowManager
 import androidx.core.app.ActivityCompat
@@ -30,8 +33,28 @@ class MainActivity : FlutterActivity() {
     private external fun initAudioContext(context: Context)
 
     companion object {
+        const val ACTION_PREVIOUS = "com.aetheria.aetheria.action.PREVIOUS"
+        const val ACTION_TOGGLE = "com.aetheria.aetheria.action.TOGGLE"
+        const val ACTION_NEXT = "com.aetheria.aetheria.action.NEXT"
+
+        private var notificationChannelBridge: MethodChannel? = null
+        private val pendingNotificationActions = mutableListOf<String>()
+
         init {
             System.loadLibrary("rust_lib_aetheria")
+        }
+
+        fun dispatchPlaybackAction(action: String) {
+            val bridge = notificationChannelBridge
+            if (bridge == null) {
+                synchronized(pendingNotificationActions) {
+                    pendingNotificationActions.add(action)
+                }
+                return
+            }
+            Handler(Looper.getMainLooper()).post {
+                bridge.invokeMethod("notificationAction", mapOf("action" to action))
+            }
         }
     }
 
@@ -43,14 +66,29 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
+        val channelBridge = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
+        notificationChannelBridge = channelBridge
+        flushPendingNotificationActions()
+
+        channelBridge.setMethodCallHandler { call, result ->
             when (call.method) {
                 "showNotification" -> {
                     val title = call.argument<String>("title") ?: "Aetheria"
                     val artist = call.argument<String>("artist") ?: "未知歌手"
                     val isPlaying = call.argument<Boolean>("isPlaying") ?: false
-                    showPlaybackNotification(title, artist, isPlaying)
+                    val positionMs = call.argument<Int>("positionMs") ?: 0
+                    val durationMs = call.argument<Int>("durationMs") ?: 0
+                    val hasPrevious = call.argument<Boolean>("hasPrevious") ?: false
+                    val hasNext = call.argument<Boolean>("hasNext") ?: false
+                    showPlaybackNotification(
+                        title,
+                        artist,
+                        isPlaying,
+                        positionMs,
+                        durationMs,
+                        hasPrevious,
+                        hasNext,
+                    )
                     result.success(null)
                 }
                 "hideNotification" -> {
@@ -82,6 +120,20 @@ class MainActivity : FlutterActivity() {
                 else -> {
                     result.notImplemented()
                 }
+            }
+        }
+    }
+
+    private fun flushPendingNotificationActions() {
+        val bridge = notificationChannelBridge ?: return
+        val actionsToDispatch = synchronized(pendingNotificationActions) {
+            val copy = pendingNotificationActions.toList()
+            pendingNotificationActions.clear()
+            copy
+        }
+        Handler(Looper.getMainLooper()).post {
+            for (action in actionsToDispatch) {
+                bridge.invokeMethod("notificationAction", mapOf("action" to action))
             }
         }
     }
@@ -126,7 +178,15 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun showPlaybackNotification(title: String, artist: String, isPlaying: Boolean) {
+    private fun showPlaybackNotification(
+        title: String,
+        artist: String,
+        isPlaying: Boolean,
+        positionMs: Int,
+        durationMs: Int,
+        hasPrevious: Boolean,
+        hasNext: Boolean,
+    ) {
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -149,18 +209,80 @@ class MainActivity : FlutterActivity() {
             PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
         )
 
-        val iconRes = android.R.drawable.ic_media_play
+        val previousIntent = buildPlaybackActionIntent(ACTION_PREVIOUS, 1)
+        val toggleIntent = buildPlaybackActionIntent(ACTION_TOGGLE, 2)
+        val nextIntent = buildPlaybackActionIntent(ACTION_NEXT, 3)
+        val safeDurationMs = durationMs.coerceAtLeast(0)
+        val safePositionMs = if (safeDurationMs > 0) {
+            positionMs.coerceIn(0, safeDurationMs)
+        } else {
+            positionMs.coerceAtLeast(0)
+        }
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(iconRes)
+            .setSmallIcon(
+                if (isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
+            )
             .setContentTitle(title)
             .setContentText(artist)
             .setOngoing(isPlaying)
             .setContentIntent(pendingIntent)
             .setOnlyAlertOnce(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .addAction(
+                android.R.drawable.ic_media_previous,
+                if (hasPrevious) "上一首" else "上一首（队列头部）",
+                previousIntent,
+            )
+            .addAction(
+                if (isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
+                if (isPlaying) "暂停" else "播放",
+                toggleIntent,
+            )
+            .addAction(
+                android.R.drawable.ic_media_next,
+                if (hasNext) "下一首" else "下一首（队列尾部）",
+                nextIntent,
+            )
+            .setStyle(
+                androidx.media.app.NotificationCompat.MediaStyle()
+                    .setShowActionsInCompactView(0, 1, 2)
+            )
+
+        if (safeDurationMs > 0) {
+            builder
+                .setProgress(safeDurationMs, safePositionMs, false)
+                .setSubText("${formatDuration(safePositionMs)} / ${formatDuration(safeDurationMs)}")
+        } else {
+            builder
+                .setProgress(0, 0, true)
+                .setSubText("正在解析音频时长")
+        }
 
         notificationManager.notify(NOTIFICATION_ID, builder.build())
+    }
+
+    private fun buildPlaybackActionIntent(action: String, requestCode: Int): PendingIntent {
+        val intent = Intent(this, PlaybackActionReceiver::class.java).apply {
+            this.action = action
+            `package` = packageName
+        }
+        return PendingIntent.getBroadcast(
+            this,
+            requestCode,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or
+                (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0),
+        )
+    }
+
+    private fun formatDuration(durationMs: Int): String {
+        val totalSeconds = (durationMs / 1000).coerceAtLeast(0)
+        val minutes = totalSeconds / 60
+        val seconds = totalSeconds % 60
+        return String.format("%02d:%02d", minutes, seconds)
     }
 
     private fun hidePlaybackNotification() {
@@ -226,6 +348,16 @@ class MainActivity : FlutterActivity() {
         } catch (e: Exception) {
             resolver.delete(uri, null, null)
             throw e
+        }
+    }
+}
+
+class PlaybackActionReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent?) {
+        when (intent?.action) {
+            MainActivity.ACTION_PREVIOUS -> MainActivity.dispatchPlaybackAction("previous")
+            MainActivity.ACTION_TOGGLE -> MainActivity.dispatchPlaybackAction("toggle")
+            MainActivity.ACTION_NEXT -> MainActivity.dispatchPlaybackAction("next")
         }
     }
 }

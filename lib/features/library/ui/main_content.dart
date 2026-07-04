@@ -8,6 +8,15 @@ import 'package:aetheria/core/widgets/glass_panel.dart';
 import 'package:aetheria/features/library/ui/tag_filter.dart';
 import 'package:aetheria/features/library/ui/song_table.dart';
 import 'package:aetheria/src/rust/api/music.dart' as music;
+import 'package:aetheria/src/rust/models/song.dart' show PreviewInfo;
+
+typedef ProgressDialogUpdate = void Function({
+  String? title,
+  String? subtitle,
+  int? current,
+  int? total,
+  bool? indeterminate,
+});
 
 class MainContent extends StatefulWidget {
   const MainContent({super.key});
@@ -19,41 +28,193 @@ class MainContent extends StatefulWidget {
 class _MainContentState extends State<MainContent> {
   final TextEditingController _searchController = TextEditingController();
 
+  Future<T?> _runProgressDialog<T>({
+    required String initialTitle,
+    required String initialSubtitle,
+    required Future<T> Function(ProgressDialogUpdate updateProgress) task,
+  }) async {
+    if (!mounted) {
+      return null;
+    }
+
+    var progressDialogOpen = false;
+    var progressTitle = initialTitle;
+    var progressSubtitle = initialSubtitle;
+    var progressCurrent = 0;
+    var progressTotal = 0;
+    var progressIndeterminate = true;
+    void Function(void Function())? setDialogState;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (dialogContext, updateDialogState) {
+          setDialogState = updateDialogState;
+          progressDialogOpen = true;
+          final cfg = dialogContext.read<UIThemeProvider>().currentTheme;
+          final progressValue =
+              progressIndeterminate || progressTotal <= 0
+                  ? null
+                  : (progressCurrent / progressTotal).clamp(0.0, 1.0);
+
+          return Center(
+            child: Material(
+              color: Colors.transparent,
+              child: Container(
+                width: 360,
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: cfg.bgPanel,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: cfg.border),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.18),
+                      blurRadius: 24,
+                      offset: const Offset(0, 10),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      progressTitle,
+                      style: TextStyle(
+                        color: cfg.textMain,
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      progressSubtitle,
+                      style: TextStyle(
+                        color: cfg.textSub,
+                        fontSize: 12,
+                        height: 1.5,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(999),
+                      child: LinearProgressIndicator(
+                        minHeight: 6,
+                        value: progressValue,
+                        color: cfg.accent,
+                        backgroundColor: cfg.border.withOpacity(0.45),
+                      ),
+                    ),
+                    if (progressTotal > 0) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        '已完成 $progressCurrent / $progressTotal 项',
+                        style: TextStyle(
+                          color: cfg.textMain,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+    await Future<void>.delayed(Duration.zero);
+
+    void updateProgress({
+      String? title,
+      String? subtitle,
+      int? current,
+      int? total,
+      bool? indeterminate,
+    }) {
+      setDialogState?.call(() {
+        if (title != null) {
+          progressTitle = title;
+        }
+        if (subtitle != null) {
+          progressSubtitle = subtitle;
+        }
+        if (current != null) {
+          progressCurrent = current;
+        }
+        if (total != null) {
+          progressTotal = total;
+        }
+        if (indeterminate != null) {
+          progressIndeterminate = indeterminate;
+        }
+      });
+    }
+
+    try {
+      return await task(updateProgress);
+    } finally {
+      if (mounted && progressDialogOpen) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
+    }
+  }
+
   Future<void> _importFiles(LibraryProvider provider) async {
     try {
-      FilePickerResult? result = await FilePicker.platform.pickFiles(
+      final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['mp3', 'wav', 'flac', 'm4a', 'ogg', 'aac'],
         allowMultiple: true,
       );
 
-      if (result == null || result.paths.isEmpty) return;
+      final selectedPaths = result?.paths.whereType<String>().toList() ?? const [];
+      if (selectedPaths.isEmpty) return;
 
       int successCount = 0;
       int failCount = 0;
 
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (ctx) => const Center(child: CircularProgressIndicator()),
+      await _runProgressDialog<void>(
+        initialTitle: '正在导入音频文件...',
+        initialSubtitle: '已完成 0 / ${selectedPaths.length} 首歌曲',
+        task: (updateProgress) async {
+          updateProgress(
+            current: 0,
+            total: selectedPaths.length,
+            indeterminate: false,
+          );
+          for (int index = 0; index < selectedPaths.length; index++) {
+            updateProgress(
+              subtitle: '正在导入 ${index + 1} / ${selectedPaths.length} 首歌曲',
+              current: index,
+            );
+            try {
+              await provider.importSong(selectedPaths[index]);
+              successCount++;
+            } catch (_) {
+              failCount++;
+            }
+            updateProgress(
+              subtitle: '已完成 ${index + 1} / ${selectedPaths.length} 首歌曲',
+              current: index + 1,
+            );
+          }
+        },
       );
 
-      for (final path in result.paths) {
-        if (path == null) continue;
-        try {
-          await provider.importSong(path);
-          successCount++;
-        } catch (e) {
-          failCount++;
-        }
+      if (!mounted) {
+        return;
       }
-
-      Navigator.of(context).pop(); // pop progress indicator
-
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('导入完成: 成功 $successCount 首, 失败 $failCount 首')),
       );
     } catch (e) {
+      if (!mounted) {
+        return;
+      }
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('导入文件错误: $e')));
@@ -61,121 +222,61 @@ class _MainContentState extends State<MainContent> {
   }
 
   Future<void> _importFolder(LibraryProvider provider) async {
-    bool progressDialogOpen = false;
     try {
-      String? selectedDirectory = await FilePicker.platform.getDirectoryPath();
+      final selectedDirectory = await FilePicker.platform.getDirectoryPath();
       if (selectedDirectory == null) return;
 
-      String progressTitle = '正在扫描文件夹...';
-      String progressSubtitle = '扫描完成后会继续读取音频元数据。';
-      double? progressValue;
-      void Function(void Function())? updateProgressDialog;
+      final previews = await _runProgressDialog<List<PreviewInfo>>(
+        initialTitle: '正在扫描文件夹...',
+        initialSubtitle: '扫描完成后会继续读取音频元数据。',
+        task: (updateProgress) async {
+          final filepaths = await music.scanDirectoryForPreview(
+            dirPath: selectedDirectory,
+          );
+          if (filepaths.isEmpty) {
+            return const <PreviewInfo>[];
+          }
 
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (ctx) => StatefulBuilder(
-          builder: (dialogContext, setDialogState) {
-            updateProgressDialog = setDialogState;
-            progressDialogOpen = true;
-            final cfg = context.read<UIThemeProvider>().currentTheme;
-            return Center(
-              child: Material(
-                color: Colors.transparent,
-                child: Container(
-                  width: 360,
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: cfg.bgPanel,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: cfg.border),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.18),
-                        blurRadius: 24,
-                        offset: const Offset(0, 10),
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        progressTitle,
-                        style: TextStyle(
-                          color: cfg.textMain,
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                        progressSubtitle,
-                        style: TextStyle(
-                          color: cfg.textSub,
-                          fontSize: 12,
-                          height: 1.5,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(999),
-                        child: LinearProgressIndicator(
-                          minHeight: 6,
-                          value: progressValue,
-                          color: cfg.accent,
-                          backgroundColor: cfg.border.withOpacity(0.45),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
+          updateProgress(
+            title: '正在读取音频元数据...',
+            subtitle: '已处理 0 / ${filepaths.length} 首候选歌曲',
+            current: 0,
+            total: filepaths.length,
+            indeterminate: false,
+          );
+
+          final previews = <PreviewInfo>[];
+          const batchSize = 24;
+          for (int start = 0; start < filepaths.length; start += batchSize) {
+            final end = math.min(start + batchSize, filepaths.length);
+            final batch = await music.previewAudioMetadata(
+              filepaths: filepaths.sublist(start, end),
             );
-          },
-        ),
-      );
-      await Future<void>.delayed(Duration.zero);
+            previews.addAll(batch);
+            updateProgress(
+              subtitle: '已处理 $end / ${filepaths.length} 首候选歌曲',
+              current: end,
+            );
+          }
 
-      final filepaths = await music.scanDirectoryForPreview(
-        dirPath: selectedDirectory,
+          return previews;
+        },
       );
-      if (filepaths.isEmpty) {
-        if (context.mounted && progressDialogOpen) {
-          Navigator.of(context).pop();
-          progressDialogOpen = false;
-        }
+
+      if (!mounted) {
+        return;
+      }
+      if (previews == null || previews.isEmpty) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('所选文件夹中未找到支持的音频文件')));
         return;
       }
 
-      final previews = <dynamic>[];
-      const batchSize = 24;
-      for (int start = 0; start < filepaths.length; start += batchSize) {
-        final end = math.min(start + batchSize, filepaths.length);
-        updateProgressDialog?.call(() {
-          progressTitle = '正在读取音频元数据...';
-          progressSubtitle = '已处理 $end / ${filepaths.length} 首候选歌曲';
-          progressValue = end / filepaths.length;
-        });
-        final batch = await music.previewAudioMetadata(
-          filepaths: filepaths.sublist(start, end),
-        );
-        previews.addAll(batch);
-      }
-
-      if (context.mounted && progressDialogOpen) {
-        Navigator.of(context).pop();
-        progressDialogOpen = false;
-      }
-
       _showImportPreviewModal(previews, provider);
     } catch (e) {
-      if (context.mounted && progressDialogOpen) {
-        Navigator.of(context).pop();
+      if (!mounted) {
+        return;
       }
       ScaffoldMessenger.of(
         context,
@@ -184,7 +285,7 @@ class _MainContentState extends State<MainContent> {
   }
 
   void _showImportPreviewModal(
-    List<dynamic> previews,
+    List<PreviewInfo> previews,
     LibraryProvider provider,
   ) {
     final checkedItems = List<bool>.filled(previews.length, true);
@@ -198,7 +299,7 @@ class _MainContentState extends State<MainContent> {
             return Center(
               child: Material(
                 color: Colors.transparent,
-                child: Container(
+                child: SizedBox(
                   width: 580,
                   height: 480,
                   child: GlassPanel(
@@ -270,7 +371,7 @@ class _MainContentState extends State<MainContent> {
                             child: ListView.separated(
                               padding: const EdgeInsets.symmetric(vertical: 4),
                               itemCount: previews.length,
-                              separatorBuilder: (_, __) => Divider(
+                              separatorBuilder: (_, _) => Divider(
                                 height: 1,
                                 color: cfg.border.withOpacity(0.5),
                               ),
@@ -318,36 +419,65 @@ class _MainContentState extends State<MainContent> {
                             const SizedBox(width: 12),
                             ElevatedButton(
                               onPressed: () async {
-                                Navigator.of(ctx).pop(); // pop preview dialog
-
-                                // show progress hud
-                                showDialog(
-                                  context: this.context,
-                                  barrierDismissible: false,
-                                  builder: (c) => const Center(
-                                    child: CircularProgressIndicator(),
-                                  ),
-                                );
-
-                                int imported = 0;
-                                for (int i = 0; i < previews.length; i++) {
-                                  if (checkedItems[i]) {
-                                    final item = previews[i];
-                                    try {
-                                      await provider.importSongWithMetadata(
-                                        item.filepath,
-                                        item.title,
-                                        item.artist,
-                                      );
-                                      imported++;
-                                    } catch (_) {}
+                                final selectedPreviews = <PreviewInfo>[];
+                                for (int index = 0; index < previews.length; index++) {
+                                  if (checkedItems[index]) {
+                                    selectedPreviews.add(previews[index]);
                                   }
                                 }
 
-                                Navigator.of(
-                                  this.context,
-                                ).pop(); // pop progress hud
+                                Navigator.of(ctx).pop();
 
+                                if (selectedPreviews.isEmpty) {
+                                  if (!mounted) {
+                                    return;
+                                  }
+                                  ScaffoldMessenger.of(this.context).showSnackBar(
+                                    const SnackBar(content: Text('请至少选择一首歌曲再导入')),
+                                  );
+                                  return;
+                                }
+
+                                int imported = 0;
+                                await _runProgressDialog<void>(
+                                  initialTitle: '正在导入已选歌曲...',
+                                  initialSubtitle:
+                                      '已完成 0 / ${selectedPreviews.length} 首歌曲',
+                                  task: (updateProgress) async {
+                                    updateProgress(
+                                      current: 0,
+                                      total: selectedPreviews.length,
+                                      indeterminate: false,
+                                    );
+                                    for (int index = 0;
+                                        index < selectedPreviews.length;
+                                        index++) {
+                                      final item = selectedPreviews[index];
+                                      updateProgress(
+                                        subtitle:
+                                            '正在导入 ${index + 1} / ${selectedPreviews.length} 首歌曲',
+                                        current: index,
+                                      );
+                                      try {
+                                        await provider.importSongWithMetadata(
+                                          item.filepath,
+                                          item.title,
+                                          item.artist,
+                                        );
+                                        imported++;
+                                      } catch (_) {}
+                                      updateProgress(
+                                        subtitle:
+                                            '已完成 ${index + 1} / ${selectedPreviews.length} 首歌曲',
+                                        current: index + 1,
+                                      );
+                                    }
+                                  },
+                                );
+
+                                if (!mounted) {
+                                  return;
+                                }
                                 ScaffoldMessenger.of(this.context).showSnackBar(
                                   SnackBar(content: Text('成功导入 $imported 首歌曲')),
                                 );

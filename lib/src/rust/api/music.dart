@@ -8,7 +8,7 @@ import '../models/playlist.dart';
 import '../models/song.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `estimate_duration_from_bitrate`, `estimate_duration_with_symphonia`, `reliable_duration`, `scan_directory`
+// These functions are ignored because they are not marked as `pub`: `estimate_duration_from_bitrate`, `estimate_duration_with_symphonia`, `refresh_audio_file_metadata_impl`, `reliable_duration`, `scan_directory`
 
 bool isLibraryInitialized() =>
     RustLib.instance.api.crateApiMusicIsLibraryInitialized();
@@ -198,8 +198,16 @@ Future<void> setRustVolume({required double vol}) =>
 Future<void> setRustPitch({required double pitch, required String algo}) =>
     RustLib.instance.api.crateApiMusicSetRustPitch(pitch: pitch, algo: algo);
 
+Future<void> setRustOutputBufferMs({required int ms}) =>
+    RustLib.instance.api.crateApiMusicSetRustOutputBufferMs(ms: ms);
+
 Future<double> getRustPlaybackPosition() =>
     RustLib.instance.api.crateApiMusicGetRustPlaybackPosition();
+
+Future<void> refreshAudioFileMetadata({required String versionId}) => RustLib
+    .instance
+    .api
+    .crateApiMusicRefreshAudioFileMetadata(versionId: versionId);
 
 Future<void> refreshSongDatabase() =>
     RustLib.instance.api.crateApiMusicRefreshSongDatabase();

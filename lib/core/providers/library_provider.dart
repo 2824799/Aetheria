@@ -35,7 +35,7 @@ class LibraryProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final isInit = await music.isLibraryInitialized();
+      final isInit = music.isLibraryInitialized();
       if (!isInit) {
         isLoading = false;
         notifyListeners();
@@ -82,17 +82,47 @@ class LibraryProvider extends ChangeNotifier {
   }
 
   bool isRefreshingDatabase = false;
+  int refreshProgressCurrent = 0;
+  int refreshProgressTotal = 0;
+  String refreshProgressLabel = '';
 
   Future<void> refreshDatabase() async {
     isRefreshingDatabase = true;
+    refreshProgressCurrent = 0;
+    refreshProgressTotal = 0;
+    refreshProgressLabel = '正在准备刷新任务...';
     notifyListeners();
     try {
-      await music.refreshSongDatabase();
+      final snapshotSongs = songs.isNotEmpty ? List<Song>.from(songs) : await music.getSongs();
+      refreshProgressTotal = snapshotSongs.length;
+      if (snapshotSongs.isEmpty) {
+        refreshProgressLabel = '音乐库为空，无需刷新。';
+      }
+      notifyListeners();
+
+      for (int songIndex = 0; songIndex < snapshotSongs.length; songIndex++) {
+        final song = snapshotSongs[songIndex];
+        refreshProgressCurrent = songIndex;
+        refreshProgressLabel =
+            '正在刷新 ${songIndex + 1} / ${snapshotSongs.length} 首歌曲: ${song.title}';
+        notifyListeners();
+
+        for (final version in song.versions) {
+          await music.refreshAudioFileMetadata(versionId: version.id);
+        }
+
+        refreshProgressCurrent = songIndex + 1;
+        notifyListeners();
+      }
+
       await loadLibrary();
     } catch (e) {
       error = e.toString();
     } finally {
       isRefreshingDatabase = false;
+      refreshProgressCurrent = 0;
+      refreshProgressTotal = 0;
+      refreshProgressLabel = '';
       notifyListeners();
     }
   }

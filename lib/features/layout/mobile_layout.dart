@@ -25,6 +25,11 @@ class _MobileLayoutState extends State<MobileLayout> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final TextEditingController _searchController = TextEditingController();
   bool _isImporting = false;
+  String _importProgressTitle = '正在处理...';
+  String _importProgressSubtitle = '';
+  int _importProgressCurrent = 0;
+  int _importProgressTotal = 0;
+  bool _importProgressIndeterminate = true;
 
   @override
   void initState() {
@@ -59,6 +64,40 @@ class _MobileLayoutState extends State<MobileLayout> {
     return '${d.toStringAsFixed(1)} ${suffixes[i]}';
   }
 
+  void _updateImportProgress({
+    required String title,
+    required String subtitle,
+    int current = 0,
+    int total = 0,
+    bool indeterminate = true,
+  }) {
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _isImporting = true;
+      _importProgressTitle = title;
+      _importProgressSubtitle = subtitle;
+      _importProgressCurrent = current;
+      _importProgressTotal = total;
+      _importProgressIndeterminate = indeterminate;
+    });
+  }
+
+  void _clearImportProgress() {
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _isImporting = false;
+      _importProgressTitle = '正在处理...';
+      _importProgressSubtitle = '';
+      _importProgressCurrent = 0;
+      _importProgressTotal = 0;
+      _importProgressIndeterminate = true;
+    });
+  }
+
   // Import audio files
   Future<void> _importFiles(LibraryProvider provider) async {
     try {
@@ -68,23 +107,41 @@ class _MobileLayoutState extends State<MobileLayout> {
         allowMultiple: true,
       );
 
-      if (result == null || result.paths.isEmpty) return;
+      final selectedPaths = result?.paths.whereType<String>().toList() ?? const [];
+      if (selectedPaths.isEmpty) return;
 
-      setState(() {
-        _isImporting = true;
-      });
+      _updateImportProgress(
+        title: '正在导入音频文件...',
+        subtitle: '已完成 0 / ${selectedPaths.length} 首歌曲',
+        current: 0,
+        total: selectedPaths.length,
+        indeterminate: false,
+      );
 
       int successCount = 0;
       int failCount = 0;
 
-      for (final path in result.paths) {
-        if (path == null) continue;
+      for (int index = 0; index < selectedPaths.length; index++) {
+        _updateImportProgress(
+          title: '正在导入音频文件...',
+          subtitle: '正在导入 ${index + 1} / ${selectedPaths.length} 首歌曲',
+          current: index,
+          total: selectedPaths.length,
+          indeterminate: false,
+        );
         try {
-          await provider.importSong(path);
+          await provider.importSong(selectedPaths[index]);
           successCount++;
         } catch (_) {
           failCount++;
         }
+        _updateImportProgress(
+          title: '正在导入音频文件...',
+          subtitle: '已完成 ${index + 1} / ${selectedPaths.length} 首歌曲',
+          current: index + 1,
+          total: selectedPaths.length,
+          indeterminate: false,
+        );
       }
 
       if (!mounted) return;
@@ -97,11 +154,7 @@ class _MobileLayoutState extends State<MobileLayout> {
         context,
       ).showSnackBar(SnackBar(content: Text('导入文件错误: $e')));
     } finally {
-      if (mounted) {
-        setState(() {
-          _isImporting = false;
-        });
-      }
+      _clearImportProgress();
     }
   }
 
@@ -111,9 +164,10 @@ class _MobileLayoutState extends State<MobileLayout> {
       String? selectedDirectory = await FilePicker.platform.getDirectoryPath();
       if (selectedDirectory == null) return;
 
-      setState(() {
-        _isImporting = true;
-      });
+      _updateImportProgress(
+        title: '正在扫描文件夹...',
+        subtitle: '正在搜索支持的音频文件...',
+      );
 
       // Scan directory for preview
       final filepaths = await music.scanDirectoryForPreview(
@@ -127,8 +181,32 @@ class _MobileLayoutState extends State<MobileLayout> {
         return;
       }
 
-      // Load metadata previews
-      final previews = await music.previewAudioMetadata(filepaths: filepaths);
+      _updateImportProgress(
+        title: '正在读取音频元数据...',
+        subtitle: '已处理 0 / ${filepaths.length} 首候选歌曲',
+        current: 0,
+        total: filepaths.length,
+        indeterminate: false,
+      );
+
+      final previews = <PreviewInfo>[];
+      const batchSize = 24;
+      for (int start = 0; start < filepaths.length; start += batchSize) {
+        final end = start + batchSize > filepaths.length
+            ? filepaths.length
+            : start + batchSize;
+        final batch = await music.previewAudioMetadata(
+          filepaths: filepaths.sublist(start, end),
+        );
+        previews.addAll(batch);
+        _updateImportProgress(
+          title: '正在读取音频元数据...',
+          subtitle: '已处理 $end / ${filepaths.length} 首候选歌曲',
+          current: end,
+          total: filepaths.length,
+          indeterminate: false,
+        );
+      }
 
       if (!mounted) return;
       // Present import preview modal
@@ -139,11 +217,7 @@ class _MobileLayoutState extends State<MobileLayout> {
         context,
       ).showSnackBar(SnackBar(content: Text('扫描文件夹错误: $e')));
     } finally {
-      if (mounted) {
-        setState(() {
-          _isImporting = false;
-        });
-      }
+      _clearImportProgress();
     }
   }
 
@@ -294,33 +368,65 @@ class _MobileLayoutState extends State<MobileLayout> {
                             const SizedBox(width: 8),
                             ElevatedButton(
                               onPressed: () async {
-                                Navigator.of(ctx).pop(); // pop preview dialog
-
-                                setState(() {
-                                  _isImporting = true;
-                                });
-
-                                int imported = 0;
-                                for (int i = 0; i < previews.length; i++) {
-                                  if (checkedItems[i]) {
-                                    final item = previews[i];
-                                    try {
-                                      await provider.importSongWithMetadata(
-                                        item.filepath,
-                                        item.title,
-                                        item.artist,
-                                      );
-                                      imported++;
-                                    } catch (_) {}
+                                final selectedPreviews = <PreviewInfo>[];
+                                for (int index = 0; index < previews.length; index++) {
+                                  if (checkedItems[index]) {
+                                    selectedPreviews.add(previews[index]);
                                   }
                                 }
 
-                                if (mounted) {
-                                  setState(() {
-                                    _isImporting = false;
-                                  });
+                                Navigator.of(ctx).pop();
+
+                                if (selectedPreviews.isEmpty) {
+                                  if (!mounted) return;
+                                  ScaffoldMessenger.of(this.context).showSnackBar(
+                                    const SnackBar(content: Text('请至少选择一首歌曲再导入')),
+                                  );
+                                  return;
                                 }
 
+                                _updateImportProgress(
+                                  title: '正在导入已选歌曲...',
+                                  subtitle: '已完成 0 / ${selectedPreviews.length} 首歌曲',
+                                  current: 0,
+                                  total: selectedPreviews.length,
+                                  indeterminate: false,
+                                );
+
+                                int imported = 0;
+                                for (int i = 0; i < selectedPreviews.length; i++) {
+                                  final item = selectedPreviews[i];
+                                  _updateImportProgress(
+                                    title: '正在导入已选歌曲...',
+                                    subtitle:
+                                        '正在导入 ${i + 1} / ${selectedPreviews.length} 首歌曲',
+                                    current: i,
+                                    total: selectedPreviews.length,
+                                    indeterminate: false,
+                                  );
+                                  try {
+                                    await provider.importSongWithMetadata(
+                                      item.filepath,
+                                      item.title,
+                                      item.artist,
+                                    );
+                                    imported++;
+                                  } catch (_) {}
+                                  _updateImportProgress(
+                                    title: '正在导入已选歌曲...',
+                                    subtitle:
+                                        '已完成 ${i + 1} / ${selectedPreviews.length} 首歌曲',
+                                    current: i + 1,
+                                    total: selectedPreviews.length,
+                                    indeterminate: false,
+                                  );
+                                }
+
+                                if (mounted) {
+                                  _clearImportProgress();
+                                }
+
+                                if (!mounted) return;
                                 ScaffoldMessenger.of(this.context).showSnackBar(
                                   SnackBar(content: Text('成功导入 $imported 首歌曲')),
                                 );
@@ -1877,17 +1983,60 @@ class _MobileLayoutState extends State<MobileLayout> {
                   ),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      CircularProgressIndicator(color: cfg.accent),
-                      const SizedBox(height: 12),
                       Text(
-                        '正在导入歌曲...',
+                        _importProgressTitle,
                         style: TextStyle(
                           color: cfg.textMain,
                           fontSize: 13,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        width: 260,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(999),
+                          child: LinearProgressIndicator(
+                            minHeight: 6,
+                            value:
+                                _importProgressIndeterminate ||
+                                        _importProgressTotal <= 0
+                                    ? null
+                                    : (_importProgressCurrent /
+                                            _importProgressTotal)
+                                        .clamp(0.0, 1.0),
+                            color: cfg.accent,
+                            backgroundColor: cfg.border.withOpacity(0.45),
+                          ),
+                        ),
+                      ),
+                      if (_importProgressTotal > 0) ...[
+                        const SizedBox(height: 10),
+                        Text(
+                          '已完成 $_importProgressCurrent / $_importProgressTotal 首',
+                          style: TextStyle(
+                            color: cfg.textMain,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                      if (_importProgressSubtitle.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        SizedBox(
+                          width: 260,
+                          child: Text(
+                            _importProgressSubtitle,
+                            style: TextStyle(
+                              color: cfg.textSub,
+                              fontSize: 11,
+                              height: 1.4,
+                            ),
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),

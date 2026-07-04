@@ -14,6 +14,8 @@ class AudioPlayerProvider extends ChangeNotifier {
   static const String _playbackVersionIdKey = 'aetheria-playback-version-id';
   static const String _playbackPositionMsKey = 'aetheria-playback-position-ms';
   static const String _playbackQueueIdsKey = 'aetheria-playback-queue-ids';
+  static const String _pitchEnabledKey = 'pitch-enabled';
+  static const String _pitchBufferMsKey = 'pitch-buffer-ms';
 
   Song? activeSong;
   Song? playingSong;
@@ -31,8 +33,10 @@ class AudioPlayerProvider extends ChangeNotifier {
 
   bool volumeBalanceEnabled = false;
   double volumeBalanceStrength = 0.5;
+  bool pitchEnabled = false;
   double pitchSemitones = 0.0;
   String pitchAlgorithm = 'wsola';
+  int pitchBufferMs = 240;
 
   bool isDetailOpen = false;
   String activeTab = 'versions';
@@ -47,6 +51,7 @@ class AudioPlayerProvider extends ChangeNotifier {
   Duration? _pendingRestorePosition;
 
   AudioPlayerProvider() {
+    NativeAudioHelper.setNotificationActionHandler(_handleNotificationAction);
     loadSettings();
   }
 
@@ -90,6 +95,7 @@ class AudioPlayerProvider extends ChangeNotifier {
       if (currentPosition.inSeconds != _lastPersistedSecond) {
         _lastPersistedSecond = currentPosition.inSeconds;
         unawaited(_persistPlaybackState());
+        _updateNotification();
       }
       notifyListeners();
     });
@@ -108,8 +114,15 @@ class AudioPlayerProvider extends ChangeNotifier {
       playAlongside = prefs.getBool('play-alongside') ?? false;
       volumeBalanceEnabled = prefs.getBool('volume-balance-enabled') ?? false;
       volumeBalanceStrength = prefs.getDouble('volume-balance-strength') ?? 0.5;
+      pitchEnabled = prefs.getBool(_pitchEnabledKey) ?? false;
       pitchSemitones = prefs.getDouble('pitch-semitones') ?? 0.0;
       pitchAlgorithm = prefs.getString('pitch-algorithm') ?? 'wsola';
+      pitchBufferMs = prefs.getInt(_pitchBufferMsKey) ?? 240;
+      await music.setRustOutputBufferMs(ms: pitchBufferMs);
+      await music.setRustPitch(
+        pitch: _effectivePitchSemitones,
+        algo: pitchAlgorithm,
+      );
       notifyListeners();
     } catch (_) {}
   }
@@ -149,7 +162,10 @@ class AudioPlayerProvider extends ChangeNotifier {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setDouble('pitch-semitones', value);
-      await music.setRustPitch(pitch: value, algo: pitchAlgorithm);
+      await music.setRustPitch(
+        pitch: _effectivePitchSemitones,
+        algo: pitchAlgorithm,
+      );
     } catch (_) {}
   }
 
@@ -159,7 +175,35 @@ class AudioPlayerProvider extends ChangeNotifier {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('pitch-algorithm', value);
-      await music.setRustPitch(pitch: pitchSemitones, algo: value);
+      await music.setRustPitch(
+        pitch: _effectivePitchSemitones,
+        algo: value,
+      );
+    } catch (_) {}
+  }
+
+  Future<void> setPitchEnabled(bool value) async {
+    pitchEnabled = value;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_pitchEnabledKey, value);
+      await music.setRustPitch(
+        pitch: _effectivePitchSemitones,
+        algo: pitchAlgorithm,
+      );
+      await _hotReloadDSP();
+    } catch (_) {}
+  }
+
+  Future<void> setPitchBufferMs(int value) async {
+    pitchBufferMs = value;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(_pitchBufferMsKey, value);
+      await music.setRustOutputBufferMs(ms: value);
+      await _hotReloadDSP();
     } catch (_) {}
   }
 
@@ -175,6 +219,8 @@ class AudioPlayerProvider extends ChangeNotifier {
     final deltaDb = volumeBalanceStrength * (lMin - lSong);
     return math.pow(10, deltaDb / 20).toDouble();
   }
+
+  double get _effectivePitchSemitones => pitchEnabled ? pitchSemitones : 0.0;
 
   Future<void> _clearPersistedPlaybackState(SharedPreferences prefs) async {
     await prefs.remove(_playbackSongIdKey);
@@ -311,7 +357,7 @@ class AudioPlayerProvider extends ChangeNotifier {
     await music.startRustPlayback(
       path: path,
       volume: volume,
-      pitch: pitchSemitones,
+      pitch: _effectivePitchSemitones,
       algo: pitchAlgorithm,
       normalizationGain: _computeNormalizationGain(version),
     );
@@ -366,7 +412,7 @@ class AudioPlayerProvider extends ChangeNotifier {
       await music.startRustPlayback(
         path: path,
         volume: volume,
-        pitch: pitchSemitones,
+        pitch: _effectivePitchSemitones,
         algo: pitchAlgorithm,
         normalizationGain: _computeNormalizationGain(playingVersion!),
       );
@@ -577,12 +623,48 @@ class AudioPlayerProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  bool _hasPreviousInQueue() {
+    if (currentQueue.isEmpty || playingSong == null) {
+      return false;
+    }
+    return currentQueue.length > 1;
+  }
+
+  bool _hasNextInQueue() {
+    if (currentQueue.isEmpty || playingSong == null) {
+      return false;
+    }
+    return currentQueue.length > 1;
+  }
+
+  Future<void> _handleNotificationAction(String action) async {
+    switch (action) {
+      case 'previous':
+        playPrevious();
+        break;
+      case 'toggle':
+        await playPause();
+        break;
+      case 'next':
+        playNext();
+        break;
+      default:
+        break;
+    }
+  }
+
   void _updateNotification() {
     if (Platform.isAndroid && playingSong != null) {
-      NativeAudioHelper.showNotification(
-        playingSong!.title,
-        playingSong!.artist ?? '未知歌手',
-        isPlaying,
+      unawaited(
+        NativeAudioHelper.showNotification(<String, dynamic>{
+          'title': playingSong!.title,
+          'artist': playingSong!.artist ?? '未知歌手',
+          'isPlaying': isPlaying,
+          'positionMs': currentPosition.inMilliseconds,
+          'durationMs': totalDuration.inMilliseconds,
+          'hasPrevious': _hasPreviousInQueue(),
+          'hasNext': _hasNextInQueue(),
+        }),
       );
     }
   }

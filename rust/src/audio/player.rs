@@ -80,6 +80,7 @@ struct PlayerState {
     pitch: Arc<Mutex<f64>>,
     algo: Arc<Mutex<String>>,
     loudness_normalization_gain: Arc<Mutex<f32>>,
+    output_buffer_ms: u32,
 }
 
 lazy_static::lazy_static! {
@@ -96,6 +97,7 @@ lazy_static::lazy_static! {
         pitch: Arc::new(Mutex::new(0.0)),
         algo: Arc::new(Mutex::new("wsola".to_string())),
         loudness_normalization_gain: Arc::new(Mutex::new(1.0)),
+        output_buffer_ms: 240,
     });
 }
 
@@ -108,6 +110,7 @@ fn err_fn(err: cpal::StreamError) {
 /// negotiated sample rate, channel count and the shared ring buffer.
 fn build_output(
     frames_played: Arc<AtomicU64>,
+    output_buffer_ms: u32,
 ) -> Result<(SendStream, u32, u32, Arc<AudioBuffer>), String> {
     let host = cpal::default_host();
     let device = host
@@ -153,8 +156,8 @@ fn build_output(
     let channels = config.channels as u32;
     let ch = channels as usize;
 
-    // ~2 seconds of buffering: enough to absorb decode hiccups, low enough for responsive seek.
-    let capacity = (sample_rate as usize * ch * 2).max(8192);
+    let buffer_ms = output_buffer_ms.clamp(60, 1500) as usize;
+    let capacity = ((sample_rate as usize * ch * buffer_ms) / 1000).max(8192);
     let buffer = Arc::new(AudioBuffer::new(capacity));
 
     let stream = match sample_format {
@@ -333,8 +336,10 @@ pub fn start_playback(
     let pitch = Arc::new(Mutex::new(pitch_val));
     let algo = Arc::new(Mutex::new(pitch_algo));
     let norm_gain = Arc::new(Mutex::new(normalization_gain));
+    let output_buffer_ms = state.output_buffer_ms;
 
-    let (stream, sample_rate, channels, buffer) = build_output(frames_played.clone())?;
+    let (stream, sample_rate, channels, buffer) =
+        build_output(frames_played.clone(), output_buffer_ms)?;
 
     state.stream = Some(stream);
     state.buffer = Some(buffer.clone());
@@ -475,6 +480,12 @@ pub fn set_pitch(pitch_val: f64, pitch_algo: String) -> Result<(), String> {
     let state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
     *state.pitch.lock().unwrap_or_else(|e| e.into_inner()) = pitch_val;
     *state.algo.lock().unwrap_or_else(|e| e.into_inner()) = pitch_algo;
+    Ok(())
+}
+
+pub fn set_output_buffer_ms(ms: i32) -> Result<(), String> {
+    let mut state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
+    state.output_buffer_ms = ms.clamp(60, 1500) as u32;
     Ok(())
 }
 
