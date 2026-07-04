@@ -297,6 +297,7 @@ struct PlayerState {
     stop_flag: Arc<AtomicBool>,
     seek_request: Arc<Mutex<Option<f64>>>,
     frames_played: Arc<AtomicU64>,
+    stream_finished: Arc<AtomicBool>,
     sample_rate: u32,
     channels: u32,
     volume: Arc<Mutex<f32>>,
@@ -320,6 +321,7 @@ lazy_static::lazy_static! {
         stop_flag: Arc::new(AtomicBool::new(false)),
         seek_request: Arc::new(Mutex::new(None)),
         frames_played: Arc::new(AtomicU64::new(0)),
+        stream_finished: Arc::new(AtomicBool::new(false)),
         sample_rate: 44100,
         channels: 2,
         volume: Arc::new(Mutex::new(0.8)),
@@ -813,10 +815,12 @@ pub fn start_playback(
     // Drop the old stream first so the hardware callback stops touching the old buffer.
     state.stream = None;
     state.buffer = None;
+    state.stream_finished.store(false, Ordering::SeqCst);
 
     let stop_flag = Arc::new(AtomicBool::new(false));
     let seek_request = Arc::new(Mutex::new(None));
     let frames_played = Arc::new(AtomicU64::new(0));
+    let stream_finished = Arc::new(AtomicBool::new(false));
     let volume = Arc::new(Mutex::new(vol));
     let pitch = Arc::new(Mutex::new(pitch_val));
     let algo = Arc::new(Mutex::new(pitch_algo));
@@ -868,6 +872,7 @@ pub fn start_playback(
     state.stop_flag = stop_flag.clone();
     state.seek_request = seek_request.clone();
     state.frames_played = frames_played.clone();
+    state.stream_finished = stream_finished.clone();
     state.volume = volume.clone();
     state.pitch = pitch.clone();
     state.algo = algo.clone();
@@ -895,6 +900,7 @@ pub fn start_playback(
                         shifter.reset();
                     }
                     buffer.clear();
+                    stream_finished.store(false, Ordering::SeqCst);
                     if let Err(e) = prefill_audio_buffer(
                         &mut pipeline,
                         &mut rubberband_shifter,
@@ -916,10 +922,12 @@ pub fn start_playback(
                     while buffer.len() > 0 && !stop_flag.load(Ordering::SeqCst) {
                         thread::sleep(Duration::from_millis(20));
                     }
+                    stream_finished.store(true, Ordering::SeqCst);
                     break;
                 }
                 Err(e) => {
                     eprintln!("Decode error: {}", e);
+                    stream_finished.store(true, Ordering::SeqCst);
                     break;
                 }
             };
@@ -963,6 +971,7 @@ pub fn seek_playback(secs: f64) -> Result<(), String> {
         (secs * state.sample_rate as f64).round() as u64,
         Ordering::SeqCst,
     );
+    state.stream_finished.store(false, Ordering::SeqCst);
     Ok(())
 }
 
@@ -974,6 +983,7 @@ pub fn stop_playback() -> Result<(), String> {
     }
     state.stream = None;
     state.buffer = None;
+    state.stream_finished.store(false, Ordering::SeqCst);
     Ok(())
 }
 
@@ -1081,6 +1091,11 @@ pub fn get_position() -> f64 {
     } else {
         frames as f64 / state.sample_rate as f64
     }
+}
+
+pub fn is_finished() -> bool {
+    let state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
+    state.stream_finished.load(Ordering::Relaxed)
 }
 
 fn normalize_rubberband_window(value: &str) -> String {

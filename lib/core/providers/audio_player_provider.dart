@@ -62,6 +62,7 @@ class AudioPlayerProvider extends ChangeNotifier {
   int _lastPositionMs = -1;
   int _lastPersistedSecond = -1;
   int _stallTicks = 0;
+  bool _isHandlingPlaybackEnd = false;
   bool _hasPreparedPlayback = false;
   Duration? _pendingRestorePosition;
 
@@ -75,11 +76,13 @@ class AudioPlayerProvider extends ChangeNotifier {
     _lastPositionMs = -1;
     _lastPersistedSecond = -1;
     _stallTicks = 0;
+    _isHandlingPlaybackEnd = false;
     _positionTimer = Timer.periodic(const Duration(milliseconds: 250), (
       timer,
     ) async {
-      if (!isPlaying) return;
+      if (!isPlaying || _isHandlingPlaybackEnd) return;
       final posSec = await music.getRustPlaybackPosition();
+      final streamFinished = await music.isRustPlaybackFinished();
       currentPosition = Duration(milliseconds: (posSec * 1000).round());
 
       final reachedEnd =
@@ -102,14 +105,9 @@ class AudioPlayerProvider extends ChangeNotifier {
       final stalledAtEnd =
           _stallTicks >= 6 && currentPosition > Duration.zero && nearEnd;
 
-      if (reachedEnd || stalledAtEnd) {
-        _positionTimer?.cancel();
-        if (playMode == PlayMode.single) {
-          await seek(Duration.zero);
-          await resume();
-        } else {
-          playNext();
-        }
+      if (streamFinished || reachedEnd || stalledAtEnd) {
+        await _handlePlaybackEnded();
+        return;
       }
       if (currentPosition.inSeconds != _lastPersistedSecond) {
         _lastPersistedSecond = currentPosition.inSeconds;
@@ -118,6 +116,30 @@ class AudioPlayerProvider extends ChangeNotifier {
       }
       notifyListeners();
     });
+  }
+
+  Future<void> _handlePlaybackEnded() async {
+    if (_isHandlingPlaybackEnd) return;
+    _isHandlingPlaybackEnd = true;
+    _positionTimer?.cancel();
+
+    try {
+      if (playMode == PlayMode.single &&
+          playingSong != null &&
+          playingVersion != null) {
+        currentPosition = Duration.zero;
+        _hasPreparedPlayback = false;
+        await _startCurrentVersionPlayback(
+          startPosition: Duration.zero,
+          startPaused: false,
+        );
+        return;
+      }
+
+      playNext();
+    } finally {
+      _isHandlingPlaybackEnd = false;
+    }
   }
 
   void _stopPositionTimer() {

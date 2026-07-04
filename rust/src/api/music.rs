@@ -18,6 +18,13 @@ use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
 use uuid::Uuid;
 
+fn is_raw_aac_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("aac"))
+        .unwrap_or(false)
+}
+
 #[frb(sync)]
 pub fn is_library_initialized() -> bool {
     let lib_dir = get_library_dir();
@@ -199,24 +206,28 @@ fn estimate_duration_with_symphonia(path: &Path) -> Option<f64> {
             track.codec_params.time_base,
         )
     };
+    let raw_aac = is_raw_aac_path(path);
 
-    if let (Some(n_frames), Some(sample_rate)) = (n_frames, sample_rate) {
-        if sample_rate > 0 {
-            let duration = n_frames as f64 / sample_rate as f64;
+    if !raw_aac {
+        if let (Some(n_frames), Some(sample_rate)) = (n_frames, sample_rate) {
+            if sample_rate > 0 {
+                let duration = n_frames as f64 / sample_rate as f64;
+                if duration.is_finite() && duration > 0.0 {
+                    return Some(duration);
+                }
+            }
+        }
+
+        if let (Some(time_base), Some(n_frames)) = (time_base, n_frames) {
+            let time = time_base.calc_time(n_frames);
+            let duration = time.seconds as f64 + time.frac;
             if duration.is_finite() && duration > 0.0 {
                 return Some(duration);
             }
         }
     }
 
-    if let (Some(time_base), Some(n_frames)) = (time_base, n_frames) {
-        let time = time_base.calc_time(n_frames);
-        let duration = time.seconds as f64 + time.frac;
-        if duration.is_finite() && duration > 0.0 {
-            return Some(duration);
-        }
-    }
-
+    let mut packet_duration_sum = 0u64;
     let mut last_packet_end = None;
     loop {
         match format.next_packet() {
@@ -224,6 +235,7 @@ fn estimate_duration_with_symphonia(path: &Path) -> Option<f64> {
                 if packet.track_id() != track_id {
                     continue;
                 }
+                packet_duration_sum = packet_duration_sum.saturating_add(packet.dur());
                 last_packet_end = Some(packet.ts().saturating_add(packet.dur()));
             }
             Err(Error::IoError(ref err)) if err.kind() == std::io::ErrorKind::UnexpectedEof => {
@@ -231,6 +243,15 @@ fn estimate_duration_with_symphonia(path: &Path) -> Option<f64> {
             }
             Err(Error::ResetRequired) => continue,
             Err(_) => break,
+        }
+    }
+
+    if raw_aac && packet_duration_sum > 0 {
+        if let Some(sample_rate) = sample_rate {
+            let duration = packet_duration_sum as f64 / sample_rate as f64;
+            if duration.is_finite() && duration > 0.0 {
+                return Some(duration);
+            }
         }
     }
 
@@ -268,6 +289,12 @@ fn estimate_duration_from_bitrate(path: &Path, bitrate_bps: Option<u32>) -> Opti
 }
 
 fn reliable_duration(path: &Path, lofty_duration: f64, lofty_bitrate: Option<u32>) -> f64 {
+    if is_raw_aac_path(path) {
+        if let Some(d) = estimate_duration_with_symphonia(path) {
+            return d;
+        }
+    }
+
     if lofty_duration.is_finite() && lofty_duration > 0.0 {
         return lofty_duration;
     }
@@ -1294,6 +1321,10 @@ pub fn get_rust_audio_output_info() -> crate::audio::player::AudioOutputInfo {
 
 pub fn get_rust_playback_position() -> f64 {
     crate::audio::player::get_position()
+}
+
+pub fn is_rust_playback_finished() -> bool {
+    crate::audio::player::is_finished()
 }
 
 fn refresh_audio_file_metadata_impl(
