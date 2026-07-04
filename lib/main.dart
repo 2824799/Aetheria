@@ -52,15 +52,22 @@ Future<void> main() async {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('Aetheria 启动失败',
-                          style: TextStyle(
-                              color: Colors.redAccent,
-                              fontSize: 22,
-                              fontWeight: FontWeight.bold)),
+                      const Text(
+                        'Aetheria 启动失败',
+                        style: TextStyle(
+                          color: Colors.redAccent,
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                       const SizedBox(height: 16),
-                      SelectableText(initError!,
-                          style: const TextStyle(
-                              color: Colors.white70, fontSize: 13)),
+                      SelectableText(
+                        initError!,
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 13,
+                        ),
+                      ),
                     ],
                   ),
                 ),

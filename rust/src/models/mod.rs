@@ -7,8 +7,8 @@
 //! - Pure data objects.
 //! - Does not contain business logic or database queries.
 
-pub mod song;
 pub mod playlist;
+pub mod song;
 
-pub use song::{Song, AudioVersion, Tag, PreviewInfo};
 pub use playlist::Playlist;
+pub use song::{AudioVersion, PreviewInfo, Song, Tag};

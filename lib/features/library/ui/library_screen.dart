@@ -52,7 +52,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
           children: [
             Icon(Icons.music_note, size: 64, color: Colors.grey),
             SizedBox(height: 16),
-            Text('No songs found in library.', style: TextStyle(color: Colors.grey)),
+            Text(
+              'No songs found in library.',
+              style: TextStyle(color: Colors.grey),
+            ),
           ],
         ),
       );
@@ -75,7 +78,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
               ),
               child: const Icon(Icons.music_note),
             ),
-            title: Text(song.title, style: const TextStyle(fontWeight: FontWeight.bold)),
+            title: Text(
+              song.title,
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
             subtitle: Text(song.artist ?? 'Unknown Artist'),
             trailing: IconButton(
               icon: const Icon(Icons.play_arrow),

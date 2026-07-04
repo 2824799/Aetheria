@@ -1,5 +1,5 @@
-use rusqlite::{params, Result};
 use super::connection::{establish_connection, init_storage};
+use rusqlite::{params, Result};
 
 // 初始化数据库表
 pub fn init_db() -> Result<()> {
@@ -94,39 +94,54 @@ pub fn init_db() -> Result<()> {
     )?;
 
     // 创建索引以优化高频查询
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_audio_files_song ON audio_files(song_id);", [])?;
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_song_tags_song ON song_tags(song_id);", [])?;
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_song_tags_tag ON song_tags(tag_id);", [])?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_audio_files_song ON audio_files(song_id);",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_song_tags_song ON song_tags(song_id);",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_song_tags_tag ON song_tags(tag_id);",
+        [],
+    )?;
 
     // 数据库迁移：自动检查并补全 md5 列（针对已有旧数据库文件）
-    let has_md5: bool = conn.query_row(
-        "SELECT COUNT(*) FROM pragma_table_info('audio_files') WHERE name='md5'",
-        [],
-        |row| row.get::<_, i64>(0).map(|count| count > 0)
-    ).unwrap_or(false);
-    
+    let has_md5: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('audio_files') WHERE name='md5'",
+            [],
+            |row| row.get::<_, i64>(0).map(|count| count > 0),
+        )
+        .unwrap_or(false);
+
     if !has_md5 {
         let _ = conn.execute("ALTER TABLE audio_files ADD COLUMN md5 TEXT;", []);
     }
 
     // 数据库迁移：自动检查并补全 bit_depth 列（针对已有旧数据库文件）
-    let has_bit_depth: bool = conn.query_row(
-        "SELECT COUNT(*) FROM pragma_table_info('audio_files') WHERE name='bit_depth'",
-        [],
-        |row| row.get::<_, i64>(0).map(|count| count > 0)
-    ).unwrap_or(false);
-    
+    let has_bit_depth: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('audio_files') WHERE name='bit_depth'",
+            [],
+            |row| row.get::<_, i64>(0).map(|count| count > 0),
+        )
+        .unwrap_or(false);
+
     if !has_bit_depth {
         let _ = conn.execute("ALTER TABLE audio_files ADD COLUMN bit_depth INTEGER;", []);
     }
 
     // 数据库迁移：自动检查并补全 loudness 列（针对已有旧数据库文件）
-    let has_loudness: bool = conn.query_row(
-        "SELECT COUNT(*) FROM pragma_table_info('audio_files') WHERE name='loudness'",
-        [],
-        |row| row.get::<_, i64>(0).map(|count| count > 0)
-    ).unwrap_or(false);
-    
+    let has_loudness: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('audio_files') WHERE name='loudness'",
+            [],
+            |row| row.get::<_, i64>(0).map(|count| count > 0),
+        )
+        .unwrap_or(false);
+
     if !has_loudness {
         let _ = conn.execute("ALTER TABLE audio_files ADD COLUMN loudness REAL;", []);
     }

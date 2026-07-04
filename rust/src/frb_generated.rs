@@ -38,7 +38,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.12.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1761867876;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 867155737;
 
 // Section: executor
 
@@ -1291,6 +1291,47 @@ fn wire__crate__api__music__update_song_metadata_impl(
         },
     )
 }
+fn wire__crate__api__music__update_tag_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "update_tag",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_tag_id = <i64>::sse_decode(&mut deserializer);
+            let api_name = <String>::sse_decode(&mut deserializer);
+            let api_color = <Option<String>>::sse_decode(&mut deserializer);
+            let api_category = <Option<String>>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::api::music::update_tag(
+                        api_tag_id,
+                        api_name,
+                        api_color,
+                        api_category,
+                    )?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
 fn wire__crate__api__music__update_version_duration_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -1772,13 +1813,14 @@ fn pde_ffi_dispatcher_primary_impl(
         35 => wire__crate__api__music__stop_rust_playback_impl(port, ptr, rust_vec_len, data_len),
         36 => wire__crate__api__music__tag_song_impl(port, ptr, rust_vec_len, data_len),
         37 => wire__crate__api__music__update_song_metadata_impl(port, ptr, rust_vec_len, data_len),
-        38 => {
+        38 => wire__crate__api__music__update_tag_impl(port, ptr, rust_vec_len, data_len),
+        39 => {
             wire__crate__api__music__update_version_duration_impl(port, ptr, rust_vec_len, data_len)
         }
-        39 => {
+        40 => {
             wire__crate__api__music__update_version_status_impl(port, ptr, rust_vec_len, data_len)
         }
-        40 => wire__crate__api__music__verify_audio_file_impl(port, ptr, rust_vec_len, data_len),
+        41 => wire__crate__api__music__verify_audio_file_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }

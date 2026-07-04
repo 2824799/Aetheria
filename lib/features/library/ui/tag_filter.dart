@@ -53,12 +53,22 @@ class _TagFilterState extends State<TagFilter> {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    _buildToggleBtn('全部包含', libraryProvider.filterMode == 'AND', () {
-                      libraryProvider.setFilterMode('AND');
-                    }, cfg),
-                    _buildToggleBtn('任意包含', libraryProvider.filterMode == 'OR', () {
-                      libraryProvider.setFilterMode('OR');
-                    }, cfg),
+                    _buildToggleBtn(
+                      '全部包含',
+                      libraryProvider.filterMode == 'AND',
+                      () {
+                        libraryProvider.setFilterMode('AND');
+                      },
+                      cfg,
+                    ),
+                    _buildToggleBtn(
+                      '任意包含',
+                      libraryProvider.filterMode == 'OR',
+                      () {
+                        libraryProvider.setFilterMode('OR');
+                      },
+                      cfg,
+                    ),
                   ],
                 ),
               ),
@@ -72,7 +82,10 @@ class _TagFilterState extends State<TagFilter> {
                 },
                 borderRadius: BorderRadius.circular(4),
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
                   child: Row(
                     children: [
                       Icon(Icons.sell, size: 14, color: cfg.textSub),
@@ -88,7 +101,9 @@ class _TagFilterState extends State<TagFilter> {
                       ),
                       const SizedBox(width: 4),
                       Icon(
-                        _isExpanded ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_right,
+                        _isExpanded
+                            ? Icons.keyboard_arrow_down
+                            : Icons.keyboard_arrow_right,
                         size: 16,
                         color: cfg.textSub,
                       ),
@@ -101,18 +116,31 @@ class _TagFilterState extends State<TagFilter> {
               if (MediaQuery.of(context).size.width >= 768)
                 ElevatedButton.icon(
                   onPressed: () => TagManagerModal.show(context),
-                  icon: Icon(Icons.sell_outlined, size: 12, color: cfg.textMain),
+                  icon: Icon(
+                    Icons.sell_outlined,
+                    size: 12,
+                    color: cfg.textMain,
+                  ),
                   label: Text(
                     '标签管理',
-                    style: TextStyle(fontSize: 11, color: cfg.textMain, fontWeight: FontWeight.bold),
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: cfg.textMain,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: cfg.border,
                     elevation: 0,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
                     minimumSize: Size.zero,
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(6),
+                    ),
                   ),
                 ),
             ],
@@ -137,28 +165,37 @@ class _TagFilterState extends State<TagFilter> {
                         spacing: 8,
                         runSpacing: 8,
                         children: libraryProvider.tags.map((tag) {
-                          final isSelected = libraryProvider.selectedTags.contains(tag.id);
-                          final isExcluded = libraryProvider.excludedTags.contains(tag.id);
-                          
-                          Color tagColor = tag.color != null 
-                              ? _parseHexColor(tag.color!, cfg.textSub) 
+                          final isSelected = libraryProvider.selectedTags
+                              .contains(tag.id);
+                          final isExcluded = libraryProvider.excludedTags
+                              .contains(tag.id);
+
+                          Color tagColor = tag.color != null
+                              ? _parseHexColor(tag.color!, cfg.textSub)
                               : cfg.textSub;
-                          
+
                           if (isExcluded) {
                             tagColor = Colors.redAccent;
                           }
-                          
+
                           return InkWell(
                             onTap: () => libraryProvider.toggleTag(tag.id),
                             borderRadius: BorderRadius.circular(14),
                             child: AnimatedContainer(
                               duration: const Duration(milliseconds: 150),
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 5,
+                              ),
                               decoration: BoxDecoration(
-                                color: (isSelected || isExcluded) ? cfg.bgHover : cfg.bgPanel,
+                                color: (isSelected || isExcluded)
+                                    ? cfg.bgHover
+                                    : cfg.bgPanel,
                                 borderRadius: BorderRadius.circular(14),
                                 border: Border.all(
-                                  color: (isSelected || isExcluded) ? tagColor : cfg.border,
+                                  color: (isSelected || isExcluded)
+                                      ? tagColor
+                                      : cfg.border,
                                   width: 1.0,
                                 ),
                                 boxShadow: (isSelected || isExcluded)
@@ -166,7 +203,7 @@ class _TagFilterState extends State<TagFilter> {
                                         BoxShadow(
                                           color: tagColor.withOpacity(0.25),
                                           blurRadius: 8,
-                                        )
+                                        ),
                                       ]
                                     : null,
                               ),
@@ -185,11 +222,15 @@ class _TagFilterState extends State<TagFilter> {
                                   Text(
                                     tag.name,
                                     style: TextStyle(
-                                      color: (isSelected || isExcluded) ? cfg.textMain : tagColor,
+                                      color: (isSelected || isExcluded)
+                                          ? cfg.textMain
+                                          : tagColor,
                                       fontSize: 12,
                                       fontWeight: FontWeight.w500,
                                       fontFamily: 'Outfit',
-                                      decoration: isExcluded ? TextDecoration.lineThrough : null,
+                                      decoration: isExcluded
+                                          ? TextDecoration.lineThrough
+                                          : null,
                                       decorationColor: Colors.redAccent,
                                       decorationThickness: 2.0,
                                     ),
@@ -202,7 +243,9 @@ class _TagFilterState extends State<TagFilter> {
                       ),
               ],
             ),
-            crossFadeState: _isExpanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+            crossFadeState: _isExpanded
+                ? CrossFadeState.showSecond
+                : CrossFadeState.showFirst,
             duration: const Duration(milliseconds: 200),
           ),
         ],
@@ -210,7 +253,12 @@ class _TagFilterState extends State<TagFilter> {
     );
   }
 
-  Widget _buildToggleBtn(String text, bool isActive, VoidCallback onTap, AppThemeConfig cfg) {
+  Widget _buildToggleBtn(
+    String text,
+    bool isActive,
+    VoidCallback onTap,
+    AppThemeConfig cfg,
+  ) {
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(4),

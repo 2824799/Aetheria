@@ -30,7 +30,7 @@ class _MainContentState extends State<MainContent> {
 
       int successCount = 0;
       int failCount = 0;
-      
+
       showDialog(
         context: context,
         barrierDismissible: false,
@@ -53,9 +53,9 @@ class _MainContentState extends State<MainContent> {
         SnackBar(content: Text('导入完成: 成功 $successCount 首, 失败 $failCount 首')),
       );
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('导入文件错误: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('导入文件错误: $e')));
     }
   }
 
@@ -71,12 +71,14 @@ class _MainContentState extends State<MainContent> {
       );
 
       // Scan directory for preview
-      final filepaths = await music.scanDirectoryForPreview(dirPath: selectedDirectory);
+      final filepaths = await music.scanDirectoryForPreview(
+        dirPath: selectedDirectory,
+      );
       if (filepaths.isEmpty) {
         Navigator.of(context).pop();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('所选文件夹中未找到支持的音频文件')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('所选文件夹中未找到支持的音频文件')));
         return;
       }
 
@@ -88,13 +90,16 @@ class _MainContentState extends State<MainContent> {
       // Present import preview modal (We'll implement a clean local dialog)
       _showImportPreviewModal(previews, provider);
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('扫描文件夹错误: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('扫描文件夹错误: $e')));
     }
   }
 
-  void _showImportPreviewModal(List<dynamic> previews, LibraryProvider provider) {
+  void _showImportPreviewModal(
+    List<dynamic> previews,
+    LibraryProvider provider,
+  ) {
     final checkedItems = List<bool>.filled(previews.length, true);
 
     showDialog(
@@ -120,10 +125,18 @@ class _MainContentState extends State<MainContent> {
                           children: [
                             Text(
                               '导入预览 (共 ${previews.length} 首)',
-                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: cfg.textMain),
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: cfg.textMain,
+                              ),
                             ),
                             IconButton(
-                              icon: Icon(Icons.close, color: cfg.textSub, size: 20),
+                              icon: Icon(
+                                Icons.close,
+                                color: cfg.textSub,
+                                size: 20,
+                              ),
                               onPressed: () => Navigator.of(ctx).pop(),
                               padding: EdgeInsets.zero,
                               constraints: const BoxConstraints(),
@@ -136,7 +149,11 @@ class _MainContentState extends State<MainContent> {
                             TextButton(
                               onPressed: () {
                                 setModalState(() {
-                                  checkedItems.fillRange(0, checkedItems.length, true);
+                                  checkedItems.fillRange(
+                                    0,
+                                    checkedItems.length,
+                                    true,
+                                  );
                                 });
                               },
                               child: const Text('全选'),
@@ -144,7 +161,11 @@ class _MainContentState extends State<MainContent> {
                             TextButton(
                               onPressed: () {
                                 setModalState(() {
-                                  checkedItems.fillRange(0, checkedItems.length, false);
+                                  checkedItems.fillRange(
+                                    0,
+                                    checkedItems.length,
+                                    false,
+                                  );
                                 });
                               },
                               child: const Text('全不选'),
@@ -162,20 +183,30 @@ class _MainContentState extends State<MainContent> {
                             child: ListView.separated(
                               padding: const EdgeInsets.symmetric(vertical: 4),
                               itemCount: previews.length,
-                              separatorBuilder: (_, __) => Divider(height: 1, color: cfg.border.withOpacity(0.5)),
+                              separatorBuilder: (_, __) => Divider(
+                                height: 1,
+                                color: cfg.border.withOpacity(0.5),
+                              ),
                               itemBuilder: (context, index) {
                                 final item = previews[index];
                                 return CheckboxListTile(
                                   value: checkedItems[index],
                                   title: Text(
                                     item.title,
-                                    style: TextStyle(color: cfg.textMain, fontSize: 13, fontWeight: FontWeight.bold),
+                                    style: TextStyle(
+                                      color: cfg.textMain,
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.bold,
+                                    ),
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                   ),
                                   subtitle: Text(
                                     '${item.artist} - ${item.filename}',
-                                    style: TextStyle(color: cfg.textSub, fontSize: 11),
+                                    style: TextStyle(
+                                      color: cfg.textSub,
+                                      fontSize: 11,
+                                    ),
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                   ),
@@ -201,12 +232,14 @@ class _MainContentState extends State<MainContent> {
                             ElevatedButton(
                               onPressed: () async {
                                 Navigator.of(ctx).pop(); // pop preview dialog
-                                
+
                                 // show progress hud
                                 showDialog(
                                   context: this.context,
                                   barrierDismissible: false,
-                                  builder: (c) => const Center(child: CircularProgressIndicator()),
+                                  builder: (c) => const Center(
+                                    child: CircularProgressIndicator(),
+                                  ),
                                 );
 
                                 int imported = 0;
@@ -214,13 +247,19 @@ class _MainContentState extends State<MainContent> {
                                   if (checkedItems[i]) {
                                     final item = previews[i];
                                     try {
-                                      await provider.importSongWithMetadata(item.filepath, item.title, item.artist);
+                                      await provider.importSongWithMetadata(
+                                        item.filepath,
+                                        item.title,
+                                        item.artist,
+                                      );
                                       imported++;
                                     } catch (_) {}
                                   }
                                 }
 
-                                Navigator.of(this.context).pop(); // pop progress hud
+                                Navigator.of(
+                                  this.context,
+                                ).pop(); // pop progress hud
 
                                 ScaffoldMessenger.of(this.context).showSnackBar(
                                   SnackBar(content: Text('成功导入 $imported 首歌曲')),
@@ -274,7 +313,11 @@ class _MainContentState extends State<MainContent> {
                   onChanged: (val) => libraryProvider.setSearchQuery(val),
                   style: TextStyle(color: cfg.textMain, fontSize: 13),
                   decoration: InputDecoration(
-                    prefixIcon: Icon(Icons.search, size: 18, color: cfg.textSub),
+                    prefixIcon: Icon(
+                      Icons.search,
+                      size: 18,
+                      color: cfg.textSub,
+                    ),
                     hintText: '搜索歌曲、歌手、专辑...',
                     hintStyle: TextStyle(color: cfg.textSub.withOpacity(0.5)),
                     filled: true,
@@ -338,12 +381,16 @@ class _MainContentState extends State<MainContent> {
                         color: cfg.accentGlow,
                         blurRadius: 8,
                         offset: const Offset(0, 4),
-                      )
+                      ),
                     ],
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.folder_open, size: 16, color: Colors.white),
+                      const Icon(
+                        Icons.folder_open,
+                        size: 16,
+                        color: Colors.white,
+                      ),
                       const SizedBox(width: 8),
                       Text(
                         '导入歌曲',
@@ -355,7 +402,11 @@ class _MainContentState extends State<MainContent> {
                         ),
                       ),
                       const SizedBox(width: 4),
-                      const Icon(Icons.arrow_drop_down, size: 16, color: Colors.white),
+                      const Icon(
+                        Icons.arrow_drop_down,
+                        size: 16,
+                        color: Colors.white,
+                      ),
                     ],
                   ),
                 ),
@@ -363,7 +414,7 @@ class _MainContentState extends State<MainContent> {
             ],
           ),
           const SizedBox(height: 16),
-          
+
           // Custom Multi-dimensional Tag Filter Panel
           const TagFilter(),
           const SizedBox(height: 16),

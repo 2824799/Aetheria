@@ -154,7 +154,11 @@ class UIThemeProvider extends ChangeNotifier {
         bodyLarge: TextStyle(color: cfg.textMain, fontFamily: 'Outfit'),
         bodyMedium: TextStyle(color: cfg.textMain, fontFamily: 'Outfit'),
         bodySmall: TextStyle(color: cfg.textSub, fontFamily: 'Outfit'),
-        titleLarge: TextStyle(color: cfg.textMain, fontFamily: 'Outfit', fontWeight: FontWeight.bold),
+        titleLarge: TextStyle(
+          color: cfg.textMain,
+          fontFamily: 'Outfit',
+          fontWeight: FontWeight.bold,
+        ),
       ),
       dividerColor: cfg.border,
     );

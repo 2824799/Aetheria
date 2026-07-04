@@ -3,7 +3,11 @@ import 'package:flutter/services.dart';
 class NativeAudioHelper {
   static const _channel = MethodChannel('com.aetheria.app/notification');
 
-  static Future<void> showNotification(String title, String artist, bool isPlaying) async {
+  static Future<void> showNotification(
+    String title,
+    String artist,
+    bool isPlaying,
+  ) async {
     try {
       await _channel.invokeMethod('showNotification', {
         'title': title,

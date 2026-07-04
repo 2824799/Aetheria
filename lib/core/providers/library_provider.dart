@@ -8,21 +8,22 @@ class LibraryProvider extends ChangeNotifier {
   List<Song> songs = [];
   List<Tag> tags = [];
   List<Playlist> playlists = [];
-  
+
   String? activePlaylistId;
   List<String> playlistSongIds = [];
-  
+
   String searchQuery = '';
   List<PlatformInt64> selectedTags = [];
   List<PlatformInt64> excludedTags = [];
   String filterMode = 'AND'; // 'AND' or 'OR'
-  
+
   String libraryPath = '';
   int? audioServerPort;
-  
+
   bool isLoading = true;
   String? error;
-  Map<String, dynamic>? clipboard; // { 'type': 'copy'/'cut', 'songIds': [...], 'sourcePlaylistId': '...' }
+  Map<String, dynamic>?
+  clipboard; // { 'type': 'copy'/'cut', 'songIds': [...], 'sourcePlaylistId': '...' }
 
   LibraryProvider() {
     // Loaded externally in main or layout
@@ -40,22 +41,24 @@ class LibraryProvider extends ChangeNotifier {
         notifyListeners();
         return;
       }
-      
+
       songs = await music.getSongs();
       tags = await music.getTags();
       playlists = await music.getPlaylists();
       libraryPath = await music.getLibraryPath();
-      
+
       if (activePlaylistId != null) {
         try {
-          playlistSongIds = await music.getPlaylistSongs(playlistId: activePlaylistId!);
+          playlistSongIds = await music.getPlaylistSongs(
+            playlistId: activePlaylistId!,
+          );
         } catch (e) {
           playlistSongIds = [];
         }
       } else {
         playlistSongIds = [];
       }
-      
+
       isLoading = false;
       notifyListeners();
     } catch (e) {
@@ -105,9 +108,17 @@ class LibraryProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> importSongWithMetadata(String filepath, String title, String artist) async {
+  Future<void> importSongWithMetadata(
+    String filepath,
+    String title,
+    String artist,
+  ) async {
     try {
-      await music.importSongWithMetadata(filepath: filepath, title: title, artist: artist);
+      await music.importSongWithMetadata(
+        filepath: filepath,
+        title: title,
+        artist: artist,
+      );
       await loadLibrary();
     } catch (e) {
       error = e.toString();
@@ -127,9 +138,17 @@ class LibraryProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> updateVersionStatus(String versionId, bool isEnabled, bool isPrimary) async {
+  Future<void> updateVersionStatus(
+    String versionId,
+    bool isEnabled,
+    bool isPrimary,
+  ) async {
     try {
-      await music.updateVersionStatus(versionId: versionId, isEnabled: isEnabled, isPrimary: isPrimary);
+      await music.updateVersionStatus(
+        versionId: versionId,
+        isEnabled: isEnabled,
+        isPrimary: isPrimary,
+      );
       await loadLibrary();
     } catch (e) {
       error = e.toString();
@@ -138,9 +157,17 @@ class LibraryProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> updateSongMetadata(String songId, String title, String artist) async {
+  Future<void> updateSongMetadata(
+    String songId,
+    String title,
+    String artist,
+  ) async {
     try {
-      await music.updateSongMetadata(songId: songId, title: title, artist: artist);
+      await music.updateSongMetadata(
+        songId: songId,
+        title: title,
+        artist: artist,
+      );
       await loadLibrary();
     } catch (e) {
       error = e.toString();
@@ -174,6 +201,27 @@ class LibraryProvider extends ChangeNotifier {
   Future<void> addTag(String name, String? color, String? category) async {
     try {
       await music.addTag(name: name, color: color, category: category);
+      await loadLibrary();
+    } catch (e) {
+      error = e.toString();
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  Future<void> updateTag(
+    PlatformInt64 tagId,
+    String name,
+    String? color,
+    String? category,
+  ) async {
+    try {
+      await music.updateTag(
+        tagId: tagId,
+        name: name,
+        color: color,
+        category: category,
+      );
       await loadLibrary();
     } catch (e) {
       error = e.toString();
@@ -240,7 +288,10 @@ class LibraryProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> addSongsToPlaylist(String playlistId, List<String> songIds) async {
+  Future<void> addSongsToPlaylist(
+    String playlistId,
+    List<String> songIds,
+  ) async {
     try {
       await music.addSongsToPlaylist(playlistId: playlistId, songIds: songIds);
       if (activePlaylistId == playlistId) {
@@ -254,9 +305,15 @@ class LibraryProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> removeSongsFromPlaylist(String playlistId, List<String> songIds) async {
+  Future<void> removeSongsFromPlaylist(
+    String playlistId,
+    List<String> songIds,
+  ) async {
     try {
-      await music.removeSongsFromPlaylist(playlistId: playlistId, songIds: songIds);
+      await music.removeSongsFromPlaylist(
+        playlistId: playlistId,
+        songIds: songIds,
+      );
       if (activePlaylistId == playlistId) {
         playlistSongIds = await music.getPlaylistSongs(playlistId: playlistId);
       }
@@ -321,7 +378,7 @@ class LibraryProvider extends ChangeNotifier {
 
   List<Song> get displaySongs {
     List<Song> list = songs;
-    
+
     // Filter by playlist
     if (activePlaylistId != null) {
       list = list.where((song) => playlistSongIds.contains(song.id)).toList();
@@ -332,27 +389,30 @@ class LibraryProvider extends ChangeNotifier {
         return idxA.compareTo(idxB);
       });
     }
-    
+
     // Filter by search
     if (searchQuery.isNotEmpty) {
       final q = searchQuery.toLowerCase();
-      list = list.where((song) => 
-        song.title.toLowerCase().contains(q) ||
-        (song.artist?.toLowerCase().contains(q) ?? false) ||
-        (song.album?.toLowerCase().contains(q) ?? false)
-      ).toList();
+      list = list
+          .where(
+            (song) =>
+                song.title.toLowerCase().contains(q) ||
+                (song.artist?.toLowerCase().contains(q) ?? false) ||
+                (song.album?.toLowerCase().contains(q) ?? false),
+          )
+          .toList();
     }
-    
+
     // Filter by tags
     if (selectedTags.isNotEmpty || excludedTags.isNotEmpty) {
       list = list.where((song) {
         final songTagIds = song.tags.map((t) => t.id).toSet();
-        
+
         if (excludedTags.isNotEmpty) {
           final hasExcluded = excludedTags.any((id) => songTagIds.contains(id));
           if (hasExcluded) return false;
         }
-        
+
         if (selectedTags.isNotEmpty) {
           if (filterMode == 'AND') {
             return selectedTags.every((id) => songTagIds.contains(id));
@@ -360,15 +420,19 @@ class LibraryProvider extends ChangeNotifier {
             return selectedTags.any((id) => songTagIds.contains(id));
           }
         }
-        
+
         return true;
       }).toList();
     }
-    
+
     return list;
   }
 
-  void setClipboard(String type, List<String> songIds, String? sourcePlaylistId) {
+  void setClipboard(
+    String type,
+    List<String> songIds,
+    String? sourcePlaylistId,
+  ) {
     clipboard = {
       'type': type,
       'songIds': songIds,
@@ -390,7 +454,9 @@ class LibraryProvider extends ChangeNotifier {
 
     try {
       await addSongsToPlaylist(targetPlaylistId, songIds);
-      if (type == 'cut' && sourcePlaylistId != null && sourcePlaylistId != targetPlaylistId) {
+      if (type == 'cut' &&
+          sourcePlaylistId != null &&
+          sourcePlaylistId != targetPlaylistId) {
         await removeSongsFromPlaylist(sourcePlaylistId, songIds);
       }
       clearClipboard();

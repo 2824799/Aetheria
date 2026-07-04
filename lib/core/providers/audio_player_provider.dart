@@ -13,22 +13,22 @@ class AudioPlayerProvider extends ChangeNotifier {
   Song? activeSong;
   Song? playingSong;
   AudioVersion? playingVersion;
-  
+
   List<Song> currentQueue = [];
-  
+
   bool isPlaying = false;
   Duration currentPosition = Duration.zero;
   Duration totalDuration = Duration.zero;
-  
+
   double volume = 0.8;
   PlayMode playMode = PlayMode.list;
   bool playAlongside = false;
-  
+
   bool volumeBalanceEnabled = false;
   double volumeBalanceStrength = 0.5;
   double pitchSemitones = 0.0;
   String pitchAlgorithm = 'wsola';
-  
+
   bool isDetailOpen = false;
   String activeTab = 'versions';
 
@@ -46,7 +46,9 @@ class AudioPlayerProvider extends ChangeNotifier {
     _positionTimer?.cancel();
     _lastPositionMs = -1;
     _stallTicks = 0;
-    _positionTimer = Timer.periodic(const Duration(milliseconds: 250), (timer) async {
+    _positionTimer = Timer.periodic(const Duration(milliseconds: 250), (
+      timer,
+    ) async {
       if (!isPlaying) return;
       final posSec = await music.getRustPlaybackPosition();
       currentPosition = Duration(milliseconds: (posSec * 1000).round());
@@ -167,8 +169,11 @@ class AudioPlayerProvider extends ChangeNotifier {
   Future<void> _hotReloadDSP() async {
     if (playingSong != null && playingVersion != null && isPlaying) {
       final pos = currentPosition;
-      final path = '$_cachedLibraryPath/${playingVersion!.filepath}'.replaceAll('\\', '/');
-      
+      final path = '$_cachedLibraryPath/${playingVersion!.filepath}'.replaceAll(
+        '\\',
+        '/',
+      );
+
       double normGain = 1.0;
       if (volumeBalanceEnabled) {
         final lMin = getLMin();
@@ -178,7 +183,7 @@ class AudioPlayerProvider extends ChangeNotifier {
           normGain = math.pow(10, deltaDb / 20).toDouble();
         }
       }
-      
+
       await music.startRustPlayback(
         path: path,
         volume: volume,
@@ -239,10 +244,15 @@ class AudioPlayerProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> playSong(Song song, List<Song> queue, String libraryPath, {int? audioServerPort}) async {
+  Future<void> playSong(
+    Song song,
+    List<Song> queue,
+    String libraryPath, {
+    int? audioServerPort,
+  }) async {
     currentQueue = queue;
     activeSong = song;
-    
+
     // Find target version
     AudioVersion? targetVersion;
     for (var v in song.versions) {
@@ -251,7 +261,7 @@ class AudioPlayerProvider extends ChangeNotifier {
         break;
       }
     }
-    
+
     if (targetVersion == null) {
       for (var v in song.versions) {
         if (v.isEnabled) {
@@ -260,15 +270,25 @@ class AudioPlayerProvider extends ChangeNotifier {
         }
       }
     }
-    
+
     if (targetVersion == null) {
       throw Exception('该歌曲暂无可用的启用音频版本！请先启用至少一个版本。');
     }
-    
-    await playSongVersion(song, targetVersion, libraryPath, audioServerPort: audioServerPort);
+
+    await playSongVersion(
+      song,
+      targetVersion,
+      libraryPath,
+      audioServerPort: audioServerPort,
+    );
   }
 
-  Future<void> playSongVersion(Song song, AudioVersion version, String libraryPath, {int? audioServerPort}) async {
+  Future<void> playSongVersion(
+    Song song,
+    AudioVersion version,
+    String libraryPath, {
+    int? audioServerPort,
+  }) async {
     activeSong = song;
     playingSong = song;
     playingVersion = version;
@@ -276,15 +296,15 @@ class AudioPlayerProvider extends ChangeNotifier {
     _cachedAudioServerPort = audioServerPort;
     currentPosition = Duration.zero;
     totalDuration = Duration.zero;
-    
+
     final path = '$libraryPath/${version.filepath}'.replaceAll('\\', '/');
-    
+
     // Check local file exists
     final file = File(path);
     if (!await file.exists()) {
       throw Exception('音频文件不存在: $path');
     }
-    
+
     // Calculate volume normalization gain
     double normGain = 1.0;
     if (volumeBalanceEnabled) {
@@ -295,7 +315,7 @@ class AudioPlayerProvider extends ChangeNotifier {
         normGain = math.pow(10, deltaDb / 20).toDouble();
       }
     }
-    
+
     // Start streaming playback in Rust via CPAL
     await music.startRustPlayback(
       path: path,
@@ -304,47 +324,62 @@ class AudioPlayerProvider extends ChangeNotifier {
       algo: pitchAlgorithm,
       normalizationGain: normGain,
     );
-    
+
     isPlaying = true;
     totalDuration = Duration(milliseconds: (version.duration * 1000).round());
     _startPositionTimer();
-    
+
     notifyListeners();
     _updateNotification();
   }
 
   void playNext() {
     if (currentQueue.isEmpty || playingSong == null) return;
-    
+
     int index = currentQueue.indexWhere((s) => s.id == playingSong!.id);
     if (index == -1) return;
-    
+
     if (playMode == PlayMode.shuffle) {
       final randomIdx = DateTime.now().millisecond % currentQueue.length;
       final nextSong = currentQueue[randomIdx];
-      playSong(nextSong, currentQueue, _cachedLibraryPath, audioServerPort: _cachedAudioServerPort).catchError((_){});
+      playSong(
+        nextSong,
+        currentQueue,
+        _cachedLibraryPath,
+        audioServerPort: _cachedAudioServerPort,
+      ).catchError((_) {});
     } else {
       int nextIdx = index + 1;
       if (nextIdx >= currentQueue.length) {
         nextIdx = 0;
       }
       final nextSong = currentQueue[nextIdx];
-      playSong(nextSong, currentQueue, _cachedLibraryPath, audioServerPort: _cachedAudioServerPort).catchError((_){});
+      playSong(
+        nextSong,
+        currentQueue,
+        _cachedLibraryPath,
+        audioServerPort: _cachedAudioServerPort,
+      ).catchError((_) {});
     }
   }
 
   void playPrevious() {
     if (currentQueue.isEmpty || playingSong == null) return;
-    
+
     int index = currentQueue.indexWhere((s) => s.id == playingSong!.id);
     if (index == -1) return;
-    
+
     int prevIdx = index - 1;
     if (prevIdx < 0) {
       prevIdx = currentQueue.length - 1;
     }
     final prevSong = currentQueue[prevIdx];
-    playSong(prevSong, currentQueue, _cachedLibraryPath, audioServerPort: _cachedAudioServerPort).catchError((_){});
+    playSong(
+      prevSong,
+      currentQueue,
+      _cachedLibraryPath,
+      audioServerPort: _cachedAudioServerPort,
+    ).catchError((_) {});
   }
 
   void setActiveSong(Song? song) {

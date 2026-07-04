@@ -1,10 +1,10 @@
+use std::collections::VecDeque;
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
     Arc, Mutex,
 };
 use std::thread;
 use std::time::Duration;
-use std::collections::VecDeque;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{BufferSize, SampleFormat, StreamConfig};
@@ -372,7 +372,8 @@ pub fn start_playback(
                         eprintln!("Seek error: {}", e);
                     }
                     buffer.clear();
-                    frames_played.store((sec * sample_rate as f64).round() as u64, Ordering::SeqCst);
+                    frames_played
+                        .store((sec * sample_rate as f64).round() as u64, Ordering::SeqCst);
                 }
             }
 
@@ -393,7 +394,8 @@ pub fn start_playback(
             }
 
             // 1. Master volume * loudness normalization gain.
-            let total_gain = *volume.lock().unwrap_or_else(|e| e.into_inner()) * *norm_gain.lock().unwrap_or_else(|e| e.into_inner());
+            let total_gain = *volume.lock().unwrap_or_else(|e| e.into_inner())
+                * *norm_gain.lock().unwrap_or_else(|e| e.into_inner());
             if (total_gain - 1.0).abs() > 0.001 {
                 for sample in block.iter_mut() {
                     *sample *= total_gain;
@@ -445,9 +447,10 @@ pub fn seek_playback(secs: f64) -> Result<(), String> {
         b.clear();
     }
     *state.seek_request.lock().unwrap_or_else(|e| e.into_inner()) = Some(secs);
-    state
-        .frames_played
-        .store((secs * state.sample_rate as f64).round() as u64, Ordering::SeqCst);
+    state.frames_played.store(
+        (secs * state.sample_rate as f64).round() as u64,
+        Ordering::SeqCst,
+    );
     Ok(())
 }
 

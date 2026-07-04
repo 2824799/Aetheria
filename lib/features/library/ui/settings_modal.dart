@@ -14,7 +14,7 @@ class SettingsModal extends StatefulWidget {
   static void show(BuildContext context) {
     showDialog(
       context: context,
-      barrierColor: Colors.black.withOpacity(0.3),
+      barrierColor: Colors.black.withOpacity(0.42),
       builder: (context) => const SettingsModal(),
     );
   }
@@ -25,7 +25,8 @@ class SettingsModal extends StatefulWidget {
 
 class _SettingsModalState extends State<SettingsModal> {
   String _activeTab = 'theme'; // For Desktop view
-  String? _selectedCategory; // For Mobile view: null = Level 1 menu, non-null = Level 2 detail page
+  String?
+  _selectedCategory; // For Mobile view: null = Level 1 menu, non-null = Level 2 detail page
 
   @override
   Widget build(BuildContext context) {
@@ -42,17 +43,23 @@ class _SettingsModalState extends State<SettingsModal> {
         child: Material(
           color: Colors.transparent,
           child: Container(
-            width: 580,
-            height: 380,
+            width: MediaQuery.of(context).size.width.clamp(720.0, 920.0),
+            height: MediaQuery.of(context).size.height.clamp(520.0, 680.0),
             margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
             child: GlassPanel(
+              blur: 30,
               borderRadius: BorderRadius.circular(16),
               padding: EdgeInsets.zero,
               child: Column(
                 children: [
                   // Header
                   Padding(
-                    padding: const EdgeInsets.only(left: 20, right: 20, top: 16, bottom: 12),
+                    padding: const EdgeInsets.only(
+                      left: 20,
+                      right: 20,
+                      top: 16,
+                      bottom: 12,
+                    ),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
@@ -90,15 +97,32 @@ class _SettingsModalState extends State<SettingsModal> {
                         Container(
                           width: 140,
                           decoration: BoxDecoration(
-                            border: Border(right: BorderSide(color: cfg.border)),
+                            border: Border(
+                              right: BorderSide(color: cfg.border),
+                            ),
                             color: Colors.black.withOpacity(0.02),
                           ),
                           child: ListView(
                             padding: const EdgeInsets.symmetric(vertical: 8),
                             children: [
-                              _buildSidebarItem('theme', Icons.palette_outlined, '个性外观', cfg),
-                              _buildSidebarItem('playback', Icons.play_circle_outline, '播放设置', cfg),
-                              _buildSidebarItem('library', Icons.folder_open_outlined, '音乐库管理', cfg),
+                              _buildSidebarItem(
+                                'theme',
+                                Icons.palette_outlined,
+                                '个性外观',
+                                cfg,
+                              ),
+                              _buildSidebarItem(
+                                'playback',
+                                Icons.play_circle_outline,
+                                '播放设置',
+                                cfg,
+                              ),
+                              _buildSidebarItem(
+                                'library',
+                                Icons.folder_open_outlined,
+                                '音乐库管理',
+                                cfg,
+                              ),
                             ],
                           ),
                         ),
@@ -107,7 +131,14 @@ class _SettingsModalState extends State<SettingsModal> {
                         Expanded(
                           child: SingleChildScrollView(
                             padding: const EdgeInsets.all(20),
-                            child: _buildActiveTabContent(cfg, libraryProvider, audioProvider, themeProvider, isDesktop, _activeTab),
+                            child: _buildActiveTabContent(
+                              cfg,
+                              libraryProvider,
+                              audioProvider,
+                              themeProvider,
+                              isDesktop,
+                              _activeTab,
+                            ),
                           ),
                         ),
                       ],
@@ -122,27 +153,33 @@ class _SettingsModalState extends State<SettingsModal> {
     } else {
       // Mobile: Hierarchical menu (Level 1 list / Level 2 full-screen details)
       final showLevel2 = _selectedCategory != null;
-      final currentCategoryTitle = _selectedCategory == 'theme' 
-          ? '个性外观' 
-          : _selectedCategory == 'playback' 
-              ? '播放设置' 
-              : '音乐库管理';
+      final currentCategoryTitle = _selectedCategory == 'theme'
+          ? '个性外观'
+          : _selectedCategory == 'playback'
+          ? '播放设置'
+          : '音乐库管理';
 
       return Center(
         child: Material(
           color: Colors.transparent,
           child: Container(
             width: double.infinity,
-            height: 420,
+            height: MediaQuery.of(context).size.height * 0.78,
             margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 40),
             child: GlassPanel(
+              blur: 30,
               borderRadius: BorderRadius.circular(16),
               padding: EdgeInsets.zero,
               child: Column(
                 children: [
                   // Header
                   Padding(
-                    padding: const EdgeInsets.only(left: 16, right: 16, top: 16, bottom: 12),
+                    padding: const EdgeInsets.only(
+                      left: 16,
+                      right: 16,
+                      top: 16,
+                      bottom: 12,
+                    ),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
@@ -150,7 +187,11 @@ class _SettingsModalState extends State<SettingsModal> {
                           children: [
                             if (showLevel2) ...[
                               IconButton(
-                                icon: Icon(Icons.arrow_back, color: cfg.textMain, size: 20),
+                                icon: Icon(
+                                  Icons.arrow_back,
+                                  color: cfg.textMain,
+                                  size: 20,
+                                ),
                                 onPressed: () {
                                   setState(() {
                                     _selectedCategory = null;
@@ -169,7 +210,11 @@ class _SettingsModalState extends State<SettingsModal> {
                                 ),
                               ),
                             ] else ...[
-                              Icon(Icons.settings, color: cfg.textMain, size: 20),
+                              Icon(
+                                Icons.settings,
+                                color: cfg.textMain,
+                                size: 20,
+                              ),
                               const SizedBox(width: 8),
                               Text(
                                 '系统设置',
@@ -179,7 +224,7 @@ class _SettingsModalState extends State<SettingsModal> {
                                   color: cfg.textMain,
                                 ),
                               ),
-                            ]
+                            ],
                           ],
                         ),
                         IconButton(
@@ -198,14 +243,36 @@ class _SettingsModalState extends State<SettingsModal> {
                     child: showLevel2
                         ? SingleChildScrollView(
                             padding: const EdgeInsets.all(16),
-                            child: _buildActiveTabContent(cfg, libraryProvider, audioProvider, themeProvider, isDesktop, _selectedCategory!),
+                            child: _buildActiveTabContent(
+                              cfg,
+                              libraryProvider,
+                              audioProvider,
+                              themeProvider,
+                              isDesktop,
+                              _selectedCategory!,
+                            ),
                           )
                         : ListView(
                             padding: const EdgeInsets.symmetric(vertical: 8),
                             children: [
-                              _buildMobileMenuItem('theme', Icons.palette_outlined, '个性外观', cfg),
-                              _buildMobileMenuItem('playback', Icons.play_circle_outline, '播放设置', cfg),
-                              _buildMobileMenuItem('library', Icons.folder_open_outlined, '音乐库管理', cfg),
+                              _buildMobileMenuItem(
+                                'theme',
+                                Icons.palette_outlined,
+                                '个性外观',
+                                cfg,
+                              ),
+                              _buildMobileMenuItem(
+                                'playback',
+                                Icons.play_circle_outline,
+                                '播放设置',
+                                cfg,
+                              ),
+                              _buildMobileMenuItem(
+                                'library',
+                                Icons.folder_open_outlined,
+                                '音乐库管理',
+                                cfg,
+                              ),
                             ],
                           ),
                   ),
@@ -218,7 +285,12 @@ class _SettingsModalState extends State<SettingsModal> {
     }
   }
 
-  Widget _buildSidebarItem(String tabId, IconData icon, String label, AppThemeConfig cfg) {
+  Widget _buildSidebarItem(
+    String tabId,
+    IconData icon,
+    String label,
+    AppThemeConfig cfg,
+  ) {
     final isActive = _activeTab == tabId;
     return InkWell(
       onTap: () {
@@ -239,11 +311,7 @@ class _SettingsModalState extends State<SettingsModal> {
         ),
         child: Row(
           children: [
-            Icon(
-              icon,
-              size: 16,
-              color: isActive ? cfg.accent : cfg.textSub,
-            ),
+            Icon(icon, size: 16, color: isActive ? cfg.accent : cfg.textSub),
             const SizedBox(width: 8),
             Text(
               label,
@@ -259,12 +327,21 @@ class _SettingsModalState extends State<SettingsModal> {
     );
   }
 
-  Widget _buildMobileMenuItem(String tabId, IconData icon, String label, AppThemeConfig cfg) {
+  Widget _buildMobileMenuItem(
+    String tabId,
+    IconData icon,
+    String label,
+    AppThemeConfig cfg,
+  ) {
     return ListTile(
       leading: Icon(icon, color: cfg.textMain, size: 20),
       title: Text(
         label,
-        style: TextStyle(color: cfg.textMain, fontSize: 13, fontWeight: FontWeight.w600),
+        style: TextStyle(
+          color: cfg.textMain,
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+        ),
       ),
       trailing: Icon(Icons.chevron_right, color: cfg.textSub, size: 16),
       onTap: () {
@@ -290,37 +367,55 @@ class _SettingsModalState extends State<SettingsModal> {
           children: [
             Text(
               '音频播放行为',
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: cfg.textSub),
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: cfg.textSub,
+              ),
             ),
             const SizedBox(height: 12),
-            SwitchListTile(
-              title: Text(
-                '与其他应用一起播放',
-                style: TextStyle(color: cfg.textMain, fontSize: 13, fontWeight: FontWeight.bold),
+            if (!isDesktop) ...[
+              SwitchListTile(
+                title: Text(
+                  '与其他应用一起播放',
+                  style: TextStyle(
+                    color: cfg.textMain,
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                subtitle: Text(
+                  '开启后允许本软件与其他音频应用同时混音播放而不被打断。',
+                  style: TextStyle(color: cfg.textSub, fontSize: 11),
+                ),
+                value: audioProvider.playAlongside,
+                onChanged: (val) {
+                  audioProvider.setPlayAlongside(val);
+                },
+                activeColor: cfg.accent,
+                contentPadding: EdgeInsets.zero,
               ),
-              subtitle: Text(
-                '开启后允许本软件与其他音频应用同时混音播放而不被打断。',
-                style: TextStyle(color: cfg.textSub, fontSize: 11),
-              ),
-              value: audioProvider.playAlongside,
-              onChanged: (val) {
-                audioProvider.setPlayAlongside(val);
-              },
-              activeColor: cfg.accent,
-              contentPadding: EdgeInsets.zero,
-            ),
-            const SizedBox(height: 12),
-            Divider(height: 1, color: cfg.border),
-            const SizedBox(height: 12),
+              const SizedBox(height: 12),
+              Divider(height: 1, color: cfg.border),
+              const SizedBox(height: 12),
+            ],
             Text(
               '主动音量均衡',
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: cfg.textSub),
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: cfg.textSub,
+              ),
             ),
             const SizedBox(height: 8),
             SwitchListTile(
               title: Text(
                 '启用音量均衡',
-                style: TextStyle(color: cfg.textMain, fontSize: 13, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                  color: cfg.textMain,
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               subtitle: Text(
                 '根据歌单音量水平，按比例自动压低大声音歌曲的音量，不提升声音小的歌曲。',
@@ -367,7 +462,11 @@ class _SettingsModalState extends State<SettingsModal> {
             const SizedBox(height: 12),
             Text(
               '输出音调调节器',
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: cfg.textSub),
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: cfg.textSub,
+              ),
             ),
             const SizedBox(height: 8),
             Row(
@@ -394,35 +493,58 @@ class _SettingsModalState extends State<SettingsModal> {
             const SizedBox(height: 8),
             Text(
               '变调算法选择:',
-              style: TextStyle(color: cfg.textMain, fontSize: 11, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                color: cfg.textMain,
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+              ),
             ),
             const SizedBox(height: 6),
             Wrap(
               spacing: 8,
               children: [
                 ChoiceChip(
-                  label: const Text('波形相似 (WSOLA)', style: TextStyle(fontSize: 10)),
+                  label: const Text(
+                    '波形相似 (WSOLA)',
+                    style: TextStyle(fontSize: 10),
+                  ),
                   selected: audioProvider.pitchAlgorithm == 'wsola',
                   onSelected: (_) => audioProvider.setPitchAlgorithm('wsola'),
                   selectedColor: cfg.accent.withOpacity(0.2),
                   checkmarkColor: cfg.accent,
-                  labelStyle: TextStyle(color: audioProvider.pitchAlgorithm == 'wsola' ? cfg.accent : cfg.textMain),
+                  labelStyle: TextStyle(
+                    color: audioProvider.pitchAlgorithm == 'wsola'
+                        ? cfg.accent
+                        : cfg.textMain,
+                  ),
                 ),
                 ChoiceChip(
-                  label: const Text('时域叠加 (OLA)', style: TextStyle(fontSize: 10)),
+                  label: const Text(
+                    '时域叠加 (OLA)',
+                    style: TextStyle(fontSize: 10),
+                  ),
                   selected: audioProvider.pitchAlgorithm == 'ola',
                   onSelected: (_) => audioProvider.setPitchAlgorithm('ola'),
                   selectedColor: cfg.accent.withOpacity(0.2),
                   checkmarkColor: cfg.accent,
-                  labelStyle: TextStyle(color: audioProvider.pitchAlgorithm == 'ola' ? cfg.accent : cfg.textMain),
+                  labelStyle: TextStyle(
+                    color: audioProvider.pitchAlgorithm == 'ola'
+                        ? cfg.accent
+                        : cfg.textMain,
+                  ),
                 ),
                 ChoiceChip(
                   label: const Text('重采样变速', style: TextStyle(fontSize: 10)),
                   selected: audioProvider.pitchAlgorithm == 'resample',
-                  onSelected: (_) => audioProvider.setPitchAlgorithm('resample'),
+                  onSelected: (_) =>
+                      audioProvider.setPitchAlgorithm('resample'),
                   selectedColor: cfg.accent.withOpacity(0.2),
                   checkmarkColor: cfg.accent,
-                  labelStyle: TextStyle(color: audioProvider.pitchAlgorithm == 'resample' ? cfg.accent : cfg.textMain),
+                  labelStyle: TextStyle(
+                    color: audioProvider.pitchAlgorithm == 'resample'
+                        ? cfg.accent
+                        : cfg.textMain,
+                  ),
                 ),
               ],
             ),
@@ -434,13 +556,14 @@ class _SettingsModalState extends State<SettingsModal> {
           children: [
             Text(
               '本地音乐数据库',
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: cfg.textSub),
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: cfg.textSub,
+              ),
             ),
             const SizedBox(height: 16),
-            Text(
-              '当前托管路径：',
-              style: TextStyle(fontSize: 11, color: cfg.textSub),
-            ),
+            Text('当前托管路径：', style: TextStyle(fontSize: 11, color: cfg.textSub)),
             const SizedBox(height: 6),
             Container(
               width: double.infinity,
@@ -452,30 +575,54 @@ class _SettingsModalState extends State<SettingsModal> {
               ),
               child: SelectableText(
                 libraryProvider.libraryPath,
-                style: TextStyle(fontSize: 11, color: cfg.textMain, fontFamily: 'monospace'),
+                style: TextStyle(
+                  fontSize: 11,
+                  color: cfg.textMain,
+                  fontFamily: 'monospace',
+                ),
               ),
             ),
             const SizedBox(height: 16),
             if (isDesktop) ...[
               OutlinedButton.icon(
                 onPressed: () => _changeLibraryPath(context, libraryProvider),
-                icon: Icon(Icons.drive_file_rename_outline, size: 14, color: cfg.accent),
-                label: Text('选择新托管路径', style: TextStyle(color: cfg.accent, fontSize: 12)),
+                icon: Icon(
+                  Icons.drive_file_rename_outline,
+                  size: 14,
+                  color: cfg.accent,
+                ),
+                label: Text(
+                  '选择新托管路径',
+                  style: TextStyle(color: cfg.accent, fontSize: 12),
+                ),
                 style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 12,
+                    horizontal: 16,
+                  ),
                   side: BorderSide(color: cfg.accent),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                 ),
               ),
               const SizedBox(height: 10),
               Text(
                 '* 注意：修改路径后，软件将会在新文件夹下重新初始化并读取 database.db。',
-                style: TextStyle(fontSize: 10, color: cfg.textSub, fontStyle: FontStyle.italic),
+                style: TextStyle(
+                  fontSize: 10,
+                  color: cfg.textSub,
+                  fontStyle: FontStyle.italic,
+                ),
               ),
             ] else ...[
               Text(
                 '* 移动端系统路径由应用安全托管，无需且不支持自定义修改。',
-                style: TextStyle(fontSize: 11, color: cfg.textSub, fontStyle: FontStyle.italic),
+                style: TextStyle(
+                  fontSize: 11,
+                  color: cfg.textSub,
+                  fontStyle: FontStyle.italic,
+                ),
               ),
             ],
             const SizedBox(height: 16),
@@ -483,7 +630,11 @@ class _SettingsModalState extends State<SettingsModal> {
             const SizedBox(height: 16),
             Text(
               '数据维护与重构',
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: cfg.textSub),
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: cfg.textSub,
+              ),
             ),
             const SizedBox(height: 12),
             Row(
@@ -503,18 +654,28 @@ class _SettingsModalState extends State<SettingsModal> {
                       ? const SizedBox(
                           width: 14,
                           height: 14,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
                         )
                       : const Icon(Icons.refresh, size: 14),
                   label: Text(
-                    libraryProvider.isRefreshingDatabase ? '正在刷新中...' : '刷新并重新扫描歌曲数据',
+                    libraryProvider.isRefreshingDatabase
+                        ? '正在刷新中...'
+                        : '刷新并重新扫描歌曲数据',
                     style: const TextStyle(fontSize: 12),
                   ),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: cfg.accent,
                     foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 12,
+                      horizontal: 16,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
                   ),
                 ),
               ],
@@ -533,7 +694,11 @@ class _SettingsModalState extends State<SettingsModal> {
           children: [
             Text(
               '界面主题风格',
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: cfg.textSub),
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: cfg.textSub,
+              ),
             ),
             const SizedBox(height: 16),
             Row(
@@ -639,7 +804,10 @@ class _SettingsModalState extends State<SettingsModal> {
     );
   }
 
-  Future<void> _changeLibraryPath(BuildContext context, LibraryProvider provider) async {
+  Future<void> _changeLibraryPath(
+    BuildContext context,
+    LibraryProvider provider,
+  ) async {
     try {
       String? selectedDirectory = await FilePicker.platform.getDirectoryPath(
         dialogTitle: '选择新的托管音乐库路径',
@@ -649,15 +817,15 @@ class _SettingsModalState extends State<SettingsModal> {
         await prefs.setString('aetheria-library-path', selectedDirectory);
         await provider.initializeLibrary(selectedDirectory);
         if (!context.mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('托管路径已更新: $selectedDirectory')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('托管路径已更新: $selectedDirectory')));
       }
     } catch (e) {
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('更改路径失败: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('更改路径失败: $e')));
     }
   }
 }

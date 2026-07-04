@@ -6,7 +6,7 @@ import 'package:aetheria/features/library/ui/settings_modal.dart';
 
 class Sidebar extends StatelessWidget {
   final double width;
-  
+
   const Sidebar({super.key, required this.width});
 
   @override
@@ -14,14 +14,12 @@ class Sidebar extends StatelessWidget {
     final libraryProvider = context.watch<LibraryProvider>();
     final themeProvider = context.watch<UIThemeProvider>();
     final cfg = themeProvider.currentTheme;
-    
+
     return Container(
       width: width,
       decoration: BoxDecoration(
         color: cfg.bgPanel,
-        border: Border(
-          right: BorderSide(color: cfg.border),
-        ),
+        border: Border(right: BorderSide(color: cfg.border)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -45,10 +43,14 @@ class Sidebar extends StatelessWidget {
                         color: cfg.accentGlow,
                         blurRadius: 12,
                         offset: const Offset(0, 4),
-                      )
+                      ),
                     ],
                   ),
-                  child: const Icon(Icons.music_note, color: Colors.white, size: 24),
+                  child: const Icon(
+                    Icons.music_note,
+                    color: Colors.white,
+                    size: 24,
+                  ),
                 ),
                 const SizedBox(width: 10),
                 Text(
@@ -64,7 +66,7 @@ class Sidebar extends StatelessWidget {
               ],
             ),
           ),
-          
+
           // Menu Items
           Expanded(
             child: ListView(
@@ -86,26 +88,29 @@ class Sidebar extends StatelessWidget {
                     _buildMenuTitle('歌单', cfg),
                     IconButton(
                       icon: Icon(Icons.add, size: 16, color: cfg.textSub),
-                      onPressed: () => _showCreatePlaylistDialog(context, libraryProvider),
+                      onPressed: () =>
+                          _showCreatePlaylistDialog(context, libraryProvider),
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
                     ),
                   ],
                 ),
                 const SizedBox(height: 8),
-                ...libraryProvider.playlists.map((p) => _buildPlaylistItem(
-                  context,
-                  playlistId: p.id,
-                  title: p.name,
-                  isActive: libraryProvider.activePlaylistId == p.id,
-                  onTap: () => libraryProvider.setActivePlaylist(p.id),
-                  provider: libraryProvider,
-                  cfg: cfg,
-                )),
+                ...libraryProvider.playlists.map(
+                  (p) => _buildPlaylistItem(
+                    context,
+                    playlistId: p.id,
+                    title: p.name,
+                    isActive: libraryProvider.activePlaylistId == p.id,
+                    onTap: () => libraryProvider.setActivePlaylist(p.id),
+                    provider: libraryProvider,
+                    cfg: cfg,
+                  ),
+                ),
               ],
             ),
           ),
-          
+
           // Bottom Actions
           Divider(height: 1, color: cfg.border),
           Padding(
@@ -161,11 +166,7 @@ class Sidebar extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Icon(
-              icon,
-              size: 18,
-              color: isActive ? cfg.accent : cfg.textSub,
-            ),
+            Icon(icon, size: 18, color: isActive ? cfg.accent : cfg.textSub),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
@@ -183,7 +184,11 @@ class Sidebar extends StatelessWidget {
             if (count != null)
               Text(
                 count.toString(),
-                style: TextStyle(fontSize: 11, color: cfg.textSub, fontFamily: 'Outfit'),
+                style: TextStyle(
+                  fontSize: 11,
+                  color: cfg.textSub,
+                  fontFamily: 'Outfit',
+                ),
               ),
           ],
         ),
@@ -202,7 +207,13 @@ class Sidebar extends StatelessWidget {
   }) {
     return GestureDetector(
       onSecondaryTapUp: (details) {
-        _showPlaylistContextMenu(context, details.globalPosition, playlistId, title, provider);
+        _showPlaylistContextMenu(
+          context,
+          details.globalPosition,
+          playlistId,
+          title,
+          provider,
+        );
       },
       child: _buildMenuItem(
         icon: Icons.queue_music,
@@ -214,7 +225,10 @@ class Sidebar extends StatelessWidget {
     );
   }
 
-  void _showCreatePlaylistDialog(BuildContext context, LibraryProvider provider) {
+  void _showCreatePlaylistDialog(
+    BuildContext context,
+    LibraryProvider provider,
+  ) {
     final controller = TextEditingController();
     showDialog(
       context: context,
@@ -238,9 +252,9 @@ class Sidebar extends StatelessWidget {
                 try {
                   await provider.createPlaylist(name);
                 } catch (e) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('创建失败: $e')),
-                  );
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(SnackBar(content: Text('创建失败: $e')));
                 }
               }
             },
@@ -260,7 +274,12 @@ class Sidebar extends StatelessWidget {
   ) {
     showMenu(
       context: context,
-      position: RelativeRect.fromLTRB(position.dx, position.dy, position.dx, position.dy),
+      position: RelativeRect.fromLTRB(
+        position.dx,
+        position.dy,
+        position.dx,
+        position.dy,
+      ),
       items: [
         const PopupMenuItem(
           value: 'rename',
@@ -292,7 +311,12 @@ class Sidebar extends StatelessWidget {
     });
   }
 
-  void _showRenamePlaylistDialog(BuildContext context, String id, String currentName, LibraryProvider provider) {
+  void _showRenamePlaylistDialog(
+    BuildContext context,
+    String id,
+    String currentName,
+    LibraryProvider provider,
+  ) {
     final controller = TextEditingController(text: currentName);
     showDialog(
       context: context,
@@ -316,9 +340,9 @@ class Sidebar extends StatelessWidget {
                 try {
                   await provider.renamePlaylist(id, name);
                 } catch (e) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('命名失败: $e')),
-                  );
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(SnackBar(content: Text('命名失败: $e')));
                 }
               }
             },
@@ -329,7 +353,12 @@ class Sidebar extends StatelessWidget {
     );
   }
 
-  void _confirmDeletePlaylist(BuildContext context, String id, String name, LibraryProvider provider) {
+  void _confirmDeletePlaylist(
+    BuildContext context,
+    String id,
+    String name,
+    LibraryProvider provider,
+  ) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -346,12 +375,15 @@ class Sidebar extends StatelessWidget {
               try {
                 await provider.deletePlaylist(id);
               } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('删除失败: $e')),
-                );
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(SnackBar(content: Text('删除失败: $e')));
               }
             },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.redAccent,
+              foregroundColor: Colors.white,
+            ),
             child: const Text('删除'),
           ),
         ],

@@ -18,7 +18,7 @@ pub struct Song {
 pub struct AudioVersion {
     pub id: String,
     pub song_id: String,
-    pub filepath: String, // Relative path, e.g. "files/uuid.mp3"
+    pub filepath: String,      // Relative path, e.g. "files/uuid.mp3"
     pub original_name: String, // e.g. "周杰伦 - 晴天.mp3"
     pub format: Option<String>,
     pub bitrate: Option<i32>,

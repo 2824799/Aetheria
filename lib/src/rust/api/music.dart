@@ -8,7 +8,7 @@ import '../models/playlist.dart';
 import '../models/song.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `scan_directory`
+// These functions are ignored because they are not marked as `pub`: `estimate_duration_from_bitrate`, `estimate_duration_with_symphonia`, `reliable_duration`, `scan_directory`
 
 bool isLibraryInitialized() =>
     RustLib.instance.api.crateApiMusicIsLibraryInitialized();
@@ -85,6 +85,18 @@ Future<Tag> addTag({required String name, String? color, String? category}) =>
       color: color,
       category: category,
     );
+
+Future<void> updateTag({
+  required PlatformInt64 tagId,
+  required String name,
+  String? color,
+  String? category,
+}) => RustLib.instance.api.crateApiMusicUpdateTag(
+  tagId: tagId,
+  name: name,
+  color: color,
+  category: category,
+);
 
 Future<void> deleteTag({required PlatformInt64 tagId}) =>
     RustLib.instance.api.crateApiMusicDeleteTag(tagId: tagId);

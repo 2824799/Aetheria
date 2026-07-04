@@ -25,9 +25,9 @@ class GlassPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final themeProvider = context.watch<UIThemeProvider>();
     final cfg = themeProvider.currentTheme;
-    
+
     final radius = borderRadius ?? BorderRadius.zero;
-    final blurVal = blur ?? cfg.glassBlur;
+    final blurVal = blur ?? cfg.glassBlur * 1.8;
 
     return ClipRRect(
       borderRadius: radius,
@@ -36,7 +36,7 @@ class GlassPanel extends StatelessWidget {
         child: Container(
           padding: padding,
           decoration: BoxDecoration(
-            color: customBackgroundColor ?? cfg.bgPanel,
+            color: customBackgroundColor ?? cfg.bgPanel.withOpacity(0.86),
             borderRadius: radius,
             border: border ?? Border.all(color: cfg.border, width: 1.0),
           ),

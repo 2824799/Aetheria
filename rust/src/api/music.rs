@@ -1,15 +1,21 @@
-use std::path::Path;
-use flutter_rust_bridge::frb;
-use crate::models::{Song, Tag, AudioVersion, Playlist, PreviewInfo};
-use crate::database::connection::{establish_connection, init_storage, set_library_dir, get_library_dir, get_files_dir};
+use crate::database::connection::{
+    establish_connection, get_files_dir, get_library_dir, init_storage, set_library_dir,
+};
 use crate::database::schema::init_db;
-use std::fs;
+use crate::models::{AudioVersion, Playlist, PreviewInfo, Song, Tag};
+use flutter_rust_bridge::frb;
+use lofty::file::{AudioFile, TaggedFileExt};
+use lofty::probe::Probe;
+use lofty::tag::Accessor;
 use rusqlite::params;
 use rusqlite::OptionalExtension;
+use std::fs;
+use std::path::Path;
+use symphonia::core::formats::FormatOptions;
+use symphonia::core::io::MediaSourceStream;
+use symphonia::core::meta::MetadataOptions;
+use symphonia::core::probe::Hint;
 use uuid::Uuid;
-use lofty::probe::Probe;
-use lofty::file::{AudioFile, TaggedFileExt};
-use lofty::tag::Accessor;
 
 #[frb(sync)]
 pub fn is_library_initialized() -> bool {
@@ -26,96 +32,108 @@ pub fn initialize_library_path(path: String) -> Result<(), String> {
 
 pub fn get_songs() -> Result<Vec<Song>, String> {
     let conn = establish_connection().map_err(|e| e.to_string())?;
-    
+
     let mut stmt = conn.prepare(
         "SELECT id, title, artist, album, lyrics, cover_path, rating, created_at FROM songs ORDER BY title ASC"
     ).map_err(|e| e.to_string())?;
-    
-    let song_rows = stmt.query_map([], |row| {
-        Ok(Song {
-            id: row.get(0)?,
-            title: row.get(1)?,
-            artist: row.get(2)?,
-            album: row.get(3)?,
-            lyrics: row.get(4)?,
-            cover_path: row.get(5)?,
-            rating: row.get(6)?,
-            created_at: row.get(7)?,
-            versions: Vec::new(),
-            tags: Vec::new(),
+
+    let song_rows = stmt
+        .query_map([], |row| {
+            Ok(Song {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                artist: row.get(2)?,
+                album: row.get(3)?,
+                lyrics: row.get(4)?,
+                cover_path: row.get(5)?,
+                rating: row.get(6)?,
+                created_at: row.get(7)?,
+                versions: Vec::new(),
+                tags: Vec::new(),
+            })
         })
-    }).map_err(|e| e.to_string())?;
-    
+        .map_err(|e| e.to_string())?;
+
     let mut songs = Vec::new();
     for song_res in song_rows {
         let mut song = song_res.map_err(|e| e.to_string())?;
-        
+
         let mut v_stmt = conn.prepare(
             "SELECT id, song_id, filepath, original_name, format, bitrate, sample_rate, duration, file_size, is_enabled, is_primary, md5, bit_depth, loudness FROM audio_files WHERE song_id = ?1"
         ).map_err(|e| e.to_string())?;
-        
-        let v_rows = v_stmt.query_map(params![song.id], |row| {
-            let is_enabled_int: i32 = row.get(9)?;
-            let is_primary_int: i32 = row.get(10)?;
-            Ok(AudioVersion {
-                id: row.get(0)?,
-                song_id: row.get(1)?,
-                filepath: row.get(2)?,
-                original_name: row.get(3)?,
-                format: row.get(4)?,
-                bitrate: row.get(5)?,
-                sample_rate: row.get(6)?,
-                duration: row.get(7)?,
-                file_size: row.get(8)?,
-                is_enabled: is_enabled_int != 0,
-                is_primary: is_primary_int != 0,
-                md5: row.get(11)?,
-                bit_depth: row.get(12)?,
-                loudness: row.get(13)?,
+
+        let v_rows = v_stmt
+            .query_map(params![song.id], |row| {
+                let is_enabled_int: i32 = row.get(9)?;
+                let is_primary_int: i32 = row.get(10)?;
+                Ok(AudioVersion {
+                    id: row.get(0)?,
+                    song_id: row.get(1)?,
+                    filepath: row.get(2)?,
+                    original_name: row.get(3)?,
+                    format: row.get(4)?,
+                    bitrate: row.get(5)?,
+                    sample_rate: row.get(6)?,
+                    duration: row.get(7)?,
+                    file_size: row.get(8)?,
+                    is_enabled: is_enabled_int != 0,
+                    is_primary: is_primary_int != 0,
+                    md5: row.get(11)?,
+                    bit_depth: row.get(12)?,
+                    loudness: row.get(13)?,
+                })
             })
-        }).map_err(|e| e.to_string())?;
-        
+            .map_err(|e| e.to_string())?;
+
         for v in v_rows {
             song.versions.push(v.map_err(|e| e.to_string())?);
         }
-        
-        let mut t_stmt = conn.prepare(
-            "SELECT t.id, t.name, t.color, t.category FROM tags t 
+
+        let mut t_stmt = conn
+            .prepare(
+                "SELECT t.id, t.name, t.color, t.category FROM tags t 
              JOIN song_tags st ON t.id = st.tag_id 
-             WHERE st.song_id = ?1"
-        ).map_err(|e| e.to_string())?;
-        
-        let t_rows = t_stmt.query_map(params![song.id], |row| {
+             WHERE st.song_id = ?1",
+            )
+            .map_err(|e| e.to_string())?;
+
+        let t_rows = t_stmt
+            .query_map(params![song.id], |row| {
+                Ok(Tag {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    color: row.get(2)?,
+                    category: row.get(3)?,
+                })
+            })
+            .map_err(|e| e.to_string())?;
+
+        for t in t_rows {
+            song.tags.push(t.map_err(|e| e.to_string())?);
+        }
+
+        songs.push(song);
+    }
+
+    Ok(songs)
+}
+
+pub fn get_tags() -> Result<Vec<Tag>, String> {
+    let conn = establish_connection().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare("SELECT id, name, color, category FROM tags ORDER BY category, name")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
             Ok(Tag {
                 id: row.get(0)?,
                 name: row.get(1)?,
                 color: row.get(2)?,
                 category: row.get(3)?,
             })
-        }).map_err(|e| e.to_string())?;
-        
-        for t in t_rows {
-            song.tags.push(t.map_err(|e| e.to_string())?);
-        }
-        
-        songs.push(song);
-    }
-    
-    Ok(songs)
-}
-
-pub fn get_tags() -> Result<Vec<Tag>, String> {
-    let conn = establish_connection().map_err(|e| e.to_string())?;
-    let mut stmt = conn.prepare("SELECT id, name, color, category FROM tags ORDER BY category, name").map_err(|e| e.to_string())?;
-    let rows = stmt.query_map([], |row| {
-        Ok(Tag {
-            id: row.get(0)?,
-            name: row.get(1)?,
-            color: row.get(2)?,
-            category: row.get(3)?,
         })
-    }).map_err(|e| e.to_string())?;
-    
+        .map_err(|e| e.to_string())?;
+
     let mut tags = Vec::new();
     for r in rows {
         tags.push(r.map_err(|e| e.to_string())?);
@@ -125,17 +143,19 @@ pub fn get_tags() -> Result<Vec<Tag>, String> {
 
 pub fn get_playlists() -> Result<Vec<Playlist>, String> {
     let conn = establish_connection().map_err(|e| e.to_string())?;
-    let mut stmt = conn.prepare(
-        "SELECT id, name, description, created_at FROM playlists ORDER BY created_at ASC"
-    ).map_err(|e| e.to_string())?;
-    let rows = stmt.query_map([], |row| {
-        Ok(Playlist {
-            id: row.get(0)?,
-            name: row.get(1)?,
-            description: row.get(2)?,
-            created_at: row.get(3)?,
+    let mut stmt = conn
+        .prepare("SELECT id, name, description, created_at FROM playlists ORDER BY created_at ASC")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(Playlist {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                description: row.get(2)?,
+                created_at: row.get(3)?,
+            })
         })
-    }).map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())?;
     let mut playlists = Vec::new();
     for r in rows {
         playlists.push(r.map_err(|e| e.to_string())?);
@@ -149,6 +169,79 @@ pub fn start_audio_server() -> u16 {
     crate::audio::server::get_port()
 }
 
+fn estimate_duration_with_symphonia(path: &Path) -> Option<f64> {
+    let file = fs::File::open(path).ok()?;
+    let mss = MediaSourceStream::new(Box::new(file), Default::default());
+    let mut hint = Hint::new();
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        hint.with_extension(ext);
+    }
+
+    let probed = symphonia::default::get_probe()
+        .format(
+            &hint,
+            mss,
+            &FormatOptions::default(),
+            &MetadataOptions::default(),
+        )
+        .ok()?;
+    let format = probed.format;
+    let track = format
+        .tracks()
+        .iter()
+        .find(|t| t.codec_params.codec != symphonia::core::codecs::CODEC_TYPE_NULL)?;
+
+    if let (Some(n_frames), Some(sample_rate)) =
+        (track.codec_params.n_frames, track.codec_params.sample_rate)
+    {
+        if sample_rate > 0 {
+            let duration = n_frames as f64 / sample_rate as f64;
+            if duration.is_finite() && duration > 0.0 {
+                return Some(duration);
+            }
+        }
+    }
+
+    if let (Some(time_base), Some(n_frames)) =
+        (track.codec_params.time_base, track.codec_params.n_frames)
+    {
+        let time = time_base.calc_time(n_frames);
+        let duration = time.seconds as f64 + time.frac;
+        if duration.is_finite() && duration > 0.0 {
+            return Some(duration);
+        }
+    }
+
+    None
+}
+
+fn estimate_duration_from_bitrate(path: &Path, bitrate_bps: Option<u32>) -> Option<f64> {
+    let bitrate = bitrate_bps?;
+    if bitrate == 0 {
+        return None;
+    }
+    let file_size = path.metadata().ok()?.len() as f64;
+    let duration = (file_size * 8.0) / (bitrate as f64);
+    if duration.is_finite() && duration > 0.0 && duration < 86400.0 {
+        Some(duration)
+    } else {
+        None
+    }
+}
+
+fn reliable_duration(path: &Path, lofty_duration: f64, lofty_bitrate: Option<u32>) -> f64 {
+    if lofty_duration.is_finite() && lofty_duration > 0.0 {
+        return lofty_duration;
+    }
+    if let Some(d) = estimate_duration_with_symphonia(path) {
+        return d;
+    }
+    if let Some(d) = estimate_duration_from_bitrate(path, lofty_bitrate) {
+        return d;
+    }
+    0.0
+}
+
 pub fn get_library_path() -> Result<String, String> {
     Ok(get_library_dir().to_string_lossy().to_string())
 }
@@ -158,38 +251,45 @@ pub fn import_song(filepath: String) -> Result<Song, String> {
     if !src_path.exists() {
         return Err("File does not exist".to_string());
     }
-    
-    let original_name = src_path.file_name()
+
+    let original_name = src_path
+        .file_name()
         .ok_or_else(|| "Invalid file name".to_string())?
         .to_string_lossy()
         .to_string();
-        
-    let ext = src_path.extension()
+
+    let ext = src_path
+        .extension()
         .unwrap_or_default()
         .to_string_lossy()
         .to_string();
 
     let file_size = src_path.metadata().map_err(|e| e.to_string())?.len() as i64;
-    
+
     let tagged_file = Probe::open(src_path)
         .map_err(|e| format!("Failed to open file probe: {}", e))?
         .read()
         .map_err(|e| format!("Failed to read metadata: {}", e))?;
-        
+
     let properties = tagged_file.properties();
-    let duration = properties.duration().as_secs_f64();
+    let duration = reliable_duration(
+        src_path,
+        properties.duration().as_secs_f64(),
+        properties.audio_bitrate().map(|b| b as u32),
+    );
     let bitrate = properties.audio_bitrate().map(|b| (b * 1000) as i32);
     let sample_rate = properties.sample_rate().map(|s| s as i32);
     let bit_depth = properties.bit_depth().map(|d| d as i32);
     let loudness = crate::audio::dsp::calculate_loudness(&src_path.to_string_lossy()).ok();
-    
-    let mut title = src_path.file_stem()
+
+    let mut title = src_path
+        .file_stem()
         .unwrap_or_default()
         .to_string_lossy()
         .to_string();
     let mut artist = None;
     let mut album = None;
-    
+
     if let Some(primary_tag) = tagged_file.primary_tag() {
         if let Some(t) = primary_tag.title() {
             title = t.to_string();
@@ -211,234 +311,70 @@ pub fn import_song(filepath: String) -> Result<Song, String> {
             album = Some(al.to_string());
         }
     }
-    
+
     let file_data = fs::read(src_path).map_err(|e| e.to_string())?;
     let file_md5 = format!("{:x}", md5::compute(file_data));
 
     let conn = establish_connection().map_err(|e| e.to_string())?;
 
-    let md5_exists: bool = conn.query_row(
-        "SELECT COUNT(*) FROM audio_files WHERE md5 = ?1",
-        params![file_md5],
-        |row| row.get::<_, i64>(0).map(|count| count > 0)
-    ).map_err(|e| e.to_string())?;
+    let md5_exists: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM audio_files WHERE md5 = ?1",
+            params![file_md5],
+            |row| row.get::<_, i64>(0).map(|count| count > 0),
+        )
+        .map_err(|e| e.to_string())?;
 
     if md5_exists {
-        return Err(format!("音频文件 [{}] 已存在于音乐库中，请勿重复导入！", original_name));
+        return Err(format!(
+            "音频文件 [{}] 已存在于音乐库中，请勿重复导入！",
+            original_name
+        ));
     }
-    
+
     let uuid = Uuid::new_v4().to_string();
     let dest_filename = format!("{}.{}", uuid, ext);
     let dest_relative_path = format!("files/{}", dest_filename);
     let dest_absolute_path = get_files_dir().join(&dest_filename);
-    
+
     fs::copy(src_path, &dest_absolute_path).map_err(|e| e.to_string())?;
-    
+
     let song_id: String = match artist {
-        Some(ref art_name) => {
-            conn.query_row(
+        Some(ref art_name) => conn
+            .query_row(
                 "SELECT id FROM songs WHERE title = ?1 AND artist = ?2",
                 params![title, art_name],
-                |row| row.get(0)
-            ).optional()
-        },
-        None => {
-            conn.query_row(
+                |row| row.get(0),
+            )
+            .optional(),
+        None => conn
+            .query_row(
                 "SELECT id FROM songs WHERE title = ?1 AND artist IS NULL",
                 params![title],
-                |row| row.get(0)
-            ).optional()
-        }
-    }.map_err(|e| e.to_string())?
-     .unwrap_or_else(|| {
-         let new_id = Uuid::new_v4().to_string();
-         conn.execute(
-             "INSERT INTO songs (id, title, artist, album) VALUES (?1, ?2, ?3, ?4)",
-             params![new_id, title, artist, album]
-         ).unwrap();
-         new_id
-     });
-     
-    let version_count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM audio_files WHERE song_id = ?1",
-        params![song_id],
-        |row| row.get(0)
-    ).map_err(|e| e.to_string())?;
-    let is_primary = if version_count == 0 { 1 } else { 0 };
-    
-    let version_id = Uuid::new_v4().to_string();
-    conn.execute(
-        "INSERT INTO audio_files (id, song_id, filepath, original_name, format, bitrate, sample_rate, duration, file_size, is_enabled, is_primary, md5, bit_depth, loudness) 
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1, ?10, ?11, ?12, ?13)",
-        params![
-            version_id,
-            song_id,
-            dest_relative_path,
-            original_name,
-            ext,
-            bitrate,
-            sample_rate,
-            duration,
-            file_size,
-            is_primary,
-            file_md5,
-            bit_depth,
-            loudness
-        ]
-    ).map_err(|e| e.to_string())?;
-    
-    let mut stmt = conn.prepare(
-        "SELECT id, title, artist, album, lyrics, cover_path, rating, created_at FROM songs WHERE id = ?1"
-    ).map_err(|e| e.to_string())?;
-    
-    let mut song = stmt.query_row(params![song_id], |row| {
-        Ok(Song {
-            id: row.get(0)?,
-            title: row.get(1)?,
-            artist: row.get(2)?,
-            album: row.get(3)?,
-            lyrics: row.get(4)?,
-            cover_path: row.get(5)?,
-            rating: row.get(6)?,
-            created_at: row.get(7)?,
-            versions: Vec::new(),
-            tags: Vec::new(),
-        })
-    }).map_err(|e| e.to_string())?;
-    
-    let mut v_stmt = conn.prepare(
-        "SELECT id, song_id, filepath, original_name, format, bitrate, sample_rate, duration, file_size, is_enabled, is_primary, md5, bit_depth, loudness FROM audio_files WHERE song_id = ?1"
-    ).map_err(|e| e.to_string())?;
-    let v_rows = v_stmt.query_map(params![song.id], |row| {
-        let is_enabled_int: i32 = row.get(9)?;
-        let is_primary_int: i32 = row.get(10)?;
-        Ok(AudioVersion {
-            id: row.get(0)?,
-            song_id: row.get(1)?,
-            filepath: row.get(2)?,
-            original_name: row.get(3)?,
-            format: row.get(4)?,
-            bitrate: row.get(5)?,
-            sample_rate: row.get(6)?,
-            duration: row.get(7)?,
-            file_size: row.get(8)?,
-            is_enabled: is_enabled_int != 0,
-            is_primary: is_primary_int != 0,
-            md5: row.get(11)?,
-            bit_depth: row.get(12)?,
-            loudness: row.get(13)?,
-        })
-    }).map_err(|e| e.to_string())?;
-    for v in v_rows {
-        song.versions.push(v.map_err(|e| e.to_string())?);
+                |row| row.get(0),
+            )
+            .optional(),
     }
-    
-    let mut t_stmt = conn.prepare(
-        "SELECT t.id, t.name, t.color, t.category FROM tags t 
-         JOIN song_tags st ON t.id = st.tag_id 
-         WHERE st.song_id = ?1"
-    ).map_err(|e| e.to_string())?;
-    let t_rows = t_stmt.query_map(params![song.id], |row| {
-        Ok(Tag {
-            id: row.get(0)?,
-            name: row.get(1)?,
-            color: row.get(2)?,
-            category: row.get(3)?,
-        })
-    }).map_err(|e| e.to_string())?;
-    for t in t_rows {
-        song.tags.push(t.map_err(|e| e.to_string())?);
-    }
-    
-    Ok(song)
-}
-
-pub fn import_song_with_metadata(filepath: String, title: String, artist: String) -> Result<(), String> {
-    let src_path = Path::new(&filepath);
-    if !src_path.exists() {
-        return Err("File does not exist".to_string());
-    }
-    
-    let original_name = src_path.file_name()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .to_string();
-        
-    let ext = src_path.extension()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .to_string();
-
-    let file_size = src_path.metadata().map_err(|e| e.to_string())?.len() as i64;
-    
-    let tagged_file = Probe::open(src_path)
-        .map_err(|e| format!("Failed to open file probe: {}", e))?
-        .read()
-        .map_err(|e| format!("Failed to read metadata: {}", e))?;
-        
-    let properties = tagged_file.properties();
-    let duration = properties.duration().as_secs_f64();
-    let bitrate = properties.audio_bitrate().map(|b| (b * 1000) as i32);
-    let sample_rate = properties.sample_rate().map(|s| s as i32);
-    let bit_depth = properties.bit_depth().map(|d| d as i32);
-    let loudness = crate::audio::dsp::calculate_loudness(&src_path.to_string_lossy()).ok();
-    
-    let file_data = fs::read(src_path).map_err(|e| e.to_string())?;
-    let file_md5 = format!("{:x}", md5::compute(file_data));
-
-    let conn = establish_connection().map_err(|e| e.to_string())?;
-
-    let md5_exists: bool = conn.query_row(
-        "SELECT COUNT(*) FROM audio_files WHERE md5 = ?1",
-        params![file_md5],
-        |row| row.get::<_, i64>(0).map(|count| count > 0)
-    ).map_err(|e| e.to_string())?;
-
-    if md5_exists {
-        return Err(format!("音频文件 [{}] 已存在于库中，请勿重复导入！", original_name));
-    }
-    
-    let uuid = Uuid::new_v4().to_string();
-    let dest_filename = format!("{}.{}", uuid, ext);
-    let dest_relative_path = format!("files/{}", dest_filename);
-    let dest_absolute_path = get_files_dir().join(&dest_filename);
-    
-    fs::copy(src_path, &dest_absolute_path).map_err(|e| e.to_string())?;
-    
-    let artist_opt = if artist.trim().is_empty() || artist == "未知歌手" { None } else { Some(artist.trim().to_string()) };
-    let song_id: String = match &artist_opt {
-        None => {
-            let id_opt: Option<String> = conn.query_row(
-                "SELECT id FROM songs WHERE title = ?1 AND artist IS NULL",
-                params![title.trim()],
-                |row| row.get(0)
-            ).optional().map_err(|e| e.to_string())?;
-            id_opt
-        },
-        Some(art) => {
-            let id_opt: Option<String> = conn.query_row(
-                "SELECT id FROM songs WHERE title = ?1 AND artist = ?2",
-                params![title.trim(), art],
-                |row| row.get(0)
-            ).optional().map_err(|e| e.to_string())?;
-            id_opt
-        }
-    }.unwrap_or_else(|| {
+    .map_err(|e| e.to_string())?
+    .unwrap_or_else(|| {
         let new_id = Uuid::new_v4().to_string();
         conn.execute(
-            "INSERT INTO songs (id, title, artist) VALUES (?1, ?2, ?3)",
-            params![new_id, title.trim(), artist_opt]
-        ).unwrap();
+            "INSERT INTO songs (id, title, artist, album) VALUES (?1, ?2, ?3, ?4)",
+            params![new_id, title, artist, album],
+        )
+        .unwrap();
         new_id
     });
 
-    let version_count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM audio_files WHERE song_id = ?1",
-        params![song_id],
-        |row| row.get(0)
-    ).map_err(|e| e.to_string())?;
+    let version_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM audio_files WHERE song_id = ?1",
+            params![song_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
     let is_primary = if version_count == 0 { 1 } else { 0 };
-    
+
     let version_id = Uuid::new_v4().to_string();
     conn.execute(
         "INSERT INTO audio_files (id, song_id, filepath, original_name, format, bitrate, sample_rate, duration, file_size, is_enabled, is_primary, md5, bit_depth, loudness) 
@@ -459,70 +395,293 @@ pub fn import_song_with_metadata(filepath: String, title: String, artist: String
             loudness
         ]
     ).map_err(|e| e.to_string())?;
-    
-    Ok(())
+
+    let mut stmt = conn.prepare(
+        "SELECT id, title, artist, album, lyrics, cover_path, rating, created_at FROM songs WHERE id = ?1"
+    ).map_err(|e| e.to_string())?;
+
+    let mut song = stmt
+        .query_row(params![song_id], |row| {
+            Ok(Song {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                artist: row.get(2)?,
+                album: row.get(3)?,
+                lyrics: row.get(4)?,
+                cover_path: row.get(5)?,
+                rating: row.get(6)?,
+                created_at: row.get(7)?,
+                versions: Vec::new(),
+                tags: Vec::new(),
+            })
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut v_stmt = conn.prepare(
+        "SELECT id, song_id, filepath, original_name, format, bitrate, sample_rate, duration, file_size, is_enabled, is_primary, md5, bit_depth, loudness FROM audio_files WHERE song_id = ?1"
+    ).map_err(|e| e.to_string())?;
+    let v_rows = v_stmt
+        .query_map(params![song.id], |row| {
+            let is_enabled_int: i32 = row.get(9)?;
+            let is_primary_int: i32 = row.get(10)?;
+            Ok(AudioVersion {
+                id: row.get(0)?,
+                song_id: row.get(1)?,
+                filepath: row.get(2)?,
+                original_name: row.get(3)?,
+                format: row.get(4)?,
+                bitrate: row.get(5)?,
+                sample_rate: row.get(6)?,
+                duration: row.get(7)?,
+                file_size: row.get(8)?,
+                is_enabled: is_enabled_int != 0,
+                is_primary: is_primary_int != 0,
+                md5: row.get(11)?,
+                bit_depth: row.get(12)?,
+                loudness: row.get(13)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    for v in v_rows {
+        song.versions.push(v.map_err(|e| e.to_string())?);
+    }
+
+    let mut t_stmt = conn
+        .prepare(
+            "SELECT t.id, t.name, t.color, t.category FROM tags t 
+         JOIN song_tags st ON t.id = st.tag_id 
+         WHERE st.song_id = ?1",
+        )
+        .map_err(|e| e.to_string())?;
+    let t_rows = t_stmt
+        .query_map(params![song.id], |row| {
+            Ok(Tag {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                color: row.get(2)?,
+                category: row.get(3)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    for t in t_rows {
+        song.tags.push(t.map_err(|e| e.to_string())?);
+    }
+
+    Ok(song)
 }
 
-pub fn import_audio_version_for_song(song_id: String, filepath: String) -> Result<AudioVersion, String> {
+pub fn import_song_with_metadata(
+    filepath: String,
+    title: String,
+    artist: String,
+) -> Result<(), String> {
     let src_path = Path::new(&filepath);
     if !src_path.exists() {
         return Err("File does not exist".to_string());
     }
-    
-    let original_name = src_path.file_name()
-        .ok_or_else(|| "Invalid file name".to_string())?
+
+    let original_name = src_path
+        .file_name()
+        .unwrap_or_default()
         .to_string_lossy()
         .to_string();
-        
-    let ext = src_path.extension()
+
+    let ext = src_path
+        .extension()
         .unwrap_or_default()
         .to_string_lossy()
         .to_string();
 
     let file_size = src_path.metadata().map_err(|e| e.to_string())?.len() as i64;
-    
+
     let tagged_file = Probe::open(src_path)
         .map_err(|e| format!("Failed to open file probe: {}", e))?
         .read()
         .map_err(|e| format!("Failed to read metadata: {}", e))?;
-        
+
     let properties = tagged_file.properties();
-    let duration = properties.duration().as_secs_f64();
+    let duration = reliable_duration(
+        src_path,
+        properties.duration().as_secs_f64(),
+        properties.audio_bitrate().map(|b| b as u32),
+    );
     let bitrate = properties.audio_bitrate().map(|b| (b * 1000) as i32);
     let sample_rate = properties.sample_rate().map(|s| s as i32);
     let bit_depth = properties.bit_depth().map(|d| d as i32);
-    
     let loudness = crate::audio::dsp::calculate_loudness(&src_path.to_string_lossy()).ok();
-    
+
     let file_data = fs::read(src_path).map_err(|e| e.to_string())?;
     let file_md5 = format!("{:x}", md5::compute(file_data));
 
     let conn = establish_connection().map_err(|e| e.to_string())?;
 
-    let md5_exists: bool = conn.query_row(
-        "SELECT COUNT(*) FROM audio_files WHERE md5 = ?1",
-        params![file_md5],
-        |row| row.get::<_, i64>(0).map(|count| count > 0)
+    let md5_exists: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM audio_files WHERE md5 = ?1",
+            params![file_md5],
+            |row| row.get::<_, i64>(0).map(|count| count > 0),
+        )
+        .map_err(|e| e.to_string())?;
+
+    if md5_exists {
+        return Err(format!(
+            "音频文件 [{}] 已存在于库中，请勿重复导入！",
+            original_name
+        ));
+    }
+
+    let uuid = Uuid::new_v4().to_string();
+    let dest_filename = format!("{}.{}", uuid, ext);
+    let dest_relative_path = format!("files/{}", dest_filename);
+    let dest_absolute_path = get_files_dir().join(&dest_filename);
+
+    fs::copy(src_path, &dest_absolute_path).map_err(|e| e.to_string())?;
+
+    let artist_opt = if artist.trim().is_empty() || artist == "未知歌手" {
+        None
+    } else {
+        Some(artist.trim().to_string())
+    };
+    let song_id: String = match &artist_opt {
+        None => {
+            let id_opt: Option<String> = conn
+                .query_row(
+                    "SELECT id FROM songs WHERE title = ?1 AND artist IS NULL",
+                    params![title.trim()],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(|e| e.to_string())?;
+            id_opt
+        }
+        Some(art) => {
+            let id_opt: Option<String> = conn
+                .query_row(
+                    "SELECT id FROM songs WHERE title = ?1 AND artist = ?2",
+                    params![title.trim(), art],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(|e| e.to_string())?;
+            id_opt
+        }
+    }
+    .unwrap_or_else(|| {
+        let new_id = Uuid::new_v4().to_string();
+        conn.execute(
+            "INSERT INTO songs (id, title, artist) VALUES (?1, ?2, ?3)",
+            params![new_id, title.trim(), artist_opt],
+        )
+        .unwrap();
+        new_id
+    });
+
+    let version_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM audio_files WHERE song_id = ?1",
+            params![song_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    let is_primary = if version_count == 0 { 1 } else { 0 };
+
+    let version_id = Uuid::new_v4().to_string();
+    conn.execute(
+        "INSERT INTO audio_files (id, song_id, filepath, original_name, format, bitrate, sample_rate, duration, file_size, is_enabled, is_primary, md5, bit_depth, loudness) 
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1, ?10, ?11, ?12, ?13)",
+        params![
+            version_id,
+            song_id,
+            dest_relative_path,
+            original_name,
+            ext,
+            bitrate,
+            sample_rate,
+            duration,
+            file_size,
+            is_primary,
+            file_md5,
+            bit_depth,
+            loudness
+        ]
     ).map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+pub fn import_audio_version_for_song(
+    song_id: String,
+    filepath: String,
+) -> Result<AudioVersion, String> {
+    let src_path = Path::new(&filepath);
+    if !src_path.exists() {
+        return Err("File does not exist".to_string());
+    }
+
+    let original_name = src_path
+        .file_name()
+        .ok_or_else(|| "Invalid file name".to_string())?
+        .to_string_lossy()
+        .to_string();
+
+    let ext = src_path
+        .extension()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+
+    let file_size = src_path.metadata().map_err(|e| e.to_string())?.len() as i64;
+
+    let tagged_file = Probe::open(src_path)
+        .map_err(|e| format!("Failed to open file probe: {}", e))?
+        .read()
+        .map_err(|e| format!("Failed to read metadata: {}", e))?;
+
+    let properties = tagged_file.properties();
+    let duration = reliable_duration(
+        src_path,
+        properties.duration().as_secs_f64(),
+        properties.audio_bitrate().map(|b| b as u32),
+    );
+    let bitrate = properties.audio_bitrate().map(|b| (b * 1000) as i32);
+    let sample_rate = properties.sample_rate().map(|s| s as i32);
+    let bit_depth = properties.bit_depth().map(|d| d as i32);
+
+    let loudness = crate::audio::dsp::calculate_loudness(&src_path.to_string_lossy()).ok();
+
+    let file_data = fs::read(src_path).map_err(|e| e.to_string())?;
+    let file_md5 = format!("{:x}", md5::compute(file_data));
+
+    let conn = establish_connection().map_err(|e| e.to_string())?;
+
+    let md5_exists: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM audio_files WHERE md5 = ?1",
+            params![file_md5],
+            |row| row.get::<_, i64>(0).map(|count| count > 0),
+        )
+        .map_err(|e| e.to_string())?;
 
     if md5_exists {
         return Err(format!("该音频文件已存在于库中，请勿重复导入！"));
     }
-    
+
     let uuid = Uuid::new_v4().to_string();
     let dest_filename = format!("{}.{}", uuid, ext);
     let dest_relative_path = format!("files/{}", dest_filename);
     let dest_absolute_path = get_files_dir().join(&dest_filename);
-    
+
     fs::copy(src_path, &dest_absolute_path).map_err(|e| e.to_string())?;
-    
-    let version_count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM audio_files WHERE song_id = ?1",
-        params![song_id],
-        |row| row.get(0)
-    ).map_err(|e| e.to_string())?;
+
+    let version_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM audio_files WHERE song_id = ?1",
+            params![song_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
     let is_primary = if version_count == 0 { 1 } else { 0 };
-    
+
     let version_id = Uuid::new_v4().to_string();
     conn.execute(
         "INSERT INTO audio_files (id, song_id, filepath, original_name, format, bitrate, sample_rate, duration, file_size, is_enabled, is_primary, md5, bit_depth, loudness) 
@@ -543,7 +702,7 @@ pub fn import_audio_version_for_song(song_id: String, filepath: String) -> Resul
             loudness
         ]
     ).map_err(|e| e.to_string())?;
-    
+
     Ok(AudioVersion {
         id: version_id,
         song_id,
@@ -562,33 +721,42 @@ pub fn import_audio_version_for_song(song_id: String, filepath: String) -> Resul
     })
 }
 
-pub fn update_version_status(version_id: String, is_enabled: bool, is_primary: bool) -> Result<(), String> {
+pub fn update_version_status(
+    version_id: String,
+    is_enabled: bool,
+    is_primary: bool,
+) -> Result<(), String> {
     let conn = establish_connection().map_err(|e| e.to_string())?;
     let is_enabled_int = if is_enabled { 1 } else { 0 };
-    
+
     conn.execute(
         "UPDATE audio_files SET is_enabled = ?1 WHERE id = ?2",
-        params![is_enabled_int, version_id]
-    ).map_err(|e| e.to_string())?;
-    
+        params![is_enabled_int, version_id],
+    )
+    .map_err(|e| e.to_string())?;
+
     if is_primary {
-        let song_id: String = conn.query_row(
-            "SELECT song_id FROM audio_files WHERE id = ?1",
-            params![version_id],
-            |row| row.get(0)
-        ).map_err(|e| e.to_string())?;
-        
+        let song_id: String = conn
+            .query_row(
+                "SELECT song_id FROM audio_files WHERE id = ?1",
+                params![version_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+
         conn.execute(
             "UPDATE audio_files SET is_primary = 0 WHERE song_id = ?1",
-            params![song_id]
-        ).map_err(|e| e.to_string())?;
-        
+            params![song_id],
+        )
+        .map_err(|e| e.to_string())?;
+
         conn.execute(
             "UPDATE audio_files SET is_primary = 1 WHERE id = ?1",
-            params![version_id]
-        ).map_err(|e| e.to_string())?;
+            params![version_id],
+        )
+        .map_err(|e| e.to_string())?;
     }
-    
+
     Ok(())
 }
 
@@ -601,16 +769,21 @@ pub fn update_song_metadata(song_id: String, title: String, artist: String) -> R
     };
     conn.execute(
         "UPDATE songs SET title = ?1, artist = ?2 WHERE id = ?3",
-        params![title.trim(), artist_val, song_id]
-    ).map_err(|e| e.to_string())?;
+        params![title.trim(), artist_val, song_id],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 pub fn delete_song(song_id: String) -> Result<(), String> {
     let conn = establish_connection().map_err(|e| e.to_string())?;
-    
-    let mut stmt = conn.prepare("SELECT filepath FROM audio_files WHERE song_id = ?1").map_err(|e| e.to_string())?;
-    let rows = stmt.query_map(params![song_id], |row| row.get::<_, String>(0)).map_err(|e| e.to_string())?;
+
+    let mut stmt = conn
+        .prepare("SELECT filepath FROM audio_files WHERE song_id = ?1")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![song_id], |row| row.get::<_, String>(0))
+        .map_err(|e| e.to_string())?;
     let files_dir = get_library_dir();
     for filepath_res in rows {
         if let Ok(filepath) = filepath_res {
@@ -620,57 +793,70 @@ pub fn delete_song(song_id: String) -> Result<(), String> {
             }
         }
     }
-    
-    conn.execute("DELETE FROM songs WHERE id = ?1", params![song_id]).map_err(|e| e.to_string())?;
+
+    conn.execute("DELETE FROM songs WHERE id = ?1", params![song_id])
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 pub fn delete_audio_version(version_id: String) -> Result<(), String> {
     let conn = establish_connection().map_err(|e| e.to_string())?;
-    
-    let (song_id, is_primary): (String, i32) = conn.query_row(
-        "SELECT song_id, is_primary FROM audio_files WHERE id = ?1",
-        params![version_id],
-        |row| Ok((row.get(0)?, row.get(1)?))
-    ).map_err(|e| e.to_string())?;
 
-    let filepath: String = conn.query_row(
-        "SELECT filepath FROM audio_files WHERE id = ?1",
-        params![version_id],
-        |row| row.get(0)
-    ).map_err(|e| e.to_string())?;
-    
+    let (song_id, is_primary): (String, i32) = conn
+        .query_row(
+            "SELECT song_id, is_primary FROM audio_files WHERE id = ?1",
+            params![version_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|e| e.to_string())?;
+
+    let filepath: String = conn
+        .query_row(
+            "SELECT filepath FROM audio_files WHERE id = ?1",
+            params![version_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+
     let absolute_path = get_library_dir().join(filepath);
     if absolute_path.exists() {
         let _ = fs::remove_file(absolute_path);
     }
-    
-    conn.execute("DELETE FROM audio_files WHERE id = ?1", params![version_id]).map_err(|e| e.to_string())?;
+
+    conn.execute("DELETE FROM audio_files WHERE id = ?1", params![version_id])
+        .map_err(|e| e.to_string())?;
 
     if is_primary != 0 {
-        let next_primary_id: Option<String> = conn.query_row(
-            "SELECT id FROM audio_files WHERE song_id = ?1 AND is_enabled = 1 LIMIT 1",
-            params![song_id],
-            |row| row.get(0)
-        ).optional().map_err(|e| e.to_string())?;
-        
+        let next_primary_id: Option<String> = conn
+            .query_row(
+                "SELECT id FROM audio_files WHERE song_id = ?1 AND is_enabled = 1 LIMIT 1",
+                params![song_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+
         let target_id = match next_primary_id {
             Some(id) => Some(id),
-            None => conn.query_row(
-                "SELECT id FROM audio_files WHERE song_id = ?1 LIMIT 1",
-                params![song_id],
-                |row| row.get(0)
-            ).optional().map_err(|e| e.to_string())?
+            None => conn
+                .query_row(
+                    "SELECT id FROM audio_files WHERE song_id = ?1 LIMIT 1",
+                    params![song_id],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(|e| e.to_string())?,
         };
-        
+
         if let Some(tid) = target_id {
             conn.execute(
                 "UPDATE audio_files SET is_primary = 1 WHERE id = ?1",
-                params![tid]
-            ).map_err(|e| e.to_string())?;
+                params![tid],
+            )
+            .map_err(|e| e.to_string())?;
         }
     }
-    
+
     Ok(())
 }
 
@@ -680,13 +866,18 @@ pub fn verify_audio_file(filepath: String) -> bool {
     file_path.exists() && file_path.is_file()
 }
 
-pub fn add_tag(name: String, color: Option<String>, category: Option<String>) -> Result<Tag, String> {
+pub fn add_tag(
+    name: String,
+    color: Option<String>,
+    category: Option<String>,
+) -> Result<Tag, String> {
     let conn = establish_connection().map_err(|e| e.to_string())?;
     conn.execute(
         "INSERT INTO tags (name, color, category) VALUES (?1, ?2, ?3)",
-        params![name, color, category]
-    ).map_err(|e| e.to_string())?;
-    
+        params![name, color, category],
+    )
+    .map_err(|e| e.to_string())?;
+
     let last_id = conn.last_insert_rowid();
     Ok(Tag {
         id: last_id,
@@ -696,9 +887,25 @@ pub fn add_tag(name: String, color: Option<String>, category: Option<String>) ->
     })
 }
 
+pub fn update_tag(
+    tag_id: i64,
+    name: String,
+    color: Option<String>,
+    category: Option<String>,
+) -> Result<(), String> {
+    let conn = establish_connection().map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE tags SET name = ?1, color = ?2, category = ?3 WHERE id = ?4",
+        params![name.trim(), color, category, tag_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 pub fn delete_tag(tag_id: i64) -> Result<(), String> {
     let conn = establish_connection().map_err(|e| e.to_string())?;
-    conn.execute("DELETE FROM tags WHERE id = ?1", params![tag_id]).map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM tags WHERE id = ?1", params![tag_id])
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -707,13 +914,15 @@ pub fn tag_song(song_id: String, tag_id: i64, bind: bool) -> Result<(), String> 
     if bind {
         conn.execute(
             "INSERT OR IGNORE INTO song_tags (song_id, tag_id) VALUES (?1, ?2)",
-            params![song_id, tag_id]
-        ).map_err(|e| e.to_string())?;
+            params![song_id, tag_id],
+        )
+        .map_err(|e| e.to_string())?;
     } else {
         conn.execute(
             "DELETE FROM song_tags WHERE song_id = ?1 AND tag_id = ?2",
-            params![song_id, tag_id]
-        ).map_err(|e| e.to_string())?;
+            params![song_id, tag_id],
+        )
+        .map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -723,57 +932,70 @@ pub fn create_playlist(name: String) -> Result<Playlist, String> {
     let id = Uuid::new_v4().to_string();
     conn.execute(
         "INSERT INTO playlists (id, name, description) VALUES (?1, ?2, '')",
-        params![id, name]
-    ).map_err(|e| e.to_string())?;
-    
-    let mut stmt = conn.prepare(
-        "SELECT id, name, description, created_at FROM playlists WHERE id = ?1"
-    ).map_err(|e| e.to_string())?;
-    let playlist = stmt.query_row(params![id], |row| {
-        Ok(Playlist {
-            id: row.get(0)?,
-            name: row.get(1)?,
-            description: row.get(2)?,
-            created_at: row.get(3)?,
+        params![id, name],
+    )
+    .map_err(|e| e.to_string())?;
+
+    let mut stmt = conn
+        .prepare("SELECT id, name, description, created_at FROM playlists WHERE id = ?1")
+        .map_err(|e| e.to_string())?;
+    let playlist = stmt
+        .query_row(params![id], |row| {
+            Ok(Playlist {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                description: row.get(2)?,
+                created_at: row.get(3)?,
+            })
         })
-    }).map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())?;
     Ok(playlist)
 }
 
 pub fn delete_playlist(id: String) -> Result<(), String> {
     let conn = establish_connection().map_err(|e| e.to_string())?;
-    conn.execute("DELETE FROM playlists WHERE id = ?1", params![id]).map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM playlists WHERE id = ?1", params![id])
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 pub fn rename_playlist(id: String, name: String) -> Result<(), String> {
     let conn = establish_connection().map_err(|e| e.to_string())?;
-    conn.execute("UPDATE playlists SET name = ?1 WHERE id = ?2", params![name, id]).map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE playlists SET name = ?1 WHERE id = ?2",
+        params![name, id],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 pub fn add_songs_to_playlist(playlist_id: String, song_ids: Vec<String>) -> Result<(), String> {
     let mut conn = establish_connection().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
-    
-    let max_sort_order: i32 = tx.query_row(
-        "SELECT COALESCE(MAX(sort_order), -1) FROM playlist_songs WHERE playlist_id = ?1",
-        params![playlist_id],
-        |row| row.get(0)
-    ).map_err(|e| e.to_string())?;
-    
+
+    let max_sort_order: i32 = tx
+        .query_row(
+            "SELECT COALESCE(MAX(sort_order), -1) FROM playlist_songs WHERE playlist_id = ?1",
+            params![playlist_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+
     let mut current_order = max_sort_order + 1;
     for song_id in song_ids {
-        let exists: i64 = tx.query_row(
-            "SELECT COUNT(*) FROM playlist_songs WHERE playlist_id = ?1 AND song_id = ?2",
-            params![playlist_id, song_id],
-            |row| row.get(0)
-        ).map_err(|e| e.to_string())?;
+        let exists: i64 = tx
+            .query_row(
+                "SELECT COUNT(*) FROM playlist_songs WHERE playlist_id = ?1 AND song_id = ?2",
+                params![playlist_id, song_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
         if exists == 0 {
             tx.execute(
                 "INSERT INTO playlist_songs (playlist_id, song_id, sort_order) VALUES (?1, ?2, ?3)",
-                params![playlist_id, song_id, current_order]
-            ).map_err(|e| e.to_string())?;
+                params![playlist_id, song_id, current_order],
+            )
+            .map_err(|e| e.to_string())?;
             current_order += 1;
         }
     }
@@ -781,14 +1003,18 @@ pub fn add_songs_to_playlist(playlist_id: String, song_ids: Vec<String>) -> Resu
     Ok(())
 }
 
-pub fn remove_songs_from_playlist(playlist_id: String, song_ids: Vec<String>) -> Result<(), String> {
+pub fn remove_songs_from_playlist(
+    playlist_id: String,
+    song_ids: Vec<String>,
+) -> Result<(), String> {
     let mut conn = establish_connection().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     for song_id in song_ids {
         tx.execute(
             "DELETE FROM playlist_songs WHERE playlist_id = ?1 AND song_id = ?2",
-            params![playlist_id, song_id]
-        ).map_err(|e| e.to_string())?;
+            params![playlist_id, song_id],
+        )
+        .map_err(|e| e.to_string())?;
     }
     tx.commit().map_err(|e| e.to_string())?;
     Ok(())
@@ -796,10 +1022,14 @@ pub fn remove_songs_from_playlist(playlist_id: String, song_ids: Vec<String>) ->
 
 pub fn get_playlist_songs(playlist_id: String) -> Result<Vec<String>, String> {
     let conn = establish_connection().map_err(|e| e.to_string())?;
-    let mut stmt = conn.prepare(
-        "SELECT song_id FROM playlist_songs WHERE playlist_id = ?1 ORDER BY sort_order ASC"
-    ).map_err(|e| e.to_string())?;
-    let rows = stmt.query_map(params![playlist_id], |row| row.get::<_, String>(0)).map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT song_id FROM playlist_songs WHERE playlist_id = ?1 ORDER BY sort_order ASC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![playlist_id], |row| row.get::<_, String>(0))
+        .map_err(|e| e.to_string())?;
     let mut song_ids = Vec::new();
     for r in rows {
         song_ids.push(r.map_err(|e| e.to_string())?);
@@ -834,7 +1064,10 @@ pub fn scan_directory_for_preview(dir_path: String) -> Result<Vec<String>, Strin
     }
     let mut files = Vec::new();
     scan_directory(path, &mut files);
-    let list = files.into_iter().map(|f| f.to_string_lossy().to_string()).collect();
+    let list = files
+        .into_iter()
+        .map(|f| f.to_string_lossy().to_string())
+        .collect();
     Ok(list)
 }
 
@@ -842,17 +1075,19 @@ pub fn preview_audio_metadata(filepaths: Vec<String>) -> Result<Vec<PreviewInfo>
     let mut list = Vec::new();
     for fp in filepaths {
         let path = Path::new(&fp);
-        let filename = path.file_name()
+        let filename = path
+            .file_name()
             .unwrap_or_default()
             .to_string_lossy()
             .to_string();
-        
-        let mut title = path.file_stem()
+
+        let mut title = path
+            .file_stem()
             .unwrap_or_default()
             .to_string_lossy()
             .to_string();
         let mut artist = "未知歌手".to_string();
-        
+
         if let Ok(tagged_file) = Probe::open(path).and_then(|p| p.read()) {
             if let Some(primary_tag) = tagged_file.primary_tag() {
                 if let Some(t) = primary_tag.title() {
@@ -863,7 +1098,7 @@ pub fn preview_audio_metadata(filepaths: Vec<String>) -> Result<Vec<PreviewInfo>
                 }
             }
         }
-        
+
         list.push(PreviewInfo {
             filepath: fp,
             filename,
@@ -876,18 +1111,25 @@ pub fn preview_audio_metadata(filepaths: Vec<String>) -> Result<Vec<PreviewInfo>
 
 pub fn reset_library() -> Result<(), String> {
     let conn = establish_connection().map_err(|e| e.to_string())?;
-    
+
     let files_dir = get_files_dir();
     if files_dir.exists() {
         let _ = fs::remove_dir_all(&files_dir);
         let _ = fs::create_dir_all(&files_dir);
     }
-    
-    let tables = ["songs", "audio_files", "tags", "song_tags", "playlists", "playlist_songs"];
+
+    let tables = [
+        "songs",
+        "audio_files",
+        "tags",
+        "song_tags",
+        "playlists",
+        "playlist_songs",
+    ];
     for table in tables {
         let _ = conn.execute(&format!("DELETE FROM {}", table), []);
     }
-    
+
     let default_tags = vec![
         ("中文", "#ef4444", "语言"),
         ("英文", "#3b82f6", "语言"),
@@ -908,33 +1150,35 @@ pub fn reset_library() -> Result<(), String> {
             params![name, color, category],
         );
     }
-    
+
     Ok(())
 }
 
 pub fn export_audio_file(version_id: String, dest_path: String) -> Result<String, String> {
     let conn = establish_connection().map_err(|e| e.to_string())?;
-    
-    let (filepath, original_name): (String, String) = conn.query_row(
-        "SELECT filepath, original_name FROM audio_files WHERE id = ?1",
-        params![version_id],
-        |row| Ok((row.get(0)?, row.get(1)?))
-    ).map_err(|e| e.to_string())?;
-    
+
+    let (filepath, original_name): (String, String) = conn
+        .query_row(
+            "SELECT filepath, original_name FROM audio_files WHERE id = ?1",
+            params![version_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|e| e.to_string())?;
+
     let src_absolute = get_library_dir().join(&filepath);
     if !src_absolute.exists() {
         return Err("Source file not found in library".to_string());
     }
-    
+
     let dest_path_obj = Path::new(&dest_path);
     let dest_absolute = if dest_path_obj.is_dir() {
         dest_path_obj.join(&original_name)
     } else {
         dest_path_obj.to_path_buf()
     };
-    
+
     fs::copy(src_absolute, &dest_absolute).map_err(|e| e.to_string())?;
-    
+
     Ok(dest_absolute.to_string_lossy().to_string())
 }
 
@@ -943,11 +1187,18 @@ pub fn update_version_duration(version_id: String, duration: f64) -> Result<(), 
     conn.execute(
         "UPDATE audio_files SET duration = ?1 WHERE id = ?2",
         params![duration, version_id],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
-pub fn start_rust_playback(path: String, volume: f32, pitch: f64, algo: String, normalization_gain: f32) -> Result<(), String> {
+pub fn start_rust_playback(
+    path: String,
+    volume: f32,
+    pitch: f64,
+    algo: String,
+    normalization_gain: f32,
+) -> Result<(), String> {
     crate::audio::player::start_playback(path, volume, pitch, algo, normalization_gain)
 }
 
@@ -982,13 +1233,17 @@ pub fn get_rust_playback_position() -> f64 {
 pub fn refresh_song_database() -> Result<(), String> {
     let conn = establish_connection().map_err(|e| e.to_string())?;
     let files_dir = get_files_dir();
-    
-    let mut stmt = conn.prepare("SELECT id, filepath FROM audio_files").map_err(|e| e.to_string())?;
+
+    let mut stmt = conn
+        .prepare("SELECT id, filepath FROM audio_files")
+        .map_err(|e| e.to_string())?;
     let mut entries = Vec::new();
-    let rows = stmt.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-    }).map_err(|e| e.to_string())?;
-    
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|e| e.to_string())?;
+
     for r in rows {
         if let Ok((id, filepath)) = r {
             let filename = filepath.split('/').last().unwrap_or(&filepath);
@@ -996,24 +1251,28 @@ pub fn refresh_song_database() -> Result<(), String> {
             entries.push((id, abs_path));
         }
     }
-    
+
     for (id, abs_path) in entries {
         if abs_path.exists() {
             // Calculate full loudness
             let loudness = crate::audio::dsp::calculate_loudness_full(&abs_path.to_string_lossy())
                 .unwrap_or(-15.0);
-                
+
             // Parse properties using Lofty
             if let Ok(tagged_file) = Probe::open(&abs_path)
                 .map_err(|e| e.to_string())
-                .and_then(|p| p.read().map_err(|e| e.to_string())) 
+                .and_then(|p| p.read().map_err(|e| e.to_string()))
             {
                 let properties = tagged_file.properties();
-                let duration = properties.duration().as_secs_f64();
+                let duration = reliable_duration(
+                    &abs_path,
+                    properties.duration().as_secs_f64(),
+                    properties.audio_bitrate().map(|b| b as u32),
+                );
                 let bitrate = properties.audio_bitrate().map(|b| (b * 1000) as i32);
                 let sample_rate = properties.sample_rate().map(|s| s as i32);
                 let bit_depth = properties.bit_depth().map(|d| d as i32);
-                
+
                 let _ = conn.execute(
                     "UPDATE audio_files SET bitrate = ?1, sample_rate = ?2, duration = ?3, bit_depth = ?4, loudness = ?5 WHERE id = ?6",
                     params![bitrate, sample_rate, duration, bit_depth, loudness, id]
@@ -1021,11 +1280,11 @@ pub fn refresh_song_database() -> Result<(), String> {
             } else {
                 let _ = conn.execute(
                     "UPDATE audio_files SET loudness = ?1 WHERE id = ?2",
-                    params![loudness, id]
+                    params![loudness, id],
                 );
             }
         }
     }
-    
+
     Ok(())
 }

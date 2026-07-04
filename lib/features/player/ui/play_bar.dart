@@ -14,13 +14,17 @@ class PlayBar extends StatelessWidget {
     return '$minutes:$seconds';
   }
 
-  void _handleSeek(BuildContext context, double globalDx, AudioPlayerProvider provider) {
+  void _handleSeek(
+    BuildContext context,
+    double globalDx,
+    AudioPlayerProvider provider,
+  ) {
     final RenderBox? box = context.findRenderObject() as RenderBox?;
     if (box == null) return;
-    
+
     final width = box.size.width;
     if (width <= 0) return;
-    
+
     final localX = box.globalToLocal(Offset(globalDx, 0)).dx;
     final pct = (localX / width).clamp(0.0, 1.0);
     final targetMs = (provider.totalDuration.inMilliseconds * pct).toInt();
@@ -32,9 +36,9 @@ class PlayBar extends StatelessWidget {
     final audioProvider = context.watch<AudioPlayerProvider>();
     final themeProvider = context.watch<UIThemeProvider>();
     final cfg = themeProvider.currentTheme;
-    
+
     final playingSong = audioProvider.playingSong;
-    
+
     final curMs = audioProvider.currentPosition.inMilliseconds.toDouble();
     final totMs = audioProvider.totalDuration.inMilliseconds.toDouble();
     final progress = totMs > 0 ? curMs / totMs : 0.0;
@@ -57,8 +61,16 @@ class PlayBar extends StatelessWidget {
             child: MouseRegion(
               cursor: SystemMouseCursors.click,
               child: GestureDetector(
-                onHorizontalDragUpdate: (details) => _handleSeek(context, details.globalPosition.dx, audioProvider),
-                onTapDown: (details) => _handleSeek(context, details.globalPosition.dx, audioProvider),
+                onHorizontalDragUpdate: (details) => _handleSeek(
+                  context,
+                  details.globalPosition.dx,
+                  audioProvider,
+                ),
+                onTapDown: (details) => _handleSeek(
+                  context,
+                  details.globalPosition.dx,
+                  audioProvider,
+                ),
                 child: Stack(
                   children: [
                     Container(
@@ -68,17 +80,14 @@ class PlayBar extends StatelessWidget {
                     ),
                     FractionallySizedBox(
                       widthFactor: progress.clamp(0.0, 1.0),
-                      child: Container(
-                        color: cfg.accent,
-                        height: 4,
-                      ),
+                      child: Container(color: cfg.accent, height: 4),
                     ),
                   ],
                 ),
               ),
             ),
           ),
-          
+
           // Main PlayBar Content
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -92,7 +101,9 @@ class PlayBar extends StatelessWidget {
                       InkWell(
                         onTap: () {
                           if (playingSong != null) {
-                            audioProvider.setDetailOpen(!audioProvider.isDetailOpen);
+                            audioProvider.setDetailOpen(
+                              !audioProvider.isDetailOpen,
+                            );
                           }
                         },
                         borderRadius: BorderRadius.circular(8),
@@ -104,7 +115,12 @@ class PlayBar extends StatelessWidget {
                             color: Colors.white.withOpacity(0.06),
                             border: Border.all(color: cfg.border),
                           ),
-                          child: Icon(Icons.music_note, color: playingSong != null ? cfg.accent : cfg.textSub),
+                          child: Icon(
+                            Icons.music_note,
+                            color: playingSong != null
+                                ? cfg.accent
+                                : cfg.textSub,
+                          ),
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -116,7 +132,7 @@ class PlayBar extends StatelessWidget {
                             Text(
                               playingSong?.title ?? '暂无播放',
                               style: TextStyle(
-                                fontWeight: FontWeight.bold, 
+                                fontWeight: FontWeight.bold,
                                 fontSize: 13,
                                 color: cfg.textMain,
                                 fontFamily: 'Outfit',
@@ -128,7 +144,7 @@ class PlayBar extends StatelessWidget {
                             Text(
                               playingSong?.artist ?? '...',
                               style: TextStyle(
-                                color: cfg.textSub, 
+                                color: cfg.textSub,
                                 fontSize: 11,
                                 fontFamily: 'Outfit',
                               ),
@@ -141,7 +157,7 @@ class PlayBar extends StatelessWidget {
                     ],
                   ),
                 ),
-                
+
                 // Playback controls (Shuffle, Repeat, Prev, Play/Pause, Next)
                 Expanded(
                   child: Row(
@@ -153,8 +169,8 @@ class PlayBar extends StatelessWidget {
                           audioProvider.playMode == PlayMode.shuffle
                               ? Icons.shuffle
                               : audioProvider.playMode == PlayMode.single
-                                  ? Icons.repeat_one
-                                  : Icons.repeat,
+                              ? Icons.repeat_one
+                              : Icons.repeat,
                           size: 18,
                           color: cfg.textSub,
                         ),
@@ -163,7 +179,11 @@ class PlayBar extends StatelessWidget {
                       const SizedBox(width: 16),
                       // Skip Previous
                       IconButton(
-                        icon: Icon(Icons.skip_previous, size: 24, color: cfg.textMain),
+                        icon: Icon(
+                          Icons.skip_previous,
+                          size: 24,
+                          color: cfg.textMain,
+                        ),
                         onPressed: () => audioProvider.playPrevious(),
                       ),
                       const SizedBox(width: 12),
@@ -184,7 +204,9 @@ class PlayBar extends StatelessWidget {
                         ),
                         child: IconButton(
                           icon: Icon(
-                            audioProvider.isPlaying ? Icons.pause : Icons.play_arrow,
+                            audioProvider.isPlaying
+                                ? Icons.pause
+                                : Icons.play_arrow,
                             color: Colors.white,
                             size: 20,
                           ),
@@ -195,13 +217,17 @@ class PlayBar extends StatelessWidget {
                       const SizedBox(width: 12),
                       // Skip Next
                       IconButton(
-                        icon: Icon(Icons.skip_next, size: 24, color: cfg.textMain),
+                        icon: Icon(
+                          Icons.skip_next,
+                          size: 24,
+                          color: cfg.textMain,
+                        ),
                         onPressed: () => audioProvider.playNext(),
                       ),
                     ],
                   ),
                 ),
-                
+
                 // Volume controls & position duration text
                 SizedBox(
                   width: MediaQuery.of(context).size.width * 0.25,
@@ -210,7 +236,11 @@ class PlayBar extends StatelessWidget {
                     children: [
                       Text(
                         '${_formatDuration(audioProvider.currentPosition)} / ${_formatDuration(audioProvider.totalDuration)}',
-                        style: TextStyle(fontSize: 11, color: cfg.textSub, fontFamily: 'Outfit'),
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: cfg.textSub,
+                          fontFamily: 'Outfit',
+                        ),
                       ),
                       const SizedBox(width: 16),
                       Icon(Icons.volume_up, size: 16, color: cfg.textSub),
@@ -220,8 +250,12 @@ class PlayBar extends StatelessWidget {
                         child: SliderTheme(
                           data: SliderTheme.of(context).copyWith(
                             trackHeight: 3,
-                            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
-                            overlayShape: const RoundSliderOverlayShape(overlayRadius: 10),
+                            thumbShape: const RoundSliderThumbShape(
+                              enabledThumbRadius: 5,
+                            ),
+                            overlayShape: const RoundSliderOverlayShape(
+                              overlayRadius: 10,
+                            ),
                             activeTrackColor: cfg.accent,
                             inactiveTrackColor: cfg.sliderTrack,
                             thumbColor: cfg.accent,

@@ -1,8 +1,8 @@
-use std::net::{TcpListener, TcpStream};
-use std::io::{Read, Write, Seek, SeekFrom, BufRead, BufReader};
 use std::fs::File;
-use std::thread;
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
+use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicU16, Ordering};
+use std::thread;
 
 /// The port the audio server is running on (0 means not started)
 static AUDIO_SERVER_PORT: AtomicU16 = AtomicU16::new(0);
@@ -19,9 +19,9 @@ pub fn start() {
     thread::spawn(|| {
         // Try a fixed port first, then fall back to alternatives
         let ports_to_try = [16860u16, 16861, 16862, 16863, 16864, 16865];
-        let listener = ports_to_try.iter().find_map(|&port| {
-            TcpListener::bind(format!("127.0.0.1:{}", port)).ok()
-        });
+        let listener = ports_to_try
+            .iter()
+            .find_map(|&port| TcpListener::bind(format!("127.0.0.1:{}", port)).ok());
 
         let listener = match listener {
             Some(l) => l,
@@ -261,10 +261,9 @@ fn url_decode(s: &str) -> String {
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let Ok(byte) = u8::from_str_radix(
-                std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or(""),
-                16,
-            ) {
+            if let Ok(byte) =
+                u8::from_str_radix(std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or(""), 16)
+            {
                 result.push(byte);
                 i += 3;
                 continue;
@@ -295,7 +294,11 @@ fn get_mime_type(path: &str) -> &'static str {
     }
 }
 
-fn send_error(stream: &mut TcpStream, code: u16, message: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn send_error(
+    stream: &mut TcpStream,
+    code: u16,
+    message: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     let body = format!("{} {}", code, message);
     let response = format!(
         "HTTP/1.1 {} {}\r\n\
@@ -305,7 +308,10 @@ fn send_error(stream: &mut TcpStream, code: u16, message: &str) -> Result<(), Bo
          Connection: close\r\n\
          \r\n\
          {}",
-        code, message, body.len(), body
+        code,
+        message,
+        body.len(),
+        body
     );
     stream.write_all(response.as_bytes())?;
     Ok(())

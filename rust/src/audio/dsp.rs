@@ -1,12 +1,15 @@
 use std::fs::File;
+use symphonia::core::audio::{AudioBufferRef, Signal};
 use symphonia::core::codecs::{Decoder, DecoderOptions};
 use symphonia::core::errors::Error;
 use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo};
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
-use symphonia::core::audio::{AudioBufferRef, Signal};
 use symphonia::core::units::Time;
+
+const RESAMPLE_EPSILON: f64 = 0.000_001;
+const SINC_HALF_TAPS: isize = 16;
 
 /// Calculate the loudness metric of an audio file in dBFS (decibels relative to full scale).
 /// This is computed by analyzing the average RMS level of the first 300 packets (approx. 5-10 seconds) for speed.
@@ -15,7 +18,10 @@ pub fn calculate_loudness(filepath: &str) -> Result<f64, String> {
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
     let mut hint = Hint::new();
 
-    if let Some(ext) = std::path::Path::new(filepath).extension().and_then(|e| e.to_str()) {
+    if let Some(ext) = std::path::Path::new(filepath)
+        .extension()
+        .and_then(|e| e.to_str())
+    {
         hint.with_extension(ext);
     }
 
@@ -28,7 +34,9 @@ pub fn calculate_loudness(filepath: &str) -> Result<f64, String> {
 
     let mut format = probed.format;
 
-    let track = format.tracks().iter()
+    let track = format
+        .tracks()
+        .iter()
         .find(|t| t.codec_params.codec != symphonia::core::codecs::CODEC_TYPE_NULL)
         .ok_or_else(|| "No audio track found".to_string())?;
 
@@ -123,7 +131,10 @@ pub fn calculate_loudness_full(filepath: &str) -> Result<f64, String> {
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
     let mut hint = Hint::new();
 
-    if let Some(ext) = std::path::Path::new(filepath).extension().and_then(|e| e.to_str()) {
+    if let Some(ext) = std::path::Path::new(filepath)
+        .extension()
+        .and_then(|e| e.to_str())
+    {
         hint.with_extension(ext);
     }
 
@@ -133,7 +144,9 @@ pub fn calculate_loudness_full(filepath: &str) -> Result<f64, String> {
 
     let mut format = probed.format;
 
-    let track = format.tracks().iter()
+    let track = format
+        .tracks()
+        .iter()
         .find(|t| t.codec_params.codec != symphonia::core::codecs::CODEC_TYPE_NULL)
         .ok_or_else(|| "No audio track found".to_string())?;
 
@@ -228,6 +241,7 @@ pub struct StreamDecoder {
     target_channels: usize,
     /// output frames produced per input frame (target_sr / source_sr)
     resample_ratio: f64,
+    passthrough_resample: bool,
     /// decoded f32 samples, already channel-converted to target_channels, at the source sample rate
     src_buffer: Vec<f32>,
     /// fractional read position (in frames) into src_buffer
@@ -240,16 +254,26 @@ impl StreamDecoder {
         let file = File::open(path).map_err(|e| e.to_string())?;
         let mss = MediaSourceStream::new(Box::new(file), Default::default());
         let mut hint = Hint::new();
-        if let Some(ext) = std::path::Path::new(path).extension().and_then(|e| e.to_str()) {
+        if let Some(ext) = std::path::Path::new(path)
+            .extension()
+            .and_then(|e| e.to_str())
+        {
             hint.with_extension(ext);
         }
 
         let probed = symphonia::default::get_probe()
-            .format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default())
+            .format(
+                &hint,
+                mss,
+                &FormatOptions::default(),
+                &MetadataOptions::default(),
+            )
             .map_err(|e| e.to_string())?;
-        let mut format = probed.format;
+        let format = probed.format;
 
-        let track = format.tracks().iter()
+        let track = format
+            .tracks()
+            .iter()
             .find(|t| t.codec_params.codec != symphonia::core::codecs::CODEC_TYPE_NULL)
             .ok_or_else(|| "No audio track found".to_string())?;
         let track_id = track.id;
@@ -259,6 +283,7 @@ impl StreamDecoder {
             .map_err(|e| e.to_string())?;
 
         let resample_ratio = target_sample_rate as f64 / source_sample_rate as f64;
+        let passthrough_resample = (resample_ratio - 1.0).abs() < RESAMPLE_EPSILON;
 
         Ok(Self {
             format,
@@ -267,6 +292,7 @@ impl StreamDecoder {
             source_sample_rate,
             target_channels: target_channels as usize,
             resample_ratio,
+            passthrough_resample,
             src_buffer: Vec::new(),
             read_pos: 0.0,
             eof: false,
@@ -328,9 +354,24 @@ impl StreamDecoder {
     pub fn read_block(&mut self, out_frames: usize) -> Result<Vec<f32>, String> {
         let tc = self.target_channels;
         let mut out: Vec<f32> = Vec::with_capacity(out_frames * tc);
+
+        if self.passthrough_resample {
+            while self.src_buffer.len() / tc < out_frames {
+                if !self.decode_next_packet()? {
+                    break;
+                }
+            }
+            let take_samples = (out_frames * tc).min(self.src_buffer.len());
+            out.extend(self.src_buffer.drain(0..take_samples));
+            return Ok(out);
+        }
+
         while out.len() / tc < out_frames {
-            // Ensure we have at least read_pos.floor()+2 source frames available.
-            let need = (self.read_pos.floor() as usize) + 2;
+            // Keep enough history for the windowed-sinc kernel. Linear interpolation is cheaper,
+            // but the sinc kernel preserves high-frequency content better when 44.1kHz sources
+            // are played through 48kHz Bluetooth output paths such as LDAC.
+            let center = self.read_pos.floor() as isize;
+            let need = (center + SINC_HALF_TAPS + 2).max(0) as usize;
             while self.src_buffer.len() / tc < need {
                 if !self.decode_next_packet()? {
                     break;
@@ -340,22 +381,56 @@ impl StreamDecoder {
             if avail == 0 {
                 break;
             }
-            if self.eof && (self.read_pos.floor() as usize) >= avail {
+            if self.eof && center as usize >= avail {
                 break;
             }
-            let i0 = (self.read_pos.floor() as usize).min(avail - 1);
-            let i1 = (i0 + 1).min(avail - 1);
-            let frac = (self.read_pos - self.read_pos.floor()) as f32;
-            for c in 0..tc {
-                let s0 = self.src_buffer[i0 * tc + c];
-                let s1 = self.src_buffer[i1 * tc + c];
-                out.push(s0 * (1.0 - frac) + s1 * frac);
+
+            let frac = self.read_pos - self.read_pos.floor();
+            let window_span = SINC_HALF_TAPS as f64;
+            let mut weight_sum = 0.0f64;
+            let mut frame = vec![0.0f64; tc];
+
+            for tap in -SINC_HALF_TAPS..=SINC_HALF_TAPS {
+                let idx = center + tap;
+                if idx < 0 || idx as usize >= avail {
+                    continue;
+                }
+                let x = tap as f64 - frac;
+                let window_pos = x.abs() / window_span;
+                if window_pos > 1.0 {
+                    continue;
+                }
+                let weight = sinc(x) * blackman_window(window_pos);
+                weight_sum += weight;
+                let base = idx as usize * tc;
+                for c in 0..tc {
+                    frame[c] += self.src_buffer[base + c] as f64 * weight;
+                }
             }
+
+            if weight_sum.abs() > 1e-12 {
+                for c in 0..tc {
+                    out.push((frame[c] / weight_sum) as f32);
+                }
+            } else {
+                let i0 = center.max(0) as usize;
+                let base = i0.min(avail - 1) * tc;
+                for c in 0..tc {
+                    out.push(self.src_buffer[base + c]);
+                }
+            }
+
             self.read_pos += 1.0 / self.resample_ratio;
 
             // Drop fully consumed source frames to keep src_buffer bounded.
             let whole = self.read_pos.floor() as usize;
-            if whole > 0 {
+            let keep_history = SINC_HALF_TAPS as usize;
+            if whole > keep_history {
+                let drop_frames = whole - keep_history;
+                let drop_n = (drop_frames * tc).min(self.src_buffer.len());
+                self.src_buffer.drain(0..drop_n);
+                self.read_pos -= drop_frames as f64;
+            } else if self.eof && whole > 0 {
                 let drop_n = (whole * tc).min(self.src_buffer.len());
                 self.src_buffer.drain(0..drop_n);
                 self.read_pos -= whole as f64;
@@ -390,6 +465,20 @@ impl StreamDecoder {
     pub fn source_sample_rate(&self) -> u32 {
         self.source_sample_rate
     }
+}
+
+fn sinc(x: f64) -> f64 {
+    if x.abs() < 1e-8 {
+        1.0
+    } else {
+        let pix = std::f64::consts::PI * x;
+        pix.sin() / pix
+    }
+}
+
+fn blackman_window(normalized_distance: f64) -> f64 {
+    let x = normalized_distance.clamp(0.0, 1.0);
+    0.42 + 0.5 * (std::f64::consts::PI * x).cos() + 0.08 * (2.0 * std::f64::consts::PI * x).cos()
 }
 
 /// Convert a decoded symphonia packet into interleaved f32 samples at the source channel count.
@@ -450,50 +539,74 @@ fn packet_to_interleaved_f32(decoded: &AudioBufferRef) -> (Vec<f32>, usize) {
 
 /// Simple Resampling pitch shifting: changes pitch and speed together (high quality, no speed preservation).
 pub fn pitch_shift_resample(input: &[f32], pitch_factor: f64) -> Vec<f32> {
+    if input.len() < 4 || pitch_factor <= 0.0 || !pitch_factor.is_finite() {
+        return input.to_vec();
+    }
     if (pitch_factor - 1.0).abs() < 0.001 {
         return input.to_vec();
     }
+
     let num_samples = input.len() / 2;
-    let target_num_samples = (num_samples as f64 / pitch_factor) as usize;
+    let target_num_samples = ((num_samples as f64) / pitch_factor).round().max(1.0) as usize;
     let mut output = Vec::with_capacity(target_num_samples * 2);
 
     for i in 0..target_num_samples {
         let src_idx = i as f64 * pitch_factor;
-        let idx_floor = src_idx.floor() as usize;
-        let idx_ceil = (idx_floor + 1).min(num_samples - 1);
-        let t = src_idx - idx_floor as f64;
-
-        let left = (1.0 - t) * input[idx_floor * 2] as f64 + t * input[idx_ceil * 2] as f64;
-        let right = (1.0 - t) * input[idx_floor * 2 + 1] as f64 + t * input[idx_ceil * 2 + 1] as f64;
-
-        output.push(left as f32);
-        output.push(right as f32);
+        output.push(cubic_stereo(input, num_samples, src_idx, 0));
+        output.push(cubic_stereo(input, num_samples, src_idx, 1));
     }
     output
 }
 
+fn cubic_stereo(input: &[f32], frames: usize, pos: f64, channel: usize) -> f32 {
+    let i1 = pos.floor() as isize;
+    let t = (pos - pos.floor()) as f32;
+    let sample = |idx: isize| -> f32 {
+        let frame = idx.clamp(0, frames.saturating_sub(1) as isize) as usize;
+        input[frame * 2 + channel]
+    };
+
+    let y0 = sample(i1 - 1);
+    let y1 = sample(i1);
+    let y2 = sample(i1 + 1);
+    let y3 = sample(i1 + 2);
+
+    let a0 = -0.5 * y0 + 1.5 * y1 - 1.5 * y2 + 0.5 * y3;
+    let a1 = y0 - 2.5 * y1 + 2.0 * y2 - 0.5 * y3;
+    let a2 = -0.5 * y0 + 0.5 * y2;
+    let a3 = y1;
+    ((a0 * t + a1) * t + a2) * t + a3
+}
+
 /// Time domain OLA (Overlap Add) time-stretches the signal.
 pub fn time_stretch_ola(input: &[f32], stretch_factor: f64) -> Vec<f32> {
+    if input.len() < 4 || stretch_factor <= 0.0 || !stretch_factor.is_finite() {
+        return input.to_vec();
+    }
     if (stretch_factor - 1.0).abs() < 0.005 {
         return input.to_vec();
     }
     let num_samples = input.len() / 2;
-    let window_size = 1024;
-    let hop_s = 256;
-    let hop_a = (hop_s as f64 * stretch_factor) as usize;
+    let window_size = 512usize.min(num_samples.max(1));
+    let hop_s = (window_size / 2).max(1);
+    let hop_a = ((hop_s as f64 * stretch_factor).round() as usize).max(1);
 
-    let target_num_samples = (num_samples as f64 / stretch_factor) as usize + window_size;
+    let target_num_samples =
+        ((num_samples as f64 / stretch_factor).ceil() as usize + window_size).max(window_size + 1);
     let mut out_data = vec![0.0f32; target_num_samples * 2];
     let mut out_weight = vec![0.0f32; target_num_samples];
 
     let hanning: Vec<f32> = (0..window_size)
-        .map(|n| 0.5 * (1.0 - ((2.0 * std::f64::consts::PI * n as f64) / (window_size - 1) as f64).cos()) as f32)
+        .map(|n| {
+            0.5 * (1.0 - ((2.0 * std::f64::consts::PI * n as f64) / (window_size - 1) as f64).cos())
+                as f32
+        })
         .collect();
 
     let mut out_pos = 0;
     let mut in_pos = 0;
 
-    while in_pos + window_size < num_samples && out_pos + window_size < target_num_samples {
+    while in_pos + window_size <= num_samples && out_pos + window_size <= target_num_samples {
         for n in 0..window_size {
             let win = hanning[n];
             let in_idx = (in_pos + n) * 2;
@@ -501,18 +614,31 @@ pub fn time_stretch_ola(input: &[f32], stretch_factor: f64) -> Vec<f32> {
 
             out_data[out_idx] += input[in_idx] * win;
             out_data[out_idx + 1] += input[in_idx + 1] * win;
-            out_weight[out_pos + n] += win * win;
+            out_weight[out_pos + n] += win;
         }
         out_pos += hop_s;
         in_pos += hop_a;
     }
 
-    let mut final_output = Vec::with_capacity(out_pos * 2);
-    for i in 0..out_pos {
+    if out_pos == 0 {
+        return input.to_vec();
+    }
+
+    let final_frames = (out_pos + window_size).min(target_num_samples);
+    let mut final_output = Vec::with_capacity(final_frames * 2);
+    for i in 0..final_frames {
         let weight = out_weight[i];
-        let gain = if weight > 0.1 { 1.0 / weight } else { 0.0 };
-        final_output.push(out_data[i * 2] * gain);
-        final_output.push(out_data[i * 2 + 1] * gain);
+        if weight > 1e-6 {
+            let gain = 1.0 / weight;
+            final_output.push(out_data[i * 2] * gain);
+            final_output.push(out_data[i * 2 + 1] * gain);
+        } else if i < num_samples {
+            final_output.push(input[i * 2]);
+            final_output.push(input[i * 2 + 1]);
+        } else {
+            final_output.push(0.0);
+            final_output.push(0.0);
+        }
     }
 
     final_output
@@ -520,9 +646,18 @@ pub fn time_stretch_ola(input: &[f32], stretch_factor: f64) -> Vec<f32> {
 
 /// Pitch shift using OLA (Overlap Add): stretches speed first then resamples back (tempo preserved).
 pub fn pitch_shift_ola(input: &[f32], pitch_factor: f64) -> Vec<f32> {
-    let stretch_factor = 1.0 / pitch_factor;
-    let stretched = time_stretch_ola(input, stretch_factor);
-    pitch_shift_resample(&stretched, pitch_factor)
+    if input.len() < 4 || pitch_factor <= 0.0 || !pitch_factor.is_finite() {
+        return input.to_vec();
+    }
+    if (pitch_factor - 1.0).abs() < 0.001 {
+        return input.to_vec();
+    }
+
+    // Resample first to change pitch, then OLA-stretch back to the original duration.
+    // The previous order was very sensitive to OLA truncation and could partially cancel
+    // or invert the requested shift on block-sized streaming buffers.
+    let shifted = pitch_shift_resample(input, pitch_factor);
+    time_stretch_ola(&shifted, 1.0 / pitch_factor)
 }
 
 /// WSOLA (Waveform Similarity Overlap Add) time stretching for enhanced tempo preservation.
@@ -541,7 +676,10 @@ pub fn time_stretch_wsola(input: &[f32], stretch_factor: f64) -> Vec<f32> {
     let mut out_weight = vec![0.0f32; target_num_samples];
 
     let hanning: Vec<f32> = (0..window_size)
-        .map(|n| 0.5 * (1.0 - ((2.0 * std::f64::consts::PI * n as f64) / (window_size - 1) as f64).cos()) as f32)
+        .map(|n| {
+            0.5 * (1.0 - ((2.0 * std::f64::consts::PI * n as f64) / (window_size - 1) as f64).cos())
+                as f32
+        })
         .collect();
 
     let mut out_pos = 0;
@@ -559,8 +697,11 @@ pub fn time_stretch_wsola(input: &[f32], stretch_factor: f64) -> Vec<f32> {
         in_pos += hop_a;
     }
 
-    while in_pos + window_size + tolerance < num_samples && out_pos + window_size < target_num_samples {
-        let natural_pos = (in_pos as isize - hop_a as isize + last_delta + hop_s as isize).max(0) as usize;
+    while in_pos + window_size + tolerance < num_samples
+        && out_pos + window_size < target_num_samples
+    {
+        let natural_pos =
+            (in_pos as isize - hop_a as isize + last_delta + hop_s as isize).max(0) as usize;
         let mut best_offset = 0isize;
         let mut min_diff = f32::MAX;
 
@@ -574,8 +715,8 @@ pub fn time_stretch_wsola(input: &[f32], stretch_factor: f64) -> Vec<f32> {
             for n in 0..hop_s {
                 let natural_idx = (natural_pos + n) * 2;
                 let candidate_idx = (candidate_pos + n) * 2;
-                diff += (input[natural_idx] - input[candidate_idx]).abs() +
-                        (input[natural_idx + 1] - input[candidate_idx + 1]).abs();
+                diff += (input[natural_idx] - input[candidate_idx]).abs()
+                    + (input[natural_idx + 1] - input[candidate_idx + 1]).abs();
             }
             if diff < min_diff {
                 min_diff = diff;

@@ -69,7 +69,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.12.0';
 
   @override
-  int get rustContentHash => -1761867876;
+  int get rustContentHash => 867155737;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -199,6 +199,13 @@ abstract class RustLibApi extends BaseApi {
     required String songId,
     required String title,
     required String artist,
+  });
+
+  Future<void> crateApiMusicUpdateTag({
+    required PlatformInt64 tagId,
+    required String name,
+    String? color,
+    String? category,
   });
 
   Future<void> crateApiMusicUpdateVersionDuration({
@@ -1349,6 +1356,44 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<void> crateApiMusicUpdateTag({
+    required PlatformInt64 tagId,
+    required String name,
+    String? color,
+    String? category,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_i_64(tagId, serializer);
+          sse_encode_String(name, serializer);
+          sse_encode_opt_String(color, serializer);
+          sse_encode_opt_String(category, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 38,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiMusicUpdateTagConstMeta,
+        argValues: [tagId, name, color, category],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiMusicUpdateTagConstMeta => const TaskConstMeta(
+    debugName: "update_tag",
+    argNames: ["tagId", "name", "color", "category"],
+  );
+
+  @override
   Future<void> crateApiMusicUpdateVersionDuration({
     required String versionId,
     required double duration,
@@ -1362,7 +1407,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 38,
+            funcId: 39,
             port: port_,
           );
         },
@@ -1399,7 +1444,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 39,
+            funcId: 40,
             port: port_,
           );
         },
@@ -1430,7 +1475,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 40,
+            funcId: 41,
             port: port_,
           );
         },

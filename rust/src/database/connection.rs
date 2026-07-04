@@ -1,6 +1,6 @@
+use rusqlite::{params, Connection, Result};
 use std::path::PathBuf;
 use std::sync::RwLock;
-use rusqlite::{params, Connection, Result};
 
 static LIBRARY_DIR: RwLock<Option<PathBuf>> = RwLock::new(None);
 
@@ -18,7 +18,7 @@ pub fn get_library_dir() -> PathBuf {
             custom_path = Some(path.clone());
         }
     }
-    
+
     if let Some(path) = custom_path {
         path
     } else {
@@ -49,7 +49,7 @@ pub fn init_storage() -> std::io::Result<()> {
 // 建立 SQLite 连接
 pub fn establish_connection() -> Result<Connection> {
     let db_path = get_library_dir().join("database.db");
-    
+
     #[cfg(any(target_os = "android", target_os = "ios"))]
     let conn = {
         let db_url = format!("file://{}?nolock=1", db_path.display());

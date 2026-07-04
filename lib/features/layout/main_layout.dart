@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:ui';
 import 'package:provider/provider.dart';
 import 'package:aetheria/core/providers/library_provider.dart';
 import 'package:aetheria/core/providers/audio_player_provider.dart';
@@ -16,13 +17,38 @@ class MainLayout extends StatefulWidget {
   State<MainLayout> createState() => _MainLayoutState();
 }
 
-class _MainLayoutState extends State<MainLayout> {
+class _MainLayoutState extends State<MainLayout> with SingleTickerProviderStateMixin {
+  late AnimationController _drawerController;
+  late Animation<double> _drawerFade;
+  late Animation<Offset> _drawerSlide;
+
   @override
   void initState() {
     super.initState();
+    _drawerController = AnimationController(
+      duration: const Duration(milliseconds: 360),
+      vsync: this,
+    );
+    _drawerFade = CurvedAnimation(
+      parent: _drawerController,
+      curve: Curves.easeOutCubic,
+    );
+    _drawerSlide = Tween<Offset>(
+      begin: const Offset(1, 0),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(
+      parent: _drawerController,
+      curve: Curves.easeOutCubic,
+    ));
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<LibraryProvider>().loadLibrary();
     });
+  }
+
+  @override
+  void dispose() {
+    _drawerController.dispose();
+    super.dispose();
   }
 
   @override
@@ -33,10 +59,14 @@ class _MainLayoutState extends State<MainLayout> {
     final themeProvider = context.watch<UIThemeProvider>();
     final cfg = themeProvider.currentTheme;
 
+    if (audioProvider.isDetailOpen) {
+      _drawerController.forward();
+    } else {
+      _drawerController.reverse();
+    }
+
     if (libraryProvider.isLoading && libraryProvider.songs.isEmpty) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
     if (isMobile) {
@@ -63,7 +93,7 @@ class _MainLayoutState extends State<MainLayout> {
               right: MediaQuery.of(context).size.width * 0.15,
               child: AmbientGlow(color: cfg.accentHover),
             ),
-            
+
             // Main Grid
             Column(
               children: [
@@ -76,14 +106,44 @@ class _MainLayoutState extends State<MainLayout> {
                         child: Stack(
                           children: [
                             const MainContent(),
-                            if (audioProvider.isDetailOpen)
-                              Positioned(
-                                right: 0,
-                                top: 0,
-                                bottom: 0,
-                                width: 360,
-                                child: const DetailPane(),
-                              ),
+                            if (_drawerController.value > 0.0 || audioProvider.isDetailOpen)
+                              Positioned.fill(
+                                child: AnimatedBuilder(
+                                  animation: _drawerFade,
+                                  builder: (context, child) {
+                                    final progress = _drawerFade.value;
+                                    return Opacity(
+                                      opacity: progress,
+                                      child: Stack(
+                                        children: [
+                                          Positioned.fill(
+                                            child: GestureDetector(
+                                              onTap: () => audioProvider.setDetailOpen(false),
+                                              child: BackdropFilter(
+                                                filter: ImageFilter.blur(
+                                                  sigmaX: 18 * progress,
+                                                  sigmaY: 18 * progress,
+                                                ),
+                                                child: Container(color: Colors.black.withOpacity(0.18)),
+                                              ),
+                                            ),
+                                          ),
+                                          Positioned(
+                                            right: 0,
+                                            top: 0,
+                                            bottom: 0,
+                                            width: 380,
+                                            child: SlideTransition(
+                                              position: _drawerSlide,
+                                              child: const DetailPane(),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                  },
+                                ),
+                            ),
                           ],
                         ),
                       ),
