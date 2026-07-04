@@ -200,8 +200,7 @@ fn estimate_duration_with_symphonia(path: &Path) -> Option<f64> {
         )
     };
 
-    if let (Some(n_frames), Some(sample_rate)) = (n_frames, sample_rate)
-    {
+    if let (Some(n_frames), Some(sample_rate)) = (n_frames, sample_rate) {
         if sample_rate > 0 {
             let duration = n_frames as f64 / sample_rate as f64;
             if duration.is_finite() && duration > 0.0 {
@@ -227,9 +226,7 @@ fn estimate_duration_with_symphonia(path: &Path) -> Option<f64> {
                 }
                 last_packet_end = Some(packet.ts().saturating_add(packet.dur()));
             }
-            Err(Error::IoError(ref err))
-                if err.kind() == std::io::ErrorKind::UnexpectedEof =>
-            {
+            Err(Error::IoError(ref err)) if err.kind() == std::io::ErrorKind::UnexpectedEof => {
                 break;
             }
             Err(Error::ResetRequired) => continue,
@@ -1271,6 +1268,26 @@ pub fn set_rust_output_buffer_ms(ms: i32) -> Result<(), String> {
     crate::audio::player::set_output_buffer_ms(ms)
 }
 
+pub fn set_rust_audio_quality_settings(
+    peak_protection_enabled: bool,
+    dither_enabled: bool,
+    rubberband_window: String,
+    rubberband_formant_preserved: bool,
+    resampler_quality: String,
+) -> Result<(), String> {
+    crate::audio::player::set_quality_settings(
+        peak_protection_enabled,
+        dither_enabled,
+        rubberband_window,
+        rubberband_formant_preserved,
+        resampler_quality,
+    )
+}
+
+pub fn get_rust_audio_output_info() -> crate::audio::player::AudioOutputInfo {
+    crate::audio::player::get_output_info()
+}
+
 pub fn get_rust_playback_position() -> f64 {
     crate::audio::player::get_position()
 }
@@ -1284,8 +1301,8 @@ fn refresh_audio_file_metadata_impl(
         return Err("Audio file does not exist".to_string());
     }
 
-    let loudness = crate::audio::dsp::calculate_loudness_full(&abs_path.to_string_lossy())
-        .unwrap_or(-15.0);
+    let loudness =
+        crate::audio::dsp::calculate_loudness_full(&abs_path.to_string_lossy()).unwrap_or(-15.0);
 
     if let Ok(tagged_file) = Probe::open(abs_path)
         .map_err(|e| e.to_string())

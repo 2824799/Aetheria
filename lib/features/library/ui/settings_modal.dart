@@ -23,6 +23,116 @@ class SettingsModal extends StatefulWidget {
   State<SettingsModal> createState() => _SettingsModalState();
 }
 
+class _AudioOutputInfoView extends StatelessWidget {
+  const _AudioOutputInfoView({
+    required this.cfg,
+    required this.audioProvider,
+  });
+
+  final AppThemeConfig cfg;
+  final AudioPlayerProvider audioProvider;
+
+  @override
+  Widget build(BuildContext context) {
+    final info = audioProvider.audioOutputInfo;
+    final underruns = info?.underruns.toString() ?? '0';
+    final clippedSamples = info?.clippedSamples.toString() ?? '0';
+    final peakDb = info == null || info.peakDb.isInfinite
+        ? '-inf'
+        : '${info.peakDb.toStringAsFixed(1)} dBFS';
+    final hasUnderrun = (info?.underruns ?? BigInt.zero) > BigInt.zero;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            _InfoPill(
+              cfg: cfg,
+              label: '设备',
+              value: info?.deviceName ?? '未连接',
+            ),
+            _InfoPill(
+              cfg: cfg,
+              label: '格式',
+              value: info == null
+                  ? 'unknown'
+                  : '${info.sampleRate} Hz / ${info.channels}ch / ${info.sampleFormat}',
+            ),
+            _InfoPill(
+              cfg: cfg,
+              label: '队列缓冲',
+              value: '${info?.outputBufferMs ?? audioProvider.pitchBufferMs} ms',
+            ),
+            _InfoPill(
+              cfg: cfg,
+              label: '设备缓冲',
+              value: info?.bufferSize ?? 'unknown',
+            ),
+            _InfoPill(cfg: cfg, label: '峰值', value: peakDb),
+            _InfoPill(cfg: cfg, label: '保护计数', value: clippedSamples),
+            _InfoPill(cfg: cfg, label: '欠载', value: underruns),
+          ],
+        ),
+        if (hasUnderrun) ...[
+          const SizedBox(height: 8),
+          Text(
+            '检测到输出欠载，请提高处理缓冲或关闭高质量选项。',
+            style: TextStyle(color: cfg.accent, fontSize: 10),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _InfoPill extends StatelessWidget {
+  const _InfoPill({
+    required this.cfg,
+    required this.label,
+    required this.value,
+  });
+
+  final AppThemeConfig cfg;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: cfg.bgHover,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: cfg.border),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '$label: ',
+            style: TextStyle(
+              color: cfg.textSub,
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 260),
+            child: Text(
+              value,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: cfg.textMain, fontSize: 10),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _SettingsModalState extends State<SettingsModal> {
   String _activeTab = 'theme'; // For Desktop view
   String?
@@ -461,6 +571,19 @@ class _SettingsModalState extends State<SettingsModal> {
             Divider(height: 1, color: cfg.border),
             const SizedBox(height: 12),
             Text(
+              '输出状态',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: cfg.textSub,
+              ),
+            ),
+            const SizedBox(height: 8),
+            _AudioOutputInfoView(cfg: cfg, audioProvider: audioProvider),
+            const SizedBox(height: 12),
+            Divider(height: 1, color: cfg.border),
+            const SizedBox(height: 12),
+            Text(
               '输出音调调节器',
               style: TextStyle(
                 fontSize: 12,
@@ -622,6 +745,152 @@ class _SettingsModalState extends State<SettingsModal> {
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Rubber Band 窗口:',
+              style: TextStyle(
+                color: cfg.textMain,
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                ChoiceChip(
+                  label: const Text('低延迟', style: TextStyle(fontSize: 10)),
+                  selected: audioProvider.rubberbandWindow == 'latency',
+                  onSelected: audioProvider.pitchEnabled &&
+                          audioProvider.pitchAlgorithm == 'rubberband'
+                      ? (_) => audioProvider.setRubberbandWindow('latency')
+                      : null,
+                  selectedColor: cfg.accent.withOpacity(0.2),
+                  checkmarkColor: cfg.accent,
+                  labelStyle: TextStyle(
+                    color: audioProvider.rubberbandWindow == 'latency'
+                        ? cfg.accent
+                        : cfg.textMain,
+                  ),
+                ),
+                ChoiceChip(
+                  label: const Text('高质量', style: TextStyle(fontSize: 10)),
+                  selected: audioProvider.rubberbandWindow == 'quality',
+                  onSelected: audioProvider.pitchEnabled &&
+                          audioProvider.pitchAlgorithm == 'rubberband'
+                      ? (_) => audioProvider.setRubberbandWindow('quality')
+                      : null,
+                  selectedColor: cfg.accent.withOpacity(0.2),
+                  checkmarkColor: cfg.accent,
+                  labelStyle: TextStyle(
+                    color: audioProvider.rubberbandWindow == 'quality'
+                        ? cfg.accent
+                        : cfg.textMain,
+                  ),
+                ),
+              ],
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: audioProvider.rubberbandFormantPreserved,
+              title: Text(
+                '保留人声音色',
+                style: TextStyle(
+                  color: cfg.textMain,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              subtitle: Text(
+                '适合人声升降调，可能增加处理压力。',
+                style: TextStyle(color: cfg.textSub, fontSize: 11),
+              ),
+              activeColor: cfg.accent,
+              onChanged: audioProvider.pitchEnabled &&
+                      audioProvider.pitchAlgorithm == 'rubberband'
+                  ? (value) =>
+                      audioProvider.setRubberbandFormantPreserved(value)
+                  : null,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '重采样质量:',
+              style: TextStyle(
+                color: cfg.textMain,
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                ChoiceChip(
+                  label: const Text('标准', style: TextStyle(fontSize: 10)),
+                  selected: audioProvider.resamplerQuality == 'standard',
+                  onSelected: (_) =>
+                      audioProvider.setResamplerQuality('standard'),
+                  selectedColor: cfg.accent.withOpacity(0.2),
+                  checkmarkColor: cfg.accent,
+                  labelStyle: TextStyle(
+                    color: audioProvider.resamplerQuality == 'standard'
+                        ? cfg.accent
+                        : cfg.textMain,
+                  ),
+                ),
+                ChoiceChip(
+                  label: const Text('高质量 sinc', style: TextStyle(fontSize: 10)),
+                  selected: audioProvider.resamplerQuality == 'high',
+                  onSelected: (_) => audioProvider.setResamplerQuality('high'),
+                  selectedColor: cfg.accent.withOpacity(0.2),
+                  checkmarkColor: cfg.accent,
+                  labelStyle: TextStyle(
+                    color: audioProvider.resamplerQuality == 'high'
+                        ? cfg.accent
+                        : cfg.textMain,
+                  ),
+                ),
+              ],
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: audioProvider.peakProtectionEnabled,
+              title: Text(
+                '峰值保护',
+                style: TextStyle(
+                  color: cfg.textMain,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              subtitle: Text(
+                'DSP 后自动留出约 -1dB headroom，避免隐藏削波。',
+                style: TextStyle(color: cfg.textSub, fontSize: 11),
+              ),
+              activeColor: cfg.accent,
+              onChanged: (value) =>
+                  audioProvider.setPeakProtectionEnabled(value),
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: audioProvider.ditherEnabled,
+              title: Text(
+                '整数输出抖动',
+                style: TextStyle(
+                  color: cfg.textMain,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              subtitle: Text(
+                '仅在设备不是 f32 输出时生效，降低量化失真。',
+                style: TextStyle(color: cfg.textSub, fontSize: 11),
+              ),
+              activeColor: cfg.accent,
+              onChanged: (value) => audioProvider.setDitherEnabled(value),
             ),
           ],
         );

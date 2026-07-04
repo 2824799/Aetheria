@@ -3,6 +3,7 @@
 
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
+import '../audio/player.dart';
 import '../frb_generated.dart';
 import '../models/playlist.dart';
 import '../models/song.dart';
@@ -200,6 +201,23 @@ Future<void> setRustPitch({required double pitch, required String algo}) =>
 
 Future<void> setRustOutputBufferMs({required int ms}) =>
     RustLib.instance.api.crateApiMusicSetRustOutputBufferMs(ms: ms);
+
+Future<void> setRustAudioQualitySettings({
+  required bool peakProtectionEnabled,
+  required bool ditherEnabled,
+  required String rubberbandWindow,
+  required bool rubberbandFormantPreserved,
+  required String resamplerQuality,
+}) => RustLib.instance.api.crateApiMusicSetRustAudioQualitySettings(
+  peakProtectionEnabled: peakProtectionEnabled,
+  ditherEnabled: ditherEnabled,
+  rubberbandWindow: rubberbandWindow,
+  rubberbandFormantPreserved: rubberbandFormantPreserved,
+  resamplerQuality: resamplerQuality,
+);
+
+Future<AudioOutputInfo> getRustAudioOutputInfo() =>
+    RustLib.instance.api.crateApiMusicGetRustAudioOutputInfo();
 
 Future<double> getRustPlaybackPosition() =>
     RustLib.instance.api.crateApiMusicGetRustPlaybackPosition();

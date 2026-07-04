@@ -9,7 +9,8 @@ use symphonia::core::probe::Hint;
 use symphonia::core::units::Time;
 
 const RESAMPLE_EPSILON: f64 = 0.000_001;
-const SINC_HALF_TAPS: isize = 16;
+const STANDARD_SINC_HALF_TAPS: isize = 16;
+const HIGH_QUALITY_SINC_HALF_TAPS: isize = 32;
 
 /// Calculate the loudness metric of an audio file in dBFS (decibels relative to full scale).
 /// This is computed by analyzing the average RMS level of the first 300 packets (approx. 5-10 seconds) for speed.
@@ -246,11 +247,17 @@ pub struct StreamDecoder {
     src_buffer: Vec<f32>,
     /// fractional read position (in frames) into src_buffer
     read_pos: f64,
+    sinc_half_taps: isize,
     eof: bool,
 }
 
 impl StreamDecoder {
-    pub fn new(path: &str, target_channels: u32, target_sample_rate: u32) -> Result<Self, String> {
+    pub fn new(
+        path: &str,
+        target_channels: u32,
+        target_sample_rate: u32,
+        resampler_quality: &str,
+    ) -> Result<Self, String> {
         let file = File::open(path).map_err(|e| e.to_string())?;
         let mss = MediaSourceStream::new(Box::new(file), Default::default());
         let mut hint = Hint::new();
@@ -295,6 +302,7 @@ impl StreamDecoder {
             passthrough_resample,
             src_buffer: Vec::new(),
             read_pos: 0.0,
+            sinc_half_taps: sinc_half_taps_for_quality(resampler_quality),
             eof: false,
         })
     }
@@ -371,7 +379,8 @@ impl StreamDecoder {
             // but the sinc kernel preserves high-frequency content better when 44.1kHz sources
             // are played through 48kHz Bluetooth output paths such as LDAC.
             let center = self.read_pos.floor() as isize;
-            let need = (center + SINC_HALF_TAPS + 2).max(0) as usize;
+            let sinc_half_taps = self.sinc_half_taps;
+            let need = (center + sinc_half_taps + 2).max(0) as usize;
             while self.src_buffer.len() / tc < need {
                 if !self.decode_next_packet()? {
                     break;
@@ -386,11 +395,11 @@ impl StreamDecoder {
             }
 
             let frac = self.read_pos - self.read_pos.floor();
-            let window_span = SINC_HALF_TAPS as f64;
+            let window_span = sinc_half_taps as f64;
             let mut weight_sum = 0.0f64;
             let mut frame = vec![0.0f64; tc];
 
-            for tap in -SINC_HALF_TAPS..=SINC_HALF_TAPS {
+            for tap in -sinc_half_taps..=sinc_half_taps {
                 let idx = center + tap;
                 if idx < 0 || idx as usize >= avail {
                     continue;
@@ -424,7 +433,7 @@ impl StreamDecoder {
 
             // Drop fully consumed source frames to keep src_buffer bounded.
             let whole = self.read_pos.floor() as usize;
-            let keep_history = SINC_HALF_TAPS as usize;
+            let keep_history = sinc_half_taps as usize;
             if whole > keep_history {
                 let drop_frames = whole - keep_history;
                 let drop_n = (drop_frames * tc).min(self.src_buffer.len());
@@ -479,6 +488,14 @@ fn sinc(x: f64) -> f64 {
 fn blackman_window(normalized_distance: f64) -> f64 {
     let x = normalized_distance.clamp(0.0, 1.0);
     0.42 + 0.5 * (std::f64::consts::PI * x).cos() + 0.08 * (2.0 * std::f64::consts::PI * x).cos()
+}
+
+fn sinc_half_taps_for_quality(quality: &str) -> isize {
+    if quality == "high" {
+        HIGH_QUALITY_SINC_HALF_TAPS
+    } else {
+        STANDARD_SINC_HALF_TAPS
+    }
 }
 
 /// Convert a decoded symphonia packet into interleaved f32 samples at the source channel count.

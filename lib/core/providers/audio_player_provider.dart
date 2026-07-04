@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:aetheria/src/rust/audio/player.dart' show AudioOutputInfo;
 import 'package:aetheria/src/rust/models/song.dart';
 import 'package:aetheria/src/rust/api/music.dart' as music;
 import 'package:aetheria/services/native_audio_helper.dart';
@@ -16,6 +17,11 @@ class AudioPlayerProvider extends ChangeNotifier {
   static const String _playbackQueueIdsKey = 'aetheria-playback-queue-ids';
   static const String _pitchEnabledKey = 'pitch-enabled';
   static const String _pitchBufferMsKey = 'pitch-buffer-ms';
+  static const String _peakProtectionKey = 'peak-protection-enabled';
+  static const String _ditherEnabledKey = 'dither-enabled';
+  static const String _rubberbandWindowKey = 'rubberband-window';
+  static const String _rubberbandFormantKey = 'rubberband-formant-preserved';
+  static const String _resamplerQualityKey = 'resampler-quality';
 
   Song? activeSong;
   Song? playingSong;
@@ -37,6 +43,12 @@ class AudioPlayerProvider extends ChangeNotifier {
   double pitchSemitones = 0.0;
   String pitchAlgorithm = 'rubberband';
   int pitchBufferMs = 240;
+  bool peakProtectionEnabled = true;
+  bool ditherEnabled = true;
+  String rubberbandWindow = 'latency';
+  bool rubberbandFormantPreserved = false;
+  String resamplerQuality = 'standard';
+  AudioOutputInfo? audioOutputInfo;
 
   bool isDetailOpen = false;
   String activeTab = 'versions';
@@ -44,6 +56,7 @@ class AudioPlayerProvider extends ChangeNotifier {
   String _cachedLibraryPath = '';
   int? _cachedAudioServerPort;
   Timer? _positionTimer;
+  Timer? _outputInfoTimer;
   int _lastPositionMs = -1;
   int _lastPersistedSecond = -1;
   int _stallTicks = 0;
@@ -105,6 +118,18 @@ class AudioPlayerProvider extends ChangeNotifier {
     _positionTimer?.cancel();
   }
 
+  void _startOutputInfoTimer() {
+    _outputInfoTimer?.cancel();
+    unawaited(refreshAudioOutputInfo());
+    _outputInfoTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      unawaited(refreshAudioOutputInfo());
+    });
+  }
+
+  void _stopOutputInfoTimer() {
+    _outputInfoTimer?.cancel();
+  }
+
   Future<void> loadSettings() async {
     try {
       if (Platform.isAndroid) {
@@ -123,11 +148,23 @@ class AudioPlayerProvider extends ChangeNotifier {
         await prefs.setString('pitch-algorithm', pitchAlgorithm);
       }
       pitchBufferMs = prefs.getInt(_pitchBufferMsKey) ?? 240;
+      peakProtectionEnabled = prefs.getBool(_peakProtectionKey) ?? true;
+      ditherEnabled = prefs.getBool(_ditherEnabledKey) ?? true;
+      rubberbandWindow = _normalizeRubberbandWindow(
+        prefs.getString(_rubberbandWindowKey),
+      );
+      rubberbandFormantPreserved =
+          prefs.getBool(_rubberbandFormantKey) ?? false;
+      resamplerQuality = _normalizeResamplerQuality(
+        prefs.getString(_resamplerQualityKey),
+      );
       await music.setRustOutputBufferMs(ms: pitchBufferMs);
+      await _syncAudioQualitySettings();
       await music.setRustPitch(
         pitch: _effectivePitchSemitones,
         algo: pitchAlgorithm,
       );
+      await refreshAudioOutputInfo();
       notifyListeners();
     } catch (_) {}
   }
@@ -213,6 +250,67 @@ class AudioPlayerProvider extends ChangeNotifier {
     } catch (_) {}
   }
 
+  Future<void> setPeakProtectionEnabled(bool value) async {
+    peakProtectionEnabled = value;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_peakProtectionKey, value);
+      await _syncAudioQualitySettings();
+    } catch (_) {}
+  }
+
+  Future<void> setDitherEnabled(bool value) async {
+    ditherEnabled = value;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_ditherEnabledKey, value);
+      await _syncAudioQualitySettings();
+    } catch (_) {}
+  }
+
+  Future<void> setRubberbandWindow(String value) async {
+    final normalized = _normalizeRubberbandWindow(value);
+    rubberbandWindow = normalized;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_rubberbandWindowKey, normalized);
+      await _syncAudioQualitySettings();
+      await _hotReloadDSP();
+    } catch (_) {}
+  }
+
+  Future<void> setRubberbandFormantPreserved(bool value) async {
+    rubberbandFormantPreserved = value;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_rubberbandFormantKey, value);
+      await _syncAudioQualitySettings();
+    } catch (_) {}
+  }
+
+  Future<void> setResamplerQuality(String value) async {
+    final normalized = _normalizeResamplerQuality(value);
+    resamplerQuality = normalized;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_resamplerQualityKey, normalized);
+      await _syncAudioQualitySettings();
+      await _hotReloadDSP();
+    } catch (_) {}
+  }
+
+  Future<void> refreshAudioOutputInfo() async {
+    try {
+      audioOutputInfo = await music.getRustAudioOutputInfo();
+      notifyListeners();
+    } catch (_) {}
+  }
+
   double _computeNormalizationGain(AudioVersion version) {
     if (!volumeBalanceEnabled) {
       return 1.0;
@@ -230,6 +328,24 @@ class AudioPlayerProvider extends ChangeNotifier {
 
   String _normalizePitchAlgorithm(String? value) {
     return value == 'resample' ? 'resample' : 'rubberband';
+  }
+
+  String _normalizeRubberbandWindow(String? value) {
+    return value == 'quality' ? 'quality' : 'latency';
+  }
+
+  String _normalizeResamplerQuality(String? value) {
+    return value == 'high' ? 'high' : 'standard';
+  }
+
+  Future<void> _syncAudioQualitySettings() {
+    return music.setRustAudioQualitySettings(
+      peakProtectionEnabled: peakProtectionEnabled,
+      ditherEnabled: ditherEnabled,
+      rubberbandWindow: rubberbandWindow,
+      rubberbandFormantPreserved: rubberbandFormantPreserved,
+      resamplerQuality: resamplerQuality,
+    );
   }
 
   Future<void> _clearPersistedPlaybackState(SharedPreferences prefs) async {
@@ -384,6 +500,7 @@ class AudioPlayerProvider extends ChangeNotifier {
     } else {
       isPlaying = true;
       _startPositionTimer();
+      _startOutputInfoTimer();
     }
 
     currentPosition = clampedPosition;
@@ -427,6 +544,7 @@ class AudioPlayerProvider extends ChangeNotifier {
         normalizationGain: _computeNormalizationGain(playingVersion!),
       );
       await music.seekRustPlayback(secs: pos.inMilliseconds / 1000.0);
+      _startOutputInfoTimer();
     }
   }
 
@@ -453,6 +571,7 @@ class AudioPlayerProvider extends ChangeNotifier {
       await music.pauseRustPlayback();
       isPlaying = false;
       _stopPositionTimer();
+      _stopOutputInfoTimer();
     } else {
       if (playingSong != null && playingVersion != null) {
         if (!_hasPreparedPlayback) {
@@ -465,6 +584,7 @@ class AudioPlayerProvider extends ChangeNotifier {
         await music.resumeRustPlayback();
         isPlaying = true;
         _startPositionTimer();
+        _startOutputInfoTimer();
       }
     }
     notifyListeners();
@@ -484,6 +604,7 @@ class AudioPlayerProvider extends ChangeNotifier {
       await music.resumeRustPlayback();
       isPlaying = true;
       _startPositionTimer();
+      _startOutputInfoTimer();
       notifyListeners();
       _updateNotification();
       unawaited(_persistPlaybackState());
@@ -682,6 +803,7 @@ class AudioPlayerProvider extends ChangeNotifier {
   @override
   void dispose() {
     _positionTimer?.cancel();
+    _outputInfoTimer?.cancel();
     unawaited(_persistPlaybackState());
     if (Platform.isAndroid) {
       NativeAudioHelper.hideNotification();

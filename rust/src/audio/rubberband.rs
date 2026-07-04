@@ -3,6 +3,10 @@ use std::ffi::c_void;
 
 type RubberBandLiveState = *mut c_void;
 
+const RUBBERBAND_LIVE_OPTION_WINDOW_SHORT: i32 = 0x0000_0000;
+const RUBBERBAND_LIVE_OPTION_WINDOW_MEDIUM: i32 = 0x0010_0000;
+const RUBBERBAND_LIVE_OPTION_FORMANT_SHIFTED: i32 = 0x0000_0000;
+const RUBBERBAND_LIVE_OPTION_FORMANT_PRESERVED: i32 = 0x0100_0000;
 const RUBBERBAND_LIVE_OPTION_CHANNELS_TOGETHER: i32 = 0x1000_0000;
 
 unsafe extern "C" {
@@ -10,6 +14,7 @@ unsafe extern "C" {
     fn rubberband_live_delete(state: RubberBandLiveState);
     fn rubberband_live_reset(state: RubberBandLiveState);
     fn rubberband_live_set_pitch_scale(state: RubberBandLiveState, scale: f64);
+    fn rubberband_live_set_formant_option(state: RubberBandLiveState, options: i32);
     fn rubberband_live_get_block_size(state: RubberBandLiveState) -> u32;
     fn rubberband_live_shift(
         state: RubberBandLiveState,
@@ -30,12 +35,20 @@ pub struct RubberBandPitchShifter {
 }
 
 impl RubberBandPitchShifter {
-    pub fn new(sample_rate: u32, channels: u32, pitch_scale: f64) -> Result<Self, String> {
+    pub fn new(
+        sample_rate: u32,
+        channels: u32,
+        pitch_scale: f64,
+        window: &str,
+        preserve_formant: bool,
+    ) -> Result<Self, String> {
         if sample_rate == 0 || channels == 0 {
             return Err("Invalid Rubber Band output format".to_string());
         }
 
-        let options = RUBBERBAND_LIVE_OPTION_CHANNELS_TOGETHER;
+        let options = RUBBERBAND_LIVE_OPTION_CHANNELS_TOGETHER
+            | window_option(window)
+            | formant_option(preserve_formant);
         let state = unsafe { rubberband_live_new(sample_rate, channels, options) };
         if state.is_null() {
             return Err("Rubber Band LiveShifter initialization failed".to_string());
@@ -96,6 +109,12 @@ impl RubberBandPitchShifter {
         self.push_interleaved(input);
         self.shift_ready_blocks();
         self.pop_interleaved(frames)
+    }
+
+    pub fn set_formant_preserved(&mut self, preserve_formant: bool) {
+        unsafe {
+            rubberband_live_set_formant_option(self.state, formant_option(preserve_formant));
+        }
     }
 
     pub fn finish(&mut self) -> Vec<f32> {
@@ -185,5 +204,21 @@ fn sanitize_pitch_scale(scale: f64) -> f64 {
         1.0
     } else {
         scale.clamp(0.25, 4.0)
+    }
+}
+
+fn window_option(window: &str) -> i32 {
+    if window == "quality" {
+        RUBBERBAND_LIVE_OPTION_WINDOW_MEDIUM
+    } else {
+        RUBBERBAND_LIVE_OPTION_WINDOW_SHORT
+    }
+}
+
+fn formant_option(preserve_formant: bool) -> i32 {
+    if preserve_formant {
+        RUBBERBAND_LIVE_OPTION_FORMANT_PRESERVED
+    } else {
+        RUBBERBAND_LIVE_OPTION_FORMANT_SHIFTED
     }
 }
