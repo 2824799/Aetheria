@@ -247,6 +247,20 @@ impl AudioBuffer {
         self.len_samples.fetch_add(samples.len(), Ordering::Relaxed);
     }
 
+    pub fn try_push(&self, samples: &[f32]) -> bool {
+        let mut queue = self.data.lock().unwrap_or_else(|e| e.into_inner());
+        if queue.len() + samples.len() > self.capacity {
+            return false;
+        }
+        queue.extend(samples.iter().cloned());
+        self.len_samples.fetch_add(samples.len(), Ordering::Relaxed);
+        true
+    }
+
+    pub fn capacity(&self) -> usize {
+        self.capacity
+    }
+
     pub fn pop(&self, out: &mut [f32]) -> usize {
         let mut queue = self.data.lock().unwrap_or_else(|e| e.into_inner());
         let len = out.len().min(queue.len());
@@ -449,11 +463,12 @@ fn prefill_audio_buffer(
     stop_flag: &AtomicBool,
     target_ms: u32,
 ) -> Result<(), String> {
-    let target_samples = ((pipeline.sample_rate as usize
+    let requested_samples = ((pipeline.sample_rate as usize
         * pipeline.channels as usize
         * target_ms.clamp(20, 500) as usize)
         / 1000)
         .max((pipeline.channels as usize).max(1) * pipeline.block_frames);
+    let target_samples = requested_samples.min(buffer.capacity().saturating_mul(2) / 3);
 
     while buffer.len() < target_samples && !stop_flag.load(Ordering::SeqCst) {
         let Some(block) = pipeline.next_block(rubberband_shifter)? else {
@@ -462,7 +477,9 @@ fn prefill_audio_buffer(
         if block.is_empty() {
             continue;
         }
-        buffer.push(&block, stop_flag);
+        if !buffer.try_push(&block) {
+            break;
+        }
     }
     Ok(())
 }
