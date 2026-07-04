@@ -64,6 +64,11 @@ class _AudioOutputInfoView extends StatelessWidget {
             ),
             _InfoPill(
               cfg: cfg,
+              label: '队列余量',
+              value: '${info?.queuedMs ?? 0} ms',
+            ),
+            _InfoPill(
+              cfg: cfg,
               label: '设备缓冲',
               value: info?.bufferSize ?? 'unknown',
             ),

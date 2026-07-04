@@ -14,6 +14,7 @@ class AudioOutputInfo {
   final String bufferSize;
   final String outputLatencyMode;
   final int outputBufferMs;
+  final int queuedMs;
   final BigInt underruns;
   final BigInt clippedSamples;
   final double peakDb;
@@ -26,6 +27,7 @@ class AudioOutputInfo {
     required this.bufferSize,
     required this.outputLatencyMode,
     required this.outputBufferMs,
+    required this.queuedMs,
     required this.underruns,
     required this.clippedSamples,
     required this.peakDb,
@@ -40,6 +42,7 @@ class AudioOutputInfo {
       bufferSize.hashCode ^
       outputLatencyMode.hashCode ^
       outputBufferMs.hashCode ^
+      queuedMs.hashCode ^
       underruns.hashCode ^
       clippedSamples.hashCode ^
       peakDb.hashCode;
@@ -56,6 +59,7 @@ class AudioOutputInfo {
           bufferSize == other.bufferSize &&
           outputLatencyMode == other.outputLatencyMode &&
           outputBufferMs == other.outputBufferMs &&
+          queuedMs == other.queuedMs &&
           underruns == other.underruns &&
           clippedSamples == other.clippedSamples &&
           peakDb == other.peakDb;

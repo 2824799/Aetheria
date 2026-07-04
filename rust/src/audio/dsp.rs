@@ -374,6 +374,7 @@ impl StreamDecoder {
             return Ok(out);
         }
 
+        let mut frame = vec![0.0f64; tc];
         while out.len() / tc < out_frames {
             // Keep enough history for the windowed-sinc kernel. Linear interpolation is cheaper,
             // but the sinc kernel preserves high-frequency content better when 44.1kHz sources
@@ -397,7 +398,7 @@ impl StreamDecoder {
             let frac = self.read_pos - self.read_pos.floor();
             let window_span = sinc_half_taps as f64;
             let mut weight_sum = 0.0f64;
-            let mut frame = vec![0.0f64; tc];
+            frame.fill(0.0);
 
             for tap in -sinc_half_taps..=sinc_half_taps {
                 let idx = center + tap;

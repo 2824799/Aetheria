@@ -96,7 +96,11 @@ class AudioPlayerProvider extends ChangeNotifier {
         _stallTicks = 0;
         _lastPositionMs = posMs;
       }
-      final stalledAtEnd = _stallTicks >= 6 && currentPosition > Duration.zero;
+      final nearEnd =
+          totalDuration > Duration.zero &&
+          currentPosition >= totalDuration - const Duration(seconds: 2);
+      final stalledAtEnd =
+          _stallTicks >= 6 && currentPosition > Duration.zero && nearEnd;
 
       if (reachedEnd || stalledAtEnd) {
         _positionTimer?.cancel();

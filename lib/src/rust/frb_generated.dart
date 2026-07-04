@@ -1703,8 +1703,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   AudioOutputInfo dco_decode_audio_output_info(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 10)
-      throw Exception('unexpected arr length: expect 10 but see ${arr.length}');
+    if (arr.length != 11)
+      throw Exception('unexpected arr length: expect 11 but see ${arr.length}');
     return AudioOutputInfo(
       deviceName: dco_decode_String(arr[0]),
       sampleRate: dco_decode_u_32(arr[1]),
@@ -1713,9 +1713,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       bufferSize: dco_decode_String(arr[4]),
       outputLatencyMode: dco_decode_String(arr[5]),
       outputBufferMs: dco_decode_u_32(arr[6]),
-      underruns: dco_decode_u_64(arr[7]),
-      clippedSamples: dco_decode_u_64(arr[8]),
-      peakDb: dco_decode_f_64(arr[9]),
+      queuedMs: dco_decode_u_32(arr[7]),
+      underruns: dco_decode_u_64(arr[8]),
+      clippedSamples: dco_decode_u_64(arr[9]),
+      peakDb: dco_decode_f_64(arr[10]),
     );
   }
 
@@ -1954,6 +1955,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_bufferSize = sse_decode_String(deserializer);
     var var_outputLatencyMode = sse_decode_String(deserializer);
     var var_outputBufferMs = sse_decode_u_32(deserializer);
+    var var_queuedMs = sse_decode_u_32(deserializer);
     var var_underruns = sse_decode_u_64(deserializer);
     var var_clippedSamples = sse_decode_u_64(deserializer);
     var var_peakDb = sse_decode_f_64(deserializer);
@@ -1965,6 +1967,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       bufferSize: var_bufferSize,
       outputLatencyMode: var_outputLatencyMode,
       outputBufferMs: var_outputBufferMs,
+      queuedMs: var_queuedMs,
       underruns: var_underruns,
       clippedSamples: var_clippedSamples,
       peakDb: var_peakDb,
@@ -2282,6 +2285,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.bufferSize, serializer);
     sse_encode_String(self.outputLatencyMode, serializer);
     sse_encode_u_32(self.outputBufferMs, serializer);
+    sse_encode_u_32(self.queuedMs, serializer);
     sse_encode_u_64(self.underruns, serializer);
     sse_encode_u_64(self.clippedSamples, serializer);
     sse_encode_f_64(self.peakDb, serializer);

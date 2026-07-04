@@ -1636,6 +1636,7 @@ impl SseDecode for crate::audio::player::AudioOutputInfo {
         let mut var_bufferSize = <String>::sse_decode(deserializer);
         let mut var_outputLatencyMode = <String>::sse_decode(deserializer);
         let mut var_outputBufferMs = <u32>::sse_decode(deserializer);
+        let mut var_queuedMs = <u32>::sse_decode(deserializer);
         let mut var_underruns = <u64>::sse_decode(deserializer);
         let mut var_clippedSamples = <u64>::sse_decode(deserializer);
         let mut var_peakDb = <f64>::sse_decode(deserializer);
@@ -1647,6 +1648,7 @@ impl SseDecode for crate::audio::player::AudioOutputInfo {
             buffer_size: var_bufferSize,
             output_latency_mode: var_outputLatencyMode,
             output_buffer_ms: var_outputBufferMs,
+            queued_ms: var_queuedMs,
             underruns: var_underruns,
             clipped_samples: var_clippedSamples,
             peak_db: var_peakDb,
@@ -2099,6 +2101,7 @@ impl flutter_rust_bridge::IntoDart for crate::audio::player::AudioOutputInfo {
             self.buffer_size.into_into_dart().into_dart(),
             self.output_latency_mode.into_into_dart().into_dart(),
             self.output_buffer_ms.into_into_dart().into_dart(),
+            self.queued_ms.into_into_dart().into_dart(),
             self.underruns.into_into_dart().into_dart(),
             self.clipped_samples.into_into_dart().into_dart(),
             self.peak_db.into_into_dart().into_dart(),
@@ -2256,6 +2259,7 @@ impl SseEncode for crate::audio::player::AudioOutputInfo {
         <String>::sse_encode(self.buffer_size, serializer);
         <String>::sse_encode(self.output_latency_mode, serializer);
         <u32>::sse_encode(self.output_buffer_ms, serializer);
+        <u32>::sse_encode(self.queued_ms, serializer);
         <u64>::sse_encode(self.underruns, serializer);
         <u64>::sse_encode(self.clipped_samples, serializer);
         <f64>::sse_encode(self.peak_db, serializer);

@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 use std::sync::{
-    atomic::{AtomicBool, AtomicU64, Ordering},
+    atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     Arc, Mutex,
 };
 use std::thread;
@@ -17,6 +17,7 @@ use crate::audio::rubberband::RubberBandPitchShifter;
 pub struct AudioBuffer {
     data: Mutex<VecDeque<f32>>,
     capacity: usize,
+    len_samples: AtomicUsize,
 }
 
 #[derive(Clone, Debug)]
@@ -49,6 +50,7 @@ pub struct AudioOutputInfo {
     pub buffer_size: String,
     pub output_latency_mode: String,
     pub output_buffer_ms: u32,
+    pub queued_ms: u32,
     pub underruns: u64,
     pub clipped_samples: u64,
     pub peak_db: f64,
@@ -64,6 +66,25 @@ struct OutputDeviceInfo {
     output_latency_mode: String,
 }
 
+#[derive(Clone)]
+struct ProcessingParams {
+    volume: Arc<Mutex<f32>>,
+    pitch: Arc<Mutex<f64>>,
+    algo: Arc<Mutex<String>>,
+    loudness_normalization_gain: Arc<Mutex<f32>>,
+    quality_settings: Arc<Mutex<AudioQualitySettings>>,
+    clipped_sample_count: Arc<AtomicU64>,
+    peak_bits: Arc<AtomicU64>,
+}
+
+struct DecodePipeline {
+    decoder: StreamDecoder,
+    block_frames: usize,
+    sample_rate: u32,
+    channels: u32,
+    params: ProcessingParams,
+}
+
 impl Default for OutputDeviceInfo {
     fn default() -> Self {
         Self {
@@ -77,11 +98,135 @@ impl Default for OutputDeviceInfo {
     }
 }
 
+impl DecodePipeline {
+    fn new(
+        path: &str,
+        sample_rate: u32,
+        channels: u32,
+        params: ProcessingParams,
+    ) -> Result<Self, String> {
+        let initial_quality = params
+            .quality_settings
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        let decoder = StreamDecoder::new(
+            path,
+            channels,
+            sample_rate,
+            &initial_quality.resampler_quality,
+        )?;
+
+        Ok(Self {
+            decoder,
+            block_frames: 2048,
+            sample_rate,
+            channels,
+            params,
+        })
+    }
+
+    fn seek(&mut self, secs: f64) -> Result<(), String> {
+        self.decoder.seek(secs)?;
+        Ok(())
+    }
+
+    fn next_block(
+        &mut self,
+        rubberband_shifter: &mut Option<RubberBandPitchShifter>,
+    ) -> Result<Option<Vec<f32>>, String> {
+        let current_quality = self
+            .params
+            .quality_settings
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+
+        let mut block = self.decoder.read_block(self.block_frames)?;
+        if block.is_empty() {
+            if let Some(shifter) = rubberband_shifter {
+                let tail = shifter.finish();
+                if !tail.is_empty() {
+                    return Ok(Some(tail));
+                }
+            }
+            return Ok(None);
+        }
+
+        let total_gain = *self.params.volume.lock().unwrap_or_else(|e| e.into_inner())
+            * *self
+                .params
+                .loudness_normalization_gain
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+        if (total_gain - 1.0).abs() > 0.001 {
+            for sample in block.iter_mut() {
+                *sample *= total_gain;
+            }
+        }
+
+        let current_pitch = *self.params.pitch.lock().unwrap_or_else(|e| e.into_inner());
+        let mut processed = if current_pitch.abs() > 0.01 && self.channels == 2 {
+            let current_algo = self
+                .params
+                .algo
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
+            let pitch_factor = 2.0f64.powf(current_pitch / 12.0);
+            match current_algo.as_str() {
+                "resample" => dsp::pitch_shift_resample(&block, pitch_factor),
+                "ola" => dsp::pitch_shift_ola(&block, pitch_factor),
+                "wsola" => dsp::pitch_shift_wsola(&block, pitch_factor),
+                _ => {
+                    if rubberband_shifter.is_none() {
+                        match RubberBandPitchShifter::new(
+                            self.sample_rate,
+                            self.channels,
+                            pitch_factor,
+                            &current_quality.rubberband_window,
+                            current_quality.rubberband_formant_preserved,
+                        ) {
+                            Ok(shifter) => {
+                                *rubberband_shifter = Some(shifter);
+                            }
+                            Err(e) => {
+                                eprintln!("Rubber Band initialization failed: {}", e);
+                            }
+                        }
+                    }
+                    if let Some(shifter) = rubberband_shifter {
+                        shifter.set_formant_preserved(current_quality.rubberband_formant_preserved);
+                        shifter.process(&block, pitch_factor)
+                    } else {
+                        block
+                    }
+                }
+            }
+        } else {
+            block
+        };
+
+        if processed.is_empty() {
+            return Ok(Some(processed));
+        }
+
+        apply_post_dsp_protection(
+            &mut processed,
+            current_quality.peak_protection_enabled,
+            &self.params.clipped_sample_count,
+            &self.params.peak_bits,
+        );
+        Ok(Some(processed))
+    }
+}
+
 impl AudioBuffer {
     pub fn new(capacity: usize) -> Self {
         Self {
             data: Mutex::new(VecDeque::with_capacity(capacity)),
             capacity,
+            len_samples: AtomicUsize::new(0),
         }
     }
 
@@ -99,6 +244,7 @@ impl AudioBuffer {
             queue = self.data.lock().unwrap_or_else(|e| e.into_inner());
         }
         queue.extend(samples.iter().cloned());
+        self.len_samples.fetch_add(samples.len(), Ordering::Relaxed);
     }
 
     pub fn pop(&self, out: &mut [f32]) -> usize {
@@ -107,15 +253,19 @@ impl AudioBuffer {
         for i in 0..len {
             out[i] = queue.pop_front().unwrap_or(0.0);
         }
+        if len > 0 {
+            self.len_samples.fetch_sub(len, Ordering::Relaxed);
+        }
         len
     }
 
     pub fn clear(&self) {
         self.data.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        self.len_samples.store(0, Ordering::Relaxed);
     }
 
     pub fn len(&self) -> usize {
-        self.data.lock().unwrap_or_else(|e| e.into_inner()).len()
+        self.len_samples.load(Ordering::Relaxed)
     }
 }
 
@@ -292,6 +442,31 @@ fn select_output_buffer_size(
     }
 }
 
+fn prefill_audio_buffer(
+    pipeline: &mut DecodePipeline,
+    rubberband_shifter: &mut Option<RubberBandPitchShifter>,
+    buffer: &AudioBuffer,
+    stop_flag: &AtomicBool,
+    target_ms: u32,
+) -> Result<(), String> {
+    let target_samples = ((pipeline.sample_rate as usize
+        * pipeline.channels as usize
+        * target_ms.clamp(20, 500) as usize)
+        / 1000)
+        .max((pipeline.channels as usize).max(1) * pipeline.block_frames);
+
+    while buffer.len() < target_samples && !stop_flag.load(Ordering::SeqCst) {
+        let Some(block) = pipeline.next_block(rubberband_shifter)? else {
+            break;
+        };
+        if block.is_empty() {
+            continue;
+        }
+        buffer.push(&block, stop_flag);
+    }
+    Ok(())
+}
+
 /// Negotiate an output config, preferring f32 at the device's default rate/channels so we
 /// can feed the callback without per-callback allocation. Returns the live stream plus the
 /// negotiated sample rate, channel count and the shared ring buffer.
@@ -390,12 +565,13 @@ fn build_output(
                     let fp = frames_played.clone();
                     let uc = underrun_count.clone();
                     let qs = quality_settings.clone();
+                    let mut tmp = Vec::<f32>::new();
                     let mut dither = TpdfDither::new(0xA17E_51A3_59C3_0D42);
                     device
                         .build_output_stream(
                             $stream_config,
                             move |data: &mut [i16], _| {
-                                let mut tmp = vec![0.0f32; data.len()];
+                                tmp.resize(data.len(), 0.0);
                                 let n = buf.pop(&mut tmp);
                                 if n < data.len() {
                                     uc.fetch_add(1, Ordering::Relaxed);
@@ -427,12 +603,13 @@ fn build_output(
                     let fp = frames_played.clone();
                     let uc = underrun_count.clone();
                     let qs = quality_settings.clone();
+                    let mut tmp = Vec::<f32>::new();
                     let mut dither = TpdfDither::new(0x9E37_79B9_7F4A_7C15);
                     device
                         .build_output_stream(
                             $stream_config,
                             move |data: &mut [u16], _| {
-                                let mut tmp = vec![0.0f32; data.len()];
+                                tmp.resize(data.len(), 0.0);
                                 let n = buf.pop(&mut tmp);
                                 if n < data.len() {
                                     uc.fetch_add(1, Ordering::Relaxed);
@@ -464,12 +641,13 @@ fn build_output(
                     let fp = frames_played.clone();
                     let uc = underrun_count.clone();
                     let qs = quality_settings.clone();
+                    let mut tmp = Vec::<f32>::new();
                     let mut dither = TpdfDither::new(0xD1B5_4A32_D192_ED03);
                     device
                         .build_output_stream(
                             $stream_config,
                             move |data: &mut [i32], _| {
-                                let mut tmp = vec![0.0f32; data.len()];
+                                tmp.resize(data.len(), 0.0);
                                 let n = buf.pop(&mut tmp);
                                 if n < data.len() {
                                     uc.fetch_add(1, Ordering::Relaxed);
@@ -501,12 +679,13 @@ fn build_output(
                     let fp = frames_played.clone();
                     let uc = underrun_count.clone();
                     let qs = quality_settings.clone();
+                    let mut tmp = Vec::<f32>::new();
                     let mut dither = TpdfDither::new(0x94D0_49BB_1331_11EB);
                     device
                         .build_output_stream(
                             $stream_config,
                             move |data: &mut [u8], _| {
-                                let mut tmp = vec![0.0f32; data.len()];
+                                tmp.resize(data.len(), 0.0);
                                 let n = buf.pop(&mut tmp);
                                 if n < data.len() {
                                     uc.fetch_add(1, Ordering::Relaxed);
@@ -537,11 +716,12 @@ fn build_output(
                     let buf = buffer.clone();
                     let fp = frames_played.clone();
                     let uc = underrun_count.clone();
+                    let mut tmp = Vec::<f32>::new();
                     device
                         .build_output_stream(
                             $stream_config,
                             move |data: &mut [f64], _| {
-                                let mut tmp = vec![0.0f32; data.len()];
+                                tmp.resize(data.len(), 0.0);
                                 let n = buf.pop(&mut tmp);
                                 if n < data.len() {
                                     uc.fetch_add(1, Ordering::Relaxed);
@@ -595,7 +775,6 @@ fn build_output(
         output_latency_mode,
     };
 
-    stream.play().map_err(|e| e.to_string())?;
     Ok((SendStream(stream), output_info, buffer))
 }
 
@@ -631,6 +810,15 @@ pub fn start_playback(
     let underrun_count = Arc::new(AtomicU64::new(0));
     let clipped_sample_count = Arc::new(AtomicU64::new(0));
     let peak_bits = Arc::new(AtomicU64::new(0.0f64.to_bits()));
+    let processing_params = ProcessingParams {
+        volume: volume.clone(),
+        pitch: pitch.clone(),
+        algo: algo.clone(),
+        loudness_normalization_gain: norm_gain.clone(),
+        quality_settings: quality_settings.clone(),
+        clipped_sample_count: clipped_sample_count.clone(),
+        peak_bits: peak_bits.clone(),
+    };
 
     let (stream, output_info, buffer) = build_output(
         frames_played.clone(),
@@ -641,6 +829,20 @@ pub fn start_playback(
     )?;
     let sample_rate = output_info.sample_rate;
     let channels = output_info.channels;
+    let mut pipeline = DecodePipeline::new(&path, sample_rate, channels, processing_params)?;
+    if !(pitch_val.abs() > 0.01
+        && algo.lock().unwrap_or_else(|e| e.into_inner()).as_str() != "resample")
+    {
+        let mut prefill_rubberband_shifter: Option<RubberBandPitchShifter> = None;
+        prefill_audio_buffer(
+            &mut pipeline,
+            &mut prefill_rubberband_shifter,
+            &buffer,
+            &stop_flag,
+            output_buffer_ms.min(160),
+        )?;
+    }
+    stream.0.play().map_err(|e| e.to_string())?;
 
     state.stream = Some(stream);
     state.buffer = Some(buffer.clone());
@@ -659,26 +861,7 @@ pub fn start_playback(
     state.peak_bits = peak_bits.clone();
 
     let handle = thread::spawn(move || {
-        let initial_quality = quality_settings
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
-        let mut decoder = match StreamDecoder::new(
-            &path,
-            channels,
-            sample_rate,
-            &initial_quality.resampler_quality,
-        ) {
-            Ok(d) => d,
-            Err(e) => {
-                eprintln!("Failed to open decoder for {}: {}", path, e);
-                return;
-            }
-        };
-
-        let block_frames = 2048usize;
         let mut rubberband_shifter: Option<RubberBandPitchShifter> = None;
-
         loop {
             if stop_flag.load(Ordering::SeqCst) {
                 break;
@@ -688,25 +871,36 @@ pub fn start_playback(
             {
                 let mut req = seek_request.lock().unwrap_or_else(|e| e.into_inner());
                 if let Some(sec) = req.take() {
-                    if let Err(e) = decoder.seek(sec) {
+                    if let Err(e) = pipeline.seek(sec) {
                         eprintln!("Seek error: {}", e);
                     }
                     if let Some(shifter) = &mut rubberband_shifter {
                         shifter.reset();
                     }
                     buffer.clear();
+                    if let Err(e) = prefill_audio_buffer(
+                        &mut pipeline,
+                        &mut rubberband_shifter,
+                        &buffer,
+                        &stop_flag,
+                        80,
+                    ) {
+                        eprintln!("Prefill error after seek: {}", e);
+                    }
                     frames_played
                         .store((sec * sample_rate as f64).round() as u64, Ordering::SeqCst);
                 }
             }
 
-            let current_quality = quality_settings
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .clone();
-
-            let mut block = match decoder.read_block(block_frames) {
-                Ok(b) => b,
+            let block = match pipeline.next_block(&mut rubberband_shifter) {
+                Ok(Some(block)) => block,
+                Ok(None) => {
+                    // End of stream: let the hardware drain whatever is still buffered.
+                    while buffer.len() > 0 && !stop_flag.load(Ordering::SeqCst) {
+                        thread::sleep(Duration::from_millis(20));
+                    }
+                    break;
+                }
                 Err(e) => {
                     eprintln!("Decode error: {}", e);
                     break;
@@ -714,83 +908,9 @@ pub fn start_playback(
             };
 
             if block.is_empty() {
-                if let Some(shifter) = &mut rubberband_shifter {
-                    let tail = shifter.finish();
-                    if !tail.is_empty() {
-                        buffer.push(&tail, &stop_flag);
-                    }
-                }
-                // End of stream: let the hardware drain whatever is still buffered.
-                while buffer.len() > 0 && !stop_flag.load(Ordering::SeqCst) {
-                    thread::sleep(Duration::from_millis(20));
-                }
-                break;
+                continue;
             }
-
-            // 1. Master volume * loudness normalization gain.
-            let total_gain = *volume.lock().unwrap_or_else(|e| e.into_inner())
-                * *norm_gain.lock().unwrap_or_else(|e| e.into_inner());
-            if (total_gain - 1.0).abs() > 0.001 {
-                for sample in block.iter_mut() {
-                    *sample *= total_gain;
-                }
-            }
-
-            // 2. Pitch shift (block-based; only meaningful for stereo output).
-            let current_pitch = *pitch.lock().unwrap_or_else(|e| e.into_inner());
-            if current_pitch.abs() > 0.01 && channels == 2 {
-                let current_algo = algo.lock().unwrap_or_else(|e| e.into_inner()).clone();
-                let pitch_factor = 2.0f64.powf(current_pitch / 12.0);
-                let processed = match current_algo.as_str() {
-                    "resample" => dsp::pitch_shift_resample(&block, pitch_factor),
-                    "ola" => dsp::pitch_shift_ola(&block, pitch_factor),
-                    "wsola" => dsp::pitch_shift_wsola(&block, pitch_factor),
-                    _ => {
-                        if rubberband_shifter.is_none() {
-                            match RubberBandPitchShifter::new(
-                                sample_rate,
-                                channels,
-                                pitch_factor,
-                                &current_quality.rubberband_window,
-                                current_quality.rubberband_formant_preserved,
-                            ) {
-                                Ok(shifter) => {
-                                    rubberband_shifter = Some(shifter);
-                                }
-                                Err(e) => {
-                                    eprintln!("Rubber Band initialization failed: {}", e);
-                                }
-                            }
-                        }
-                        if let Some(shifter) = &mut rubberband_shifter {
-                            shifter.set_formant_preserved(
-                                current_quality.rubberband_formant_preserved,
-                            );
-                            shifter.process(&block, pitch_factor)
-                        } else {
-                            block.clone()
-                        }
-                    }
-                };
-                if !processed.is_empty() {
-                    let mut protected = processed;
-                    apply_post_dsp_protection(
-                        &mut protected,
-                        current_quality.peak_protection_enabled,
-                        &clipped_sample_count,
-                        &peak_bits,
-                    );
-                    buffer.push(&protected, &stop_flag);
-                }
-            } else {
-                apply_post_dsp_protection(
-                    &mut block,
-                    current_quality.peak_protection_enabled,
-                    &clipped_sample_count,
-                    &peak_bits,
-                );
-                buffer.push(&block, &stop_flag);
-            }
+            buffer.push(&block, &stop_flag);
         }
     });
 
@@ -905,6 +1025,18 @@ pub fn get_output_info() -> AudioOutputInfo {
     } else {
         f64::NEG_INFINITY
     };
+    let queued_ms = if state.sample_rate > 0 && state.channels > 0 {
+        state
+            .buffer
+            .as_ref()
+            .map(|buffer| {
+                ((buffer.len() as u64 * 1000) / (state.sample_rate as u64 * state.channels as u64))
+                    as u32
+            })
+            .unwrap_or(0)
+    } else {
+        0
+    };
 
     AudioOutputInfo {
         device_name: info.device_name,
@@ -914,6 +1046,7 @@ pub fn get_output_info() -> AudioOutputInfo {
         buffer_size: info.buffer_size,
         output_latency_mode: info.output_latency_mode,
         output_buffer_ms: state.output_buffer_ms,
+        queued_ms,
         underruns: state.underrun_count.load(Ordering::Relaxed),
         clipped_samples: state.clipped_sample_count.load(Ordering::Relaxed),
         peak_db,
