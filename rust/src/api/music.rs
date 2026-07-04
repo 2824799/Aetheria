@@ -11,6 +11,7 @@ use rusqlite::params;
 use rusqlite::OptionalExtension;
 use std::fs;
 use std::path::Path;
+use symphonia::core::errors::Error;
 use symphonia::core::formats::FormatOptions;
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
@@ -185,14 +186,21 @@ fn estimate_duration_with_symphonia(path: &Path) -> Option<f64> {
             &MetadataOptions::default(),
         )
         .ok()?;
-    let format = probed.format;
-    let track = format
-        .tracks()
-        .iter()
-        .find(|t| t.codec_params.codec != symphonia::core::codecs::CODEC_TYPE_NULL)?;
+    let mut format = probed.format;
+    let (track_id, n_frames, sample_rate, time_base) = {
+        let track = format
+            .tracks()
+            .iter()
+            .find(|t| t.codec_params.codec != symphonia::core::codecs::CODEC_TYPE_NULL)?;
+        (
+            track.id,
+            track.codec_params.n_frames,
+            track.codec_params.sample_rate,
+            track.codec_params.time_base,
+        )
+    };
 
-    if let (Some(n_frames), Some(sample_rate)) =
-        (track.codec_params.n_frames, track.codec_params.sample_rate)
+    if let (Some(n_frames), Some(sample_rate)) = (n_frames, sample_rate)
     {
         if sample_rate > 0 {
             let duration = n_frames as f64 / sample_rate as f64;
@@ -202,13 +210,46 @@ fn estimate_duration_with_symphonia(path: &Path) -> Option<f64> {
         }
     }
 
-    if let (Some(time_base), Some(n_frames)) =
-        (track.codec_params.time_base, track.codec_params.n_frames)
-    {
+    if let (Some(time_base), Some(n_frames)) = (time_base, n_frames) {
         let time = time_base.calc_time(n_frames);
         let duration = time.seconds as f64 + time.frac;
         if duration.is_finite() && duration > 0.0 {
             return Some(duration);
+        }
+    }
+
+    let mut last_packet_end = None;
+    loop {
+        match format.next_packet() {
+            Ok(packet) => {
+                if packet.track_id() != track_id {
+                    continue;
+                }
+                last_packet_end = Some(packet.ts().saturating_add(packet.dur()));
+            }
+            Err(Error::IoError(ref err))
+                if err.kind() == std::io::ErrorKind::UnexpectedEof =>
+            {
+                break;
+            }
+            Err(Error::ResetRequired) => continue,
+            Err(_) => break,
+        }
+    }
+
+    if let Some(packet_end) = last_packet_end {
+        if let Some(time_base) = time_base {
+            let time = time_base.calc_time(packet_end);
+            let duration = time.seconds as f64 + time.frac;
+            if duration.is_finite() && duration > 0.0 {
+                return Some(duration);
+            }
+        }
+        if let Some(sample_rate) = sample_rate {
+            let duration = packet_end as f64 / sample_rate as f64;
+            if duration.is_finite() && duration > 0.0 {
+                return Some(duration);
+            }
         }
     }
 

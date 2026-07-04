@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:math' as math;
 import 'package:provider/provider.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:aetheria/core/providers/library_provider.dart';
@@ -60,36 +61,122 @@ class _MainContentState extends State<MainContent> {
   }
 
   Future<void> _importFolder(LibraryProvider provider) async {
+    bool progressDialogOpen = false;
     try {
       String? selectedDirectory = await FilePicker.platform.getDirectoryPath();
       if (selectedDirectory == null) return;
 
+      String progressTitle = '正在扫描文件夹...';
+      String progressSubtitle = '扫描完成后会继续读取音频元数据。';
+      double? progressValue;
+      void Function(void Function())? updateProgressDialog;
+
       showDialog(
         context: context,
         barrierDismissible: false,
-        builder: (ctx) => const Center(child: CircularProgressIndicator()),
+        builder: (ctx) => StatefulBuilder(
+          builder: (dialogContext, setDialogState) {
+            updateProgressDialog = setDialogState;
+            progressDialogOpen = true;
+            final cfg = context.read<UIThemeProvider>().currentTheme;
+            return Center(
+              child: Material(
+                color: Colors.transparent,
+                child: Container(
+                  width: 360,
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: cfg.bgPanel,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: cfg.border),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.18),
+                        blurRadius: 24,
+                        offset: const Offset(0, 10),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        progressTitle,
+                        style: TextStyle(
+                          color: cfg.textMain,
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        progressSubtitle,
+                        style: TextStyle(
+                          color: cfg.textSub,
+                          fontSize: 12,
+                          height: 1.5,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(999),
+                        child: LinearProgressIndicator(
+                          minHeight: 6,
+                          value: progressValue,
+                          color: cfg.accent,
+                          backgroundColor: cfg.border.withOpacity(0.45),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
       );
+      await Future<void>.delayed(Duration.zero);
 
-      // Scan directory for preview
       final filepaths = await music.scanDirectoryForPreview(
         dirPath: selectedDirectory,
       );
       if (filepaths.isEmpty) {
-        Navigator.of(context).pop();
+        if (context.mounted && progressDialogOpen) {
+          Navigator.of(context).pop();
+          progressDialogOpen = false;
+        }
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('所选文件夹中未找到支持的音频文件')));
         return;
       }
 
-      // Load metadata previews
-      final previews = await music.previewAudioMetadata(filepaths: filepaths);
+      final previews = <dynamic>[];
+      const batchSize = 24;
+      for (int start = 0; start < filepaths.length; start += batchSize) {
+        final end = math.min(start + batchSize, filepaths.length);
+        updateProgressDialog?.call(() {
+          progressTitle = '正在读取音频元数据...';
+          progressSubtitle = '已处理 $end / ${filepaths.length} 首候选歌曲';
+          progressValue = end / filepaths.length;
+        });
+        final batch = await music.previewAudioMetadata(
+          filepaths: filepaths.sublist(start, end),
+        );
+        previews.addAll(batch);
+      }
 
-      Navigator.of(context).pop(); // pop progress loader
+      if (context.mounted && progressDialogOpen) {
+        Navigator.of(context).pop();
+        progressDialogOpen = false;
+      }
 
-      // Present import preview modal (We'll implement a clean local dialog)
       _showImportPreviewModal(previews, provider);
     } catch (e) {
+      if (context.mounted && progressDialogOpen) {
+        Navigator.of(context).pop();
+      }
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('扫描文件夹错误: $e')));

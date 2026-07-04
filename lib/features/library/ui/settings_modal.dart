@@ -680,6 +680,26 @@ class _SettingsModalState extends State<SettingsModal> {
                 ),
               ],
             ),
+            if (libraryProvider.isRefreshingDatabase) ...[
+              const SizedBox(height: 12),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(999),
+                child: LinearProgressIndicator(
+                  minHeight: 6,
+                  color: cfg.accent,
+                  backgroundColor: cfg.border.withOpacity(0.45),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '正在深度重扫音频属性与响度信息，旧库里解析失败的 M4A 时长也会在这一轮里重新校正。',
+                style: TextStyle(
+                  fontSize: 10,
+                  color: cfg.textSub,
+                  height: 1.5,
+                ),
+              ),
+            ],
             const SizedBox(height: 8),
             Text(
               '* 点击将深度重新扫描所有音频（包括时长、比特率、声道、位深度），并完整解码全部音频文件以计算最精准的全局听感音量指标（耗时可能较长，请重新加载应用生效）。',

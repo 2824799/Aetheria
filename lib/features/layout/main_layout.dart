@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'dart:ui';
 import 'package:provider/provider.dart';
 import 'package:aetheria/core/providers/library_provider.dart';
 import 'package:aetheria/core/providers/audio_player_provider.dart';
@@ -19,29 +18,33 @@ class MainLayout extends StatefulWidget {
 
 class _MainLayoutState extends State<MainLayout> with SingleTickerProviderStateMixin {
   late AnimationController _drawerController;
-  late Animation<double> _drawerFade;
   late Animation<Offset> _drawerSlide;
 
   @override
   void initState() {
     super.initState();
     _drawerController = AnimationController(
-      duration: const Duration(milliseconds: 360),
+      duration: const Duration(milliseconds: 180),
       vsync: this,
-    );
-    _drawerFade = CurvedAnimation(
-      parent: _drawerController,
-      curve: Curves.easeOutCubic,
     );
     _drawerSlide = Tween<Offset>(
       begin: const Offset(1, 0),
       end: Offset.zero,
     ).animate(CurvedAnimation(
       parent: _drawerController,
-      curve: Curves.easeOutCubic,
+      curve: Curves.easeOutQuart,
     ));
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<LibraryProvider>().loadLibrary();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final libraryProvider = context.read<LibraryProvider>();
+      await libraryProvider.loadLibrary();
+      if (!mounted) {
+        return;
+      }
+      await context.read<AudioPlayerProvider>().restorePlaybackState(
+        libraryProvider.songs,
+        libraryProvider.libraryPath,
+        audioServerPort: libraryProvider.audioServerPort,
+      );
     });
   }
 
@@ -108,42 +111,28 @@ class _MainLayoutState extends State<MainLayout> with SingleTickerProviderStateM
                             const MainContent(),
                             if (_drawerController.value > 0.0 || audioProvider.isDetailOpen)
                               Positioned.fill(
-                                child: AnimatedBuilder(
-                                  animation: _drawerFade,
-                                  builder: (context, child) {
-                                    final progress = _drawerFade.value;
-                                    return Opacity(
-                                      opacity: progress,
-                                      child: Stack(
-                                        children: [
-                                          Positioned.fill(
-                                            child: GestureDetector(
-                                              onTap: () => audioProvider.setDetailOpen(false),
-                                              child: BackdropFilter(
-                                                filter: ImageFilter.blur(
-                                                  sigmaX: 18 * progress,
-                                                  sigmaY: 18 * progress,
-                                                ),
-                                                child: Container(color: Colors.black.withOpacity(0.18)),
-                                              ),
-                                            ),
-                                          ),
-                                          Positioned(
-                                            right: 0,
-                                            top: 0,
-                                            bottom: 0,
-                                            width: 380,
-                                            child: SlideTransition(
-                                              position: _drawerSlide,
-                                              child: const DetailPane(),
-                                            ),
-                                          ),
-                                        ],
+                                child: Stack(
+                                  children: [
+                                    Positioned.fill(
+                                      child: GestureDetector(
+                                        behavior: HitTestBehavior.translucent,
+                                        onTap: () => audioProvider.setDetailOpen(false),
+                                        child: const SizedBox.expand(),
                                       ),
-                                    );
-                                  },
+                                    ),
+                                    Positioned(
+                                      right: 0,
+                                      top: 0,
+                                      bottom: 0,
+                                      width: 380,
+                                      child: SlideTransition(
+                                        position: _drawerSlide,
+                                        child: const DetailPane(),
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                            ),
+                              ),
                           ],
                         ),
                       ),
