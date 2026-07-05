@@ -766,6 +766,27 @@ class AudioPlayerProvider extends ChangeNotifier {
     unawaited(_persistPlaybackState());
   }
 
+  Future<void> stopForLibrarySync() async {
+    _stopPositionTimer();
+    _stopOutputInfoTimer();
+    await music.stopRustPlayback();
+    isPlaying = false;
+    _hasPreparedPlayback = false;
+    playingSong = null;
+    playingVersion = null;
+    activeSong = null;
+    currentQueue = [];
+    currentPosition = Duration.zero;
+    totalDuration = Duration.zero;
+    _pendingRestorePosition = null;
+    notifyListeners();
+    _updateNotification();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await _clearPersistedPlaybackState(prefs);
+    } catch (_) {}
+  }
+
   Future<void> playSong(
     Song song,
     List<Song> queue,
@@ -979,19 +1000,30 @@ class AudioPlayerProvider extends ChangeNotifier {
     }
   }
 
+  String? _currentPlayingAudioPath() {
+    final version = playingVersion;
+    if (version == null || _cachedLibraryPath.isEmpty) {
+      return null;
+    }
+    return '$_cachedLibraryPath/${version.filepath}'.replaceAll('\\', '/');
+  }
+
   void _updateNotification() {
     if (Platform.isAndroid && playingSong != null) {
-      unawaited(
-        NativeAudioHelper.showNotification(<String, dynamic>{
-          'title': playingSong!.title,
-          'artist': playingSong!.artist ?? '未知歌手',
-          'isPlaying': isPlaying,
-          'positionMs': currentPosition.inMilliseconds,
-          'durationMs': totalDuration.inMilliseconds,
-          'hasPrevious': _hasPreviousInQueue(),
-          'hasNext': _hasNextInQueue(),
-        }),
-      );
+      final audioPath = _currentPlayingAudioPath();
+      final payload = <String, dynamic>{
+        'title': playingSong!.title,
+        'artist': playingSong!.artist ?? '未知歌手',
+        'isPlaying': isPlaying,
+        'positionMs': currentPosition.inMilliseconds,
+        'durationMs': totalDuration.inMilliseconds,
+        'hasPrevious': _hasPreviousInQueue(),
+        'hasNext': _hasNextInQueue(),
+      };
+      if (audioPath != null) {
+        payload['audioPath'] = audioPath;
+      }
+      unawaited(NativeAudioHelper.showNotification(payload));
     }
   }
 

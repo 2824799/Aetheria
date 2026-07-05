@@ -64,6 +64,86 @@ class _MobileLayoutState extends State<MobileLayout> {
     return '${d.toStringAsFixed(1)} ${suffixes[i]}';
   }
 
+  Future<bool> _confirmDeleteSong(BuildContext context, Song song) async {
+    final firstConfirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('删除歌曲？'),
+        content: Text('即将从音乐库中删除《${song.title}》，并同时删除本地物理音频文件。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('取消'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.redAccent,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('继续删除'),
+          ),
+        ],
+      ),
+    );
+
+    if (firstConfirm != true || !context.mounted) {
+      return false;
+    }
+
+    final finalConfirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('再次确认彻底删除'),
+        content: Text('最后确认：《${song.title}》的数据库记录和本地音频文件都会被删除，此操作不可撤销。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('取消'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.redAccent,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('彻底删除'),
+          ),
+        ],
+      ),
+    );
+
+    return finalConfirm == true;
+  }
+
+  Future<bool> _confirmDeleteVersion(
+    BuildContext context,
+    AudioVersion version,
+  ) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('删除音源版本？'),
+        content: Text('确定要删除音源版本“${version.originalName}”吗？这会同时删除对应的本地音频文件。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('取消'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.redAccent,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('删除版本'),
+          ),
+        ],
+      ),
+    );
+    return confirm == true;
+  }
+
   void _updateImportProgress({
     required String title,
     required String subtitle,
@@ -828,29 +908,7 @@ class _MobileLayoutState extends State<MobileLayout> {
                   ),
                   onTap: () async {
                     Navigator.of(ctx).pop();
-                    final confirm = await showDialog<bool>(
-                      context: context,
-                      builder: (c) => AlertDialog(
-                        title: const Text('删除歌曲？'),
-                        content: Text(
-                          '确定要彻底删除歌曲《${song.title}》吗？这会同时删除本地音乐文件！',
-                        ),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.of(c).pop(false),
-                            child: const Text('取消'),
-                          ),
-                          ElevatedButton(
-                            onPressed: () => Navigator.of(c).pop(true),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.redAccent,
-                              foregroundColor: Colors.white,
-                            ),
-                            child: const Text('删除'),
-                          ),
-                        ],
-                      ),
-                    );
+                    final confirm = await _confirmDeleteSong(context, song);
                     if (confirm == true) {
                       try {
                         await libraryProvider.deleteSong(song.id);
@@ -1183,9 +1241,20 @@ class _MobileLayoutState extends State<MobileLayout> {
                                   color: Colors.redAccent,
                                 ),
                                 onPressed: () async {
+                                  final confirm = await _confirmDeleteVersion(
+                                    context,
+                                    v,
+                                  );
+                                  if (!confirm) {
+                                    return;
+                                  }
                                   try {
                                     await libraryProvider.deleteAudioVersion(
                                       v.id,
+                                    );
+                                    if (!context.mounted) return;
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(content: Text('音源版本已删除')),
                                     );
                                   } catch (e) {
                                     if (!context.mounted) return;

@@ -34,6 +34,57 @@ class DetailPane extends StatelessWidget {
     return '${d.toStringAsFixed(1)} ${suffixes[i]}';
   }
 
+  String _formatLoudness(double? loudness) {
+    if (loudness == null) {
+      return '响度: 待扫描';
+    }
+    return '响度: ${loudness.toStringAsFixed(1)} LUFS';
+  }
+
+  Future<bool> _confirmDeleteVersion(
+    BuildContext context,
+    AudioVersion version,
+  ) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('删除音源版本？'),
+        content: Text('确定要删除音源版本“${version.originalName}”吗？这会同时删除对应的本地音频文件。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('取消'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.redAccent,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('删除版本'),
+          ),
+        ],
+      ),
+    );
+    return confirm == true;
+  }
+
+  AudioVersion? _displayVersionForSong(
+    Song song,
+    AudioPlayerProvider audioProvider,
+  ) {
+    final playingVersion = audioProvider.playingVersion;
+    if (audioProvider.playingSong?.id == song.id && playingVersion != null) {
+      return playingVersion;
+    }
+    for (final version in song.versions) {
+      if (version.isPrimary) {
+        return version;
+      }
+    }
+    return song.versions.isNotEmpty ? song.versions.first : null;
+  }
+
   Future<void> _saveSongMetadata(
     BuildContext context,
     Song song, {
@@ -230,6 +281,7 @@ class DetailPane extends StatelessWidget {
     if (song.id.isEmpty) {
       return const SizedBox.shrink();
     }
+    final displayVersion = _displayVersionForSong(song, audioProvider);
 
     return ClipRRect(
       borderRadius: const BorderRadius.horizontal(left: Radius.circular(22)),
@@ -318,6 +370,32 @@ class DetailPane extends StatelessWidget {
                       _saveSongMetadata(context, song, artist: value),
                 ),
               ),
+              if (displayVersion != null) ...[
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: cfg.bgHover.withOpacity(0.14),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: cfg.border.withOpacity(0.65)),
+                  ),
+                  child: Text(
+                    _formatLoudness(displayVersion.loudness),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: displayVersion.loudness == null
+                          ? cfg.textSub
+                          : cfg.textMain,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
               const SizedBox(height: 16),
 
               // Tabs (Versions, Tags, Lyrics)
@@ -442,7 +520,7 @@ class DetailPane extends StatelessWidget {
 
                         // Technical specs
                         Text(
-                          '${v.format?.toUpperCase() ?? "未知"} | ${(v.bitrate ?? 0) ~/ 1000}kbps | ${v.sampleRate != null ? (v.sampleRate! / 1000).toStringAsFixed(1) : "未知"}kHz | $durationMin:$durationSec | ${_formatFileSize(v.fileSize.toInt())}',
+                          '${v.format?.toUpperCase() ?? "未知"} | ${(v.bitrate ?? 0) ~/ 1000}kbps | ${v.sampleRate != null ? (v.sampleRate! / 1000).toStringAsFixed(1) : "未知"}kHz | $durationMin:$durationSec | ${_formatFileSize(v.fileSize.toInt())} | ${_formatLoudness(v.loudness)}',
                           style: TextStyle(
                             fontSize: 10,
                             color: cfg.textSub,
@@ -581,6 +659,16 @@ class DetailPane extends StatelessWidget {
                             if (song.versions.length > 1)
                               TextButton.icon(
                                 onPressed: () async {
+                                  final confirmed = await _confirmDeleteVersion(
+                                    context,
+                                    v,
+                                  );
+                                  if (!confirmed) {
+                                    return;
+                                  }
+                                  if (!context.mounted) {
+                                    return;
+                                  }
                                   final messenger = ScaffoldMessenger.of(
                                     context,
                                   );

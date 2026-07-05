@@ -9,6 +9,7 @@ use lofty::probe::Probe;
 use lofty::tag::Accessor;
 use rusqlite::params;
 use rusqlite::OptionalExtension;
+use std::cmp::Ordering;
 use std::fs;
 use std::path::Path;
 use symphonia::core::errors::Error;
@@ -23,6 +24,39 @@ fn is_raw_aac_path(path: &Path) -> bool {
         .and_then(|ext| ext.to_str())
         .map(|ext| ext.eq_ignore_ascii_case("aac"))
         .unwrap_or(false)
+}
+
+#[cfg(windows)]
+#[link(name = "Shlwapi")]
+extern "system" {
+    fn StrCmpLogicalW(psz1: *const u16, psz2: *const u16) -> i32;
+}
+
+#[cfg(windows)]
+fn explorer_style_compare(a: &str, b: &str) -> Ordering {
+    let a_wide: Vec<u16> = a.encode_utf16().chain(std::iter::once(0)).collect();
+    let b_wide: Vec<u16> = b.encode_utf16().chain(std::iter::once(0)).collect();
+    unsafe { StrCmpLogicalW(a_wide.as_ptr(), b_wide.as_ptr()).cmp(&0) }
+}
+
+#[cfg(not(windows))]
+fn explorer_style_compare(a: &str, b: &str) -> Ordering {
+    a.to_lowercase()
+        .cmp(&b.to_lowercase())
+        .then_with(|| a.cmp(b))
+}
+
+fn sort_songs_like_explorer(songs: &mut [Song]) {
+    songs.sort_by(|a, b| {
+        explorer_style_compare(&a.title, &b.title)
+            .then_with(|| {
+                explorer_style_compare(
+                    a.artist.as_deref().unwrap_or(""),
+                    b.artist.as_deref().unwrap_or(""),
+                )
+            })
+            .then_with(|| a.id.cmp(&b.id))
+    });
 }
 
 #[frb(sync)]
@@ -41,9 +75,11 @@ pub fn initialize_library_path(path: String) -> Result<(), String> {
 pub fn get_songs() -> Result<Vec<Song>, String> {
     let conn = establish_connection().map_err(|e| e.to_string())?;
 
-    let mut stmt = conn.prepare(
-        "SELECT id, title, artist, album, lyrics, cover_path, rating, created_at FROM songs ORDER BY title ASC"
-    ).map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, title, artist, album, lyrics, cover_path, rating, created_at FROM songs",
+        )
+        .map_err(|e| e.to_string())?;
 
     let song_rows = stmt
         .query_map([], |row| {
@@ -123,6 +159,8 @@ pub fn get_songs() -> Result<Vec<Song>, String> {
 
         songs.push(song);
     }
+
+    sort_songs_like_explorer(&mut songs);
 
     Ok(songs)
 }

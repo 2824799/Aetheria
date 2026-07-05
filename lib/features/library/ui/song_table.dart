@@ -74,6 +74,7 @@ class _SongTableState extends State<SongTable> {
   bool _boxSelectionAdditive = false;
   DateTime? _lastPrimaryTapAt;
   String? _lastPrimaryTapSongId;
+  DateTime? _ignoreRowTapUntil;
   double _viewportWidth = 0;
 
   @override
@@ -181,6 +182,11 @@ class _SongTableState extends State<SongTable> {
     LibraryProvider libraryProvider,
     AudioPlayerProvider audioProvider,
   ) async {
+    final ignoreUntil = _ignoreRowTapUntil;
+    if (ignoreUntil != null && DateTime.now().isBefore(ignoreUntil)) {
+      return;
+    }
+
     final isCtrlPressed = _isMultiSelectModifierPressed();
     final isShiftPressed = HardwareKeyboard.instance.isShiftPressed;
 
@@ -405,7 +411,7 @@ class _SongTableState extends State<SongTable> {
       return;
     }
     if (cmd == 'delete') {
-      _confirmDeleteSongs(context, targetSongIds, provider);
+      await _confirmDeleteSongs(context, targetSongIds, provider);
       return;
     }
     if (cmd == 'remove_playlist' && activePlaylistId != null) {
@@ -417,55 +423,102 @@ class _SongTableState extends State<SongTable> {
     }
   }
 
-  void _confirmDeleteSongs(
+  String _deleteSongSummary(List<String> songIds, LibraryProvider provider) {
+    final songsById = {for (final song in provider.songs) song.id: song};
+    final titles = songIds
+        .map((id) => songsById[id]?.title)
+        .whereType<String>()
+        .toList();
+    if (songIds.length == 1) {
+      return titles.isNotEmpty ? '《${titles.first}》' : '这首歌曲';
+    }
+    if (titles.isEmpty) {
+      return '这 ${songIds.length} 首歌曲';
+    }
+    final preview = titles.take(3).map((title) => '《$title》').join('、');
+    final suffix = songIds.length > 3 ? ' 等 ${songIds.length} 首歌曲' : '';
+    return '$preview$suffix';
+  }
+
+  Future<void> _confirmDeleteSongs(
     BuildContext context,
     List<String> songIds,
     LibraryProvider provider,
-  ) {
-    showDialog(
+  ) async {
+    final summary = _deleteSongSummary(songIds, provider);
+    final firstConfirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('彻底删除歌曲？'),
-        content: Text('您确定要将这 ${songIds.length} 首歌曲从音乐库彻底删除吗？这会同时删除本地物理音频文件！'),
+        title: const Text('删除歌曲？'),
+        content: Text('即将从音乐库中删除 $summary，并同时删除本地物理音频文件。'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
+            onPressed: () => Navigator.of(ctx).pop(false),
             child: const Text('取消'),
           ),
           ElevatedButton(
-            onPressed: () async {
-              Navigator.of(ctx).pop();
-              try {
-                for (final id in songIds) {
-                  await provider.deleteSong(id);
-                }
-                if (!mounted) {
-                  return;
-                }
-                setState(() {
-                  _selectedSongIds.clear();
-                });
-                ScaffoldMessenger.of(
-                  context,
-                ).showSnackBar(const SnackBar(content: Text('删除歌曲成功')));
-              } catch (e) {
-                if (!context.mounted) {
-                  return;
-                }
-                ScaffoldMessenger.of(
-                  context,
-                ).showSnackBar(SnackBar(content: Text('删除失败: $e')));
-              }
-            },
+            onPressed: () => Navigator.of(ctx).pop(true),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.redAccent,
               foregroundColor: Colors.white,
             ),
-            child: const Text('确定删除'),
+            child: const Text('继续删除'),
           ),
         ],
       ),
     );
+
+    if (firstConfirm != true || !context.mounted) {
+      return;
+    }
+
+    final finalConfirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('再次确认彻底删除'),
+        content: Text('最后确认：$summary 的数据库记录和本地音频文件都会被删除，此操作不可撤销。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('取消'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.redAccent,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('彻底删除'),
+          ),
+        ],
+      ),
+    );
+
+    if (finalConfirm != true || !context.mounted) {
+      return;
+    }
+
+    try {
+      for (final id in songIds) {
+        await provider.deleteSong(id);
+      }
+      if (!mounted || !context.mounted) {
+        return;
+      }
+      setState(() {
+        _selectedSongIds.clear();
+      });
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('删除歌曲成功')));
+    } catch (e) {
+      if (!context.mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('删除失败: $e')));
+    }
   }
 
   void _handlePointerDown(PointerDownEvent event) {
@@ -1017,53 +1070,67 @@ class _SongTableState extends State<SongTable> {
                                         children: [
                                           SizedBox(
                                             width: _leadingColumnWidth,
-                                            child: IconButton(
-                                              icon: Icon(
-                                                isCurrentlyPlaying &&
-                                                        audioProvider.isPlaying
-                                                    ? Icons.pause_circle_filled
-                                                    : Icons.play_circle_filled,
-                                                size: 18,
-                                                color: isCurrentlyPlaying
-                                                    ? const Color(0xFF10B981)
-                                                    : cfg.textSub,
-                                              ),
-                                              onPressed: () async {
-                                                if (isCurrentlyPlaying) {
-                                                  await audioProvider
-                                                      .playPause();
-                                                  return;
-                                                }
-                                                try {
-                                                  await audioProvider.playSong(
-                                                    song,
-                                                    songs,
-                                                    libraryProvider.libraryPath,
-                                                    audioServerPort:
-                                                        libraryProvider
-                                                            .audioServerPort,
-                                                  );
-                                                } catch (e) {
-                                                  if (!context.mounted) {
+                                            child: Listener(
+                                              onPointerDown: (_) {
+                                                _ignoreRowTapUntil =
+                                                    DateTime.now().add(
+                                                      const Duration(
+                                                        milliseconds: 320,
+                                                      ),
+                                                    );
+                                              },
+                                              child: IconButton(
+                                                icon: Icon(
+                                                  isCurrentlyPlaying &&
+                                                          audioProvider
+                                                              .isPlaying
+                                                      ? Icons
+                                                            .pause_circle_filled
+                                                      : Icons
+                                                            .play_circle_filled,
+                                                  size: 18,
+                                                  color: isCurrentlyPlaying
+                                                      ? const Color(0xFF10B981)
+                                                      : cfg.textSub,
+                                                ),
+                                                onPressed: () async {
+                                                  if (isCurrentlyPlaying) {
+                                                    await audioProvider
+                                                        .playPause();
                                                     return;
                                                   }
-                                                  ScaffoldMessenger.of(
-                                                    context,
-                                                  ).showSnackBar(
-                                                    SnackBar(
-                                                      content: Text(
-                                                        e.toString(),
+                                                  try {
+                                                    await audioProvider.playSong(
+                                                      song,
+                                                      songs,
+                                                      libraryProvider
+                                                          .libraryPath,
+                                                      audioServerPort:
+                                                          libraryProvider
+                                                              .audioServerPort,
+                                                    );
+                                                  } catch (e) {
+                                                    if (!context.mounted) {
+                                                      return;
+                                                    }
+                                                    ScaffoldMessenger.of(
+                                                      context,
+                                                    ).showSnackBar(
+                                                      SnackBar(
+                                                        content: Text(
+                                                          e.toString(),
+                                                        ),
                                                       ),
+                                                    );
+                                                  }
+                                                },
+                                                padding: EdgeInsets.zero,
+                                                constraints:
+                                                    const BoxConstraints.tightFor(
+                                                      width: 36,
+                                                      height: 36,
                                                     ),
-                                                  );
-                                                }
-                                              },
-                                              padding: EdgeInsets.zero,
-                                              constraints:
-                                                  const BoxConstraints.tightFor(
-                                                    width: 36,
-                                                    height: 36,
-                                                  ),
+                                              ),
                                             ),
                                           ),
                                           for (final column in _columnOrder)

@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:aetheria/core/providers/library_provider.dart';
 import 'package:aetheria/core/providers/audio_player_provider.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
+import 'package:aetheria/core/providers/sync_provider.dart';
 import 'package:aetheria/features/sidebar/ui/sidebar.dart';
 import 'package:aetheria/features/library/ui/main_content.dart';
 import 'package:aetheria/features/player/ui/play_bar.dart';
@@ -16,9 +17,11 @@ class MainLayout extends StatefulWidget {
   State<MainLayout> createState() => _MainLayoutState();
 }
 
-class _MainLayoutState extends State<MainLayout> with SingleTickerProviderStateMixin {
+class _MainLayoutState extends State<MainLayout>
+    with SingleTickerProviderStateMixin {
   late AnimationController _drawerController;
   late Animation<Offset> _drawerSlide;
+  String? _handledSyncRequestId;
 
   @override
   void initState() {
@@ -27,16 +30,20 @@ class _MainLayoutState extends State<MainLayout> with SingleTickerProviderStateM
       duration: const Duration(milliseconds: 180),
       vsync: this,
     );
-    _drawerSlide = Tween<Offset>(
-      begin: const Offset(1, 0),
-      end: Offset.zero,
-    ).animate(CurvedAnimation(
-      parent: _drawerController,
-      curve: Curves.easeOutQuart,
-    ));
+    _drawerSlide = Tween<Offset>(begin: const Offset(1, 0), end: Offset.zero)
+        .animate(
+          CurvedAnimation(
+            parent: _drawerController,
+            curve: Curves.easeOutQuart,
+          ),
+        );
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final libraryProvider = context.read<LibraryProvider>();
       await libraryProvider.loadLibrary();
+      if (!mounted) {
+        return;
+      }
+      await context.read<SyncProvider>().start(libraryProvider);
       if (!mounted) {
         return;
       }
@@ -60,7 +67,19 @@ class _MainLayoutState extends State<MainLayout> with SingleTickerProviderStateM
     final libraryProvider = context.watch<LibraryProvider>();
     final audioProvider = context.watch<AudioPlayerProvider>();
     final themeProvider = context.watch<UIThemeProvider>();
+    final syncProvider = context.watch<SyncProvider>();
     final cfg = themeProvider.currentTheme;
+
+    final incomingRequest = syncProvider.incomingRequest;
+    if (incomingRequest != null &&
+        incomingRequest.id != _handledSyncRequestId) {
+      _handledSyncRequestId = incomingRequest.id;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _showIncomingSyncDialog(incomingRequest);
+        }
+      });
+    }
 
     if (audioProvider.isDetailOpen) {
       _drawerController.forward();
@@ -109,14 +128,16 @@ class _MainLayoutState extends State<MainLayout> with SingleTickerProviderStateM
                         child: Stack(
                           children: [
                             const MainContent(),
-                            if (_drawerController.value > 0.0 || audioProvider.isDetailOpen)
+                            if (_drawerController.value > 0.0 ||
+                                audioProvider.isDetailOpen)
                               Positioned.fill(
                                 child: Stack(
                                   children: [
                                     Positioned.fill(
                                       child: GestureDetector(
                                         behavior: HitTestBehavior.translucent,
-                                        onTap: () => audioProvider.setDetailOpen(false),
+                                        onTap: () =>
+                                            audioProvider.setDetailOpen(false),
                                         child: const SizedBox.expand(),
                                       ),
                                     ),
@@ -146,6 +167,40 @@ class _MainLayoutState extends State<MainLayout> with SingleTickerProviderStateM
         ),
       ),
     );
+  }
+
+  Future<void> _showIncomingSyncDialog(IncomingSyncRequest request) async {
+    final syncProvider = context.read<SyncProvider>();
+    final approved = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('同步请求'),
+        content: Text(
+          '${request.deviceName} 请求从本设备同步音乐库。'
+          '\n\n同意后，对方会拉取本机 database.db 和 files 文件夹内容。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('拒绝'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('同意同步'),
+          ),
+        ],
+      ),
+    );
+
+    if (!mounted) {
+      return;
+    }
+    if (approved == true) {
+      await syncProvider.approveIncomingRequest(request.id);
+    } else {
+      await syncProvider.denyIncomingRequest(request.id);
+    }
   }
 }
 

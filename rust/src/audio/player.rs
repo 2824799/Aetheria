@@ -68,7 +68,6 @@ struct OutputDeviceInfo {
 
 #[derive(Clone)]
 struct ProcessingParams {
-    volume: Arc<Mutex<f32>>,
     pitch: Arc<Mutex<f64>>,
     algo: Arc<Mutex<String>>,
     loudness_normalization_gain: Arc<Mutex<f32>>,
@@ -153,12 +152,11 @@ impl DecodePipeline {
             return Ok(None);
         }
 
-        let total_gain = *self.params.volume.lock().unwrap_or_else(|e| e.into_inner())
-            * *self
-                .params
-                .loudness_normalization_gain
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
+        let total_gain = *self
+            .params
+            .loudness_normalization_gain
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         if (total_gain - 1.0).abs() > 0.001 {
             for sample in block.iter_mut() {
                 *sample *= total_gain;
@@ -486,12 +484,18 @@ fn prefill_audio_buffer(
     Ok(())
 }
 
+fn current_output_volume(volume: &Arc<Mutex<f32>>) -> f32 {
+    let value = *volume.lock().unwrap_or_else(|e| e.into_inner());
+    value.clamp(0.0, 1.0)
+}
+
 /// Negotiate an output config, preferring f32 at the device's default rate/channels so we
 /// can feed the callback without per-callback allocation. Returns the live stream plus the
 /// negotiated sample rate, channel count and the shared ring buffer.
 fn build_output(
     frames_played: Arc<AtomicU64>,
     underrun_count: Arc<AtomicU64>,
+    live_volume: Arc<Mutex<f32>>,
     quality_settings: Arc<Mutex<AudioQualitySettings>>,
     output_buffer_ms: u32,
     output_latency_mode: String,
@@ -559,6 +563,7 @@ fn build_output(
                     let buf = buffer.clone();
                     let fp = frames_played.clone();
                     let uc = underrun_count.clone();
+                    let vol = live_volume.clone();
                     device
                         .build_output_stream(
                             $stream_config,
@@ -566,6 +571,12 @@ fn build_output(
                                 let n = buf.pop(data);
                                 if n < data.len() {
                                     uc.fetch_add(1, Ordering::Relaxed);
+                                }
+                                let output_volume = current_output_volume(&vol);
+                                if (output_volume - 1.0).abs() > 0.001 {
+                                    for sample in &mut data[..n] {
+                                        *sample *= output_volume;
+                                    }
                                 }
                                 for i in n..data.len() {
                                     data[i] = 0.0;
@@ -584,6 +595,7 @@ fn build_output(
                     let fp = frames_played.clone();
                     let uc = underrun_count.clone();
                     let qs = quality_settings.clone();
+                    let vol = live_volume.clone();
                     let mut tmp = Vec::<f32>::new();
                     let mut dither = TpdfDither::new(0xA17E_51A3_59C3_0D42);
                     device
@@ -597,11 +609,13 @@ fn build_output(
                                 }
                                 let dither_enabled =
                                     qs.lock().unwrap_or_else(|e| e.into_inner()).dither_enabled;
+                                let output_volume = current_output_volume(&vol);
                                 for i in 0..n {
+                                    let sample = tmp[i] * output_volume;
                                     let v = if dither_enabled {
-                                        dither.apply(tmp[i], 1.0 / 32768.0)
+                                        dither.apply(sample, 1.0 / 32768.0)
                                     } else {
-                                        tmp[i]
+                                        sample
                                     };
                                     data[i] = (v.clamp(-1.0, 1.0) * 32767.0) as i16;
                                 }
@@ -622,6 +636,7 @@ fn build_output(
                     let fp = frames_played.clone();
                     let uc = underrun_count.clone();
                     let qs = quality_settings.clone();
+                    let vol = live_volume.clone();
                     let mut tmp = Vec::<f32>::new();
                     let mut dither = TpdfDither::new(0x9E37_79B9_7F4A_7C15);
                     device
@@ -635,11 +650,13 @@ fn build_output(
                                 }
                                 let dither_enabled =
                                     qs.lock().unwrap_or_else(|e| e.into_inner()).dither_enabled;
+                                let output_volume = current_output_volume(&vol);
                                 for i in 0..n {
+                                    let sample = tmp[i] * output_volume;
                                     let v = if dither_enabled {
-                                        dither.apply(tmp[i], 1.0 / 65536.0)
+                                        dither.apply(sample, 1.0 / 65536.0)
                                     } else {
-                                        tmp[i]
+                                        sample
                                     };
                                     data[i] = ((v.clamp(-1.0, 1.0) * 0.5 + 0.5) * 65535.0) as u16;
                                 }
@@ -660,6 +677,7 @@ fn build_output(
                     let fp = frames_played.clone();
                     let uc = underrun_count.clone();
                     let qs = quality_settings.clone();
+                    let vol = live_volume.clone();
                     let mut tmp = Vec::<f32>::new();
                     let mut dither = TpdfDither::new(0xD1B5_4A32_D192_ED03);
                     device
@@ -673,11 +691,13 @@ fn build_output(
                                 }
                                 let dither_enabled =
                                     qs.lock().unwrap_or_else(|e| e.into_inner()).dither_enabled;
+                                let output_volume = current_output_volume(&vol);
                                 for i in 0..n {
+                                    let sample = tmp[i] * output_volume;
                                     let v = if dither_enabled {
-                                        dither.apply(tmp[i], 1.0 / 2_147_483_648.0)
+                                        dither.apply(sample, 1.0 / 2_147_483_648.0)
                                     } else {
-                                        tmp[i]
+                                        sample
                                     };
                                     data[i] = (v.clamp(-1.0, 1.0) * 2147483647.0) as i32;
                                 }
@@ -698,6 +718,7 @@ fn build_output(
                     let fp = frames_played.clone();
                     let uc = underrun_count.clone();
                     let qs = quality_settings.clone();
+                    let vol = live_volume.clone();
                     let mut tmp = Vec::<f32>::new();
                     let mut dither = TpdfDither::new(0x94D0_49BB_1331_11EB);
                     device
@@ -711,11 +732,13 @@ fn build_output(
                                 }
                                 let dither_enabled =
                                     qs.lock().unwrap_or_else(|e| e.into_inner()).dither_enabled;
+                                let output_volume = current_output_volume(&vol);
                                 for i in 0..n {
+                                    let sample = tmp[i] * output_volume;
                                     let v = if dither_enabled {
-                                        dither.apply(tmp[i], 1.0 / 256.0)
+                                        dither.apply(sample, 1.0 / 256.0)
                                     } else {
-                                        tmp[i]
+                                        sample
                                     };
                                     data[i] = ((v.clamp(-1.0, 1.0) * 0.5 + 0.5) * 255.0) as u8;
                                 }
@@ -735,6 +758,7 @@ fn build_output(
                     let buf = buffer.clone();
                     let fp = frames_played.clone();
                     let uc = underrun_count.clone();
+                    let vol = live_volume.clone();
                     let mut tmp = Vec::<f32>::new();
                     device
                         .build_output_stream(
@@ -745,8 +769,9 @@ fn build_output(
                                 if n < data.len() {
                                     uc.fetch_add(1, Ordering::Relaxed);
                                 }
+                                let output_volume = current_output_volume(&vol);
                                 for i in 0..n {
-                                    data[i] = tmp[i] as f64;
+                                    data[i] = (tmp[i] * output_volume) as f64;
                                 }
                                 for i in n..data.len() {
                                     data[i] = 0.0;
@@ -840,7 +865,6 @@ pub fn start_playback(
     let clipped_sample_count = Arc::new(AtomicU64::new(0));
     let peak_bits = Arc::new(AtomicU64::new(0.0f64.to_bits()));
     let processing_params = ProcessingParams {
-        volume: volume.clone(),
         pitch: pitch.clone(),
         algo: algo.clone(),
         loudness_normalization_gain: norm_gain.clone(),
@@ -852,6 +876,7 @@ pub fn start_playback(
     let (stream, output_info, buffer) = build_output(
         frames_played.clone(),
         underrun_count.clone(),
+        volume.clone(),
         quality_settings.clone(),
         output_buffer_ms,
         output_latency_mode,

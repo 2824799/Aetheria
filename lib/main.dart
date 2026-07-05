@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
 import 'package:aetheria/core/providers/library_provider.dart';
 import 'package:aetheria/core/providers/audio_player_provider.dart';
+import 'package:aetheria/core/providers/sync_provider.dart';
 import 'package:aetheria/features/layout/main_layout.dart';
 
 Future<void> main() async {
@@ -62,7 +63,7 @@ Future<void> main() async {
                       ),
                       const SizedBox(height: 16),
                       SelectableText(
-                        initError!,
+                        initError,
                         style: const TextStyle(
                           color: Colors.white70,
                           fontSize: 13,
@@ -79,6 +80,7 @@ Future<void> main() async {
               ChangeNotifierProvider(create: (_) => UIThemeProvider()),
               ChangeNotifierProvider(create: (_) => LibraryProvider()),
               ChangeNotifierProvider(create: (_) => AudioPlayerProvider()),
+              ChangeNotifierProvider(create: (_) => SyncProvider()),
             ],
             child: const AetheriaApp(),
           ),

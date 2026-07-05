@@ -6,6 +6,7 @@ import 'dart:io';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
 import 'package:aetheria/core/providers/library_provider.dart';
 import 'package:aetheria/core/providers/audio_player_provider.dart';
+import 'package:aetheria/core/providers/sync_provider.dart';
 import 'package:aetheria/core/widgets/glass_panel.dart';
 
 class SettingsModal extends StatefulWidget {
@@ -157,6 +158,7 @@ class _SettingsModalState extends State<SettingsModal> {
     final themeProvider = context.watch<UIThemeProvider>();
     final libraryProvider = context.watch<LibraryProvider>();
     final audioProvider = context.watch<AudioPlayerProvider>();
+    final syncProvider = context.watch<SyncProvider>();
     final cfg = themeProvider.currentTheme;
 
     final isDesktop = !Platform.isAndroid && !Platform.isIOS;
@@ -247,6 +249,12 @@ class _SettingsModalState extends State<SettingsModal> {
                                 '音乐库管理',
                                 cfg,
                               ),
+                              _buildSidebarItem(
+                                'sync',
+                                Icons.sync_alt,
+                                '局域网同步',
+                                cfg,
+                              ),
                             ],
                           ),
                         ),
@@ -259,6 +267,7 @@ class _SettingsModalState extends State<SettingsModal> {
                               cfg,
                               libraryProvider,
                               audioProvider,
+                              syncProvider,
                               themeProvider,
                               isDesktop,
                               _activeTab,
@@ -281,6 +290,8 @@ class _SettingsModalState extends State<SettingsModal> {
           ? '个性外观'
           : _selectedCategory == 'playback'
           ? '播放设置'
+          : _selectedCategory == 'sync'
+          ? '局域网同步'
           : '音乐库管理';
 
       return Center(
@@ -371,6 +382,7 @@ class _SettingsModalState extends State<SettingsModal> {
                               cfg,
                               libraryProvider,
                               audioProvider,
+                              syncProvider,
                               themeProvider,
                               isDesktop,
                               _selectedCategory!,
@@ -395,6 +407,12 @@ class _SettingsModalState extends State<SettingsModal> {
                                 'library',
                                 Icons.folder_open_outlined,
                                 '音乐库管理',
+                                cfg,
+                              ),
+                              _buildMobileMenuItem(
+                                'sync',
+                                Icons.sync_alt,
+                                '局域网同步',
                                 cfg,
                               ),
                             ],
@@ -480,11 +498,14 @@ class _SettingsModalState extends State<SettingsModal> {
     AppThemeConfig cfg,
     LibraryProvider libraryProvider,
     AudioPlayerProvider audioProvider,
+    SyncProvider syncProvider,
     UIThemeProvider themeProvider,
     bool isDesktop,
     String activeTab,
   ) {
     switch (activeTab) {
+      case 'sync':
+        return _buildSyncTab(cfg, libraryProvider, audioProvider, syncProvider);
       case 'playback':
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1284,6 +1305,364 @@ class _SettingsModalState extends State<SettingsModal> {
             ),
           ],
         );
+    }
+  }
+
+  Widget _buildSyncTab(
+    AppThemeConfig cfg,
+    LibraryProvider libraryProvider,
+    AudioPlayerProvider audioProvider,
+    SyncProvider syncProvider,
+  ) {
+    final devices = syncProvider.devices;
+    final request = syncProvider.incomingRequest;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '局域网镜像同步',
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+            color: cfg.textSub,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: cfg.bgHover,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: cfg.border),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    syncProvider.isRunning
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_unchecked,
+                    size: 16,
+                    color: syncProvider.isRunning ? cfg.accent : cfg.textSub,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      syncProvider.statusMessage,
+                      style: TextStyle(
+                        color: cfg.textMain,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '本机名称：${syncProvider.localDeviceName}'
+                '${syncProvider.localPort == null ? '' : ' · 端口 ${syncProvider.localPort}'}',
+                style: TextStyle(color: cfg.textSub, fontSize: 11),
+              ),
+              if (syncProvider.errorMessage != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  syncProvider.errorMessage!,
+                  style: const TextStyle(color: Colors.redAccent, fontSize: 11),
+                ),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: [
+            ElevatedButton.icon(
+              onPressed: syncProvider.isRunning
+                  ? () => syncProvider.announceNow()
+                  : () => syncProvider.start(libraryProvider),
+              icon: const Icon(Icons.radar, size: 14),
+              label: Text(
+                syncProvider.isRunning ? '刷新发现设备' : '启动同步服务',
+                style: const TextStyle(fontSize: 12),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: cfg.accent,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(
+                  vertical: 12,
+                  horizontal: 16,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+            ),
+            OutlinedButton.icon(
+              onPressed: syncProvider.clearDevices,
+              icon: const Icon(Icons.cleaning_services_outlined, size: 14),
+              label: const Text('清空列表', style: TextStyle(fontSize: 12)),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: cfg.accent,
+                side: BorderSide(color: cfg.accent.withOpacity(0.65)),
+                padding: const EdgeInsets.symmetric(
+                  vertical: 12,
+                  horizontal: 16,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+            ),
+          ],
+        ),
+        if (request != null) ...[
+          const SizedBox(height: 14),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.orangeAccent.withOpacity(0.08),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.orangeAccent.withOpacity(0.35)),
+            ),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.notification_important_outlined,
+                  size: 18,
+                  color: Colors.orangeAccent,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    '${request.deviceName} 请求从本设备同步音乐库',
+                    style: TextStyle(color: cfg.textMain, fontSize: 12),
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => syncProvider.denyIncomingRequest(request.id),
+                  child: const Text('拒绝'),
+                ),
+                const SizedBox(width: 4),
+                ElevatedButton(
+                  onPressed: () =>
+                      syncProvider.approveIncomingRequest(request.id),
+                  child: const Text('同意'),
+                ),
+              ],
+            ),
+          ),
+        ],
+        if (syncProvider.isSyncing) ...[
+          const SizedBox(height: 14),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: LinearProgressIndicator(
+              minHeight: 6,
+              value: syncProvider.progress,
+              color: cfg.accent,
+              backgroundColor: cfg.border.withOpacity(0.45),
+            ),
+          ),
+        ],
+        const SizedBox(height: 16),
+        Divider(height: 1, color: cfg.border),
+        const SizedBox(height: 16),
+        Text(
+          '发现的设备',
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+            color: cfg.textSub,
+          ),
+        ),
+        const SizedBox(height: 10),
+        if (devices.isEmpty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: cfg.bgHover,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: cfg.border),
+            ),
+            child: Text(
+              '还没有发现设备。请确认两台设备在同一局域网，并且都打开了 Aetheria。',
+              style: TextStyle(color: cfg.textSub, fontSize: 11, height: 1.5),
+            ),
+          )
+        else
+          for (final device in devices) ...[
+            _buildSyncDeviceTile(
+              cfg,
+              device,
+              libraryProvider,
+              audioProvider,
+              syncProvider,
+            ),
+            const SizedBox(height: 10),
+          ],
+        const SizedBox(height: 8),
+        Text(
+          '* 第一版是镜像覆盖：从选中设备同步到本机后，本机 database.db 和 files 文件夹会以对方为准；对方没有的本机文件会删除。同步前会自动备份当前库。',
+          style: TextStyle(fontSize: 10, color: cfg.textSub, height: 1.5),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSyncDeviceTile(
+    AppThemeConfig cfg,
+    SyncDevice device,
+    LibraryProvider libraryProvider,
+    AudioPlayerProvider audioProvider,
+    SyncProvider syncProvider,
+  ) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: cfg.bgHover,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: cfg.border),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.devices_other, color: cfg.accent, size: 18),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  device.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: cfg.textMain,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '${device.endpoint} · ${device.songCount} 首 · ${device.versionCount} 个版本',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: cfg.textSub, fontSize: 10),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          ElevatedButton.icon(
+            onPressed: syncProvider.isSyncing
+                ? null
+                : () => _confirmPullFromDevice(
+                    context,
+                    cfg,
+                    device,
+                    libraryProvider,
+                    audioProvider,
+                    syncProvider,
+                  ),
+            icon: const Icon(Icons.download, size: 14),
+            label: const Text('同步到本机', style: TextStyle(fontSize: 11)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: cfg.accent,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _confirmPullFromDevice(
+    BuildContext context,
+    AppThemeConfig cfg,
+    SyncDevice device,
+    LibraryProvider libraryProvider,
+    AudioPlayerProvider audioProvider,
+    SyncProvider syncProvider,
+  ) async {
+    final firstConfirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('从远端同步到本机？'),
+        content: Text(
+          '即将把 ${device.name} 的音乐库同步到本机。'
+          '\n\n本机数据库和 files 文件夹会以对方为准。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('取消'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('继续'),
+          ),
+        ],
+      ),
+    );
+    if (firstConfirm != true || !context.mounted) {
+      return;
+    }
+
+    final finalConfirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('再次确认覆盖本机'),
+        content: const Text(
+          '本机多余的歌曲、数据库记录和 files 文件会被删除。同步前会备份当前库，但这仍然是一次覆盖操作。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('取消'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.redAccent,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('覆盖本机'),
+          ),
+        ],
+      ),
+    );
+    if (finalConfirm != true || !context.mounted) {
+      return;
+    }
+
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await syncProvider.pullFromDevice(
+        device: device,
+        libraryProvider: libraryProvider,
+        audioProvider: audioProvider,
+      );
+      if (!mounted) {
+        return;
+      }
+      messenger.showSnackBar(
+        SnackBar(content: Text('已从 ${device.name} 同步到本机')),
+      );
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      messenger.showSnackBar(SnackBar(content: Text('同步失败: $e')));
     }
   }
 

@@ -9,6 +9,9 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.media.MediaMetadataRetriever
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -33,6 +36,8 @@ class MainActivity : FlutterActivity() {
     private val NOTIFICATION_ID = 1001
     private val CHANNEL_ID = "music_playback"
     private var mediaSession: MediaSessionCompat? = null
+    private var cachedArtworkPath: String? = null
+    private var cachedArtworkBitmap: Bitmap? = null
 
     private external fun initAudioContext(context: Context)
 
@@ -90,6 +95,7 @@ class MainActivity : FlutterActivity() {
                     val durationMs = call.argument<Int>("durationMs") ?: 0
                     val hasPrevious = call.argument<Boolean>("hasPrevious") ?: false
                     val hasNext = call.argument<Boolean>("hasNext") ?: false
+                    val audioPath = call.argument<String>("audioPath")
                     showPlaybackNotification(
                         title,
                         artist,
@@ -98,6 +104,7 @@ class MainActivity : FlutterActivity() {
                         durationMs,
                         hasPrevious,
                         hasNext,
+                        audioPath,
                     )
                     result.success(null)
                 }
@@ -196,6 +203,7 @@ class MainActivity : FlutterActivity() {
         durationMs: Int,
         hasPrevious: Boolean,
         hasNext: Boolean,
+        audioPath: String?,
     ) {
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
@@ -229,6 +237,7 @@ class MainActivity : FlutterActivity() {
             positionMs.coerceAtLeast(0)
         }
         val session = ensureMediaSession()
+        val artwork = loadEmbeddedArtwork(audioPath)
         updateMediaSession(
             session,
             title,
@@ -238,6 +247,7 @@ class MainActivity : FlutterActivity() {
             safeDurationMs,
             hasPrevious,
             hasNext,
+            artwork,
         )
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
@@ -252,6 +262,7 @@ class MainActivity : FlutterActivity() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setLargeIcon(artwork)
             .addAction(
                 android.R.drawable.ic_media_previous,
                 if (hasPrevious) "上一首" else "上一首（队列头部）",
@@ -284,6 +295,58 @@ class MainActivity : FlutterActivity() {
         }
 
         notificationManager.notify(NOTIFICATION_ID, builder.build())
+    }
+
+    private fun loadEmbeddedArtwork(audioPath: String?): Bitmap? {
+        if (audioPath.isNullOrBlank()) {
+            cachedArtworkPath = null
+            cachedArtworkBitmap = null
+            return null
+        }
+        if (cachedArtworkPath == audioPath) {
+            return cachedArtworkBitmap
+        }
+
+        cachedArtworkPath = audioPath
+        cachedArtworkBitmap = null
+        val file = File(audioPath)
+        if (!file.exists()) {
+            return null
+        }
+
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(file.absolutePath)
+            val pictureData = retriever.embeddedPicture ?: return null
+            decodeArtworkBitmap(pictureData).also { bitmap ->
+                cachedArtworkBitmap = bitmap
+            }
+        } catch (_: Exception) {
+            null
+        } finally {
+            try {
+                retriever.release()
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    private fun decodeArtworkBitmap(data: ByteArray): Bitmap? {
+        val bounds = BitmapFactory.Options().apply {
+            inJustDecodeBounds = true
+        }
+        BitmapFactory.decodeByteArray(data, 0, data.size, bounds)
+
+        var sampleSize = 1
+        val maxEdge = 512
+        while (bounds.outWidth / sampleSize > maxEdge || bounds.outHeight / sampleSize > maxEdge) {
+            sampleSize *= 2
+        }
+
+        val options = BitmapFactory.Options().apply {
+            inSampleSize = sampleSize
+        }
+        return BitmapFactory.decodeByteArray(data, 0, data.size, options)
     }
 
     private fun ensureMediaSession(): MediaSessionCompat {
@@ -329,6 +392,7 @@ class MainActivity : FlutterActivity() {
         durationMs: Int,
         hasPrevious: Boolean,
         hasNext: Boolean,
+        artwork: Bitmap?,
     ) {
         val actions = PlaybackStateCompat.ACTION_PLAY_PAUSE or
             PlaybackStateCompat.ACTION_PLAY or
@@ -337,13 +401,16 @@ class MainActivity : FlutterActivity() {
             (if (hasPrevious) PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS else 0L) or
             (if (hasNext) PlaybackStateCompat.ACTION_SKIP_TO_NEXT else 0L)
 
-        session.setMetadata(
-            MediaMetadataCompat.Builder()
-                .putString(MediaMetadataCompat.METADATA_KEY_TITLE, title)
-                .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, artist)
-                .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, durationMs.toLong())
-                .build()
-        )
+        val metadataBuilder = MediaMetadataCompat.Builder()
+            .putString(MediaMetadataCompat.METADATA_KEY_TITLE, title)
+            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, artist)
+            .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, durationMs.toLong())
+        if (artwork != null) {
+            metadataBuilder
+                .putBitmap(MediaMetadataCompat.METADATA_KEY_ART, artwork)
+                .putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, artwork)
+        }
+        session.setMetadata(metadataBuilder.build())
         session.setPlaybackState(
             PlaybackStateCompat.Builder()
                 .setActions(actions)
