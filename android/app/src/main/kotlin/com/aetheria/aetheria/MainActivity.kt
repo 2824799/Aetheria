@@ -14,6 +14,9 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
+import android.support.v4.media.MediaMetadataCompat
+import android.support.v4.media.session.MediaSessionCompat
+import android.support.v4.media.session.PlaybackStateCompat
 import android.view.WindowManager
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
@@ -29,6 +32,7 @@ class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.aetheria.app/notification"
     private val NOTIFICATION_ID = 1001
     private val CHANNEL_ID = "music_playback"
+    private var mediaSession: MediaSessionCompat? = null
 
     private external fun initAudioContext(context: Context)
 
@@ -62,6 +66,12 @@ class MainActivity : FlutterActivity() {
         super.onCreate(savedInstanceState)
         setHighRefreshRate()
         initAudioContext(applicationContext)
+    }
+
+    override fun onDestroy() {
+        mediaSession?.release()
+        mediaSession = null
+        super.onDestroy()
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -218,6 +228,17 @@ class MainActivity : FlutterActivity() {
         } else {
             positionMs.coerceAtLeast(0)
         }
+        val session = ensureMediaSession()
+        updateMediaSession(
+            session,
+            title,
+            artist,
+            isPlaying,
+            safePositionMs,
+            safeDurationMs,
+            hasPrevious,
+            hasNext,
+        )
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(
@@ -248,6 +269,7 @@ class MainActivity : FlutterActivity() {
             )
             .setStyle(
                 androidx.media.app.NotificationCompat.MediaStyle()
+                    .setMediaSession(session.sessionToken)
                     .setShowActionsInCompactView(0, 1, 2)
             )
 
@@ -262,6 +284,76 @@ class MainActivity : FlutterActivity() {
         }
 
         notificationManager.notify(NOTIFICATION_ID, builder.build())
+    }
+
+    private fun ensureMediaSession(): MediaSessionCompat {
+        mediaSession?.let {
+            it.isActive = true
+            return it
+        }
+
+        val session = MediaSessionCompat(this, "AetheriaPlayback").apply {
+            setCallback(object : MediaSessionCompat.Callback() {
+                override fun onPlay() {
+                    MainActivity.dispatchPlaybackAction("toggle")
+                }
+
+                override fun onPause() {
+                    MainActivity.dispatchPlaybackAction("toggle")
+                }
+
+                override fun onSkipToPrevious() {
+                    MainActivity.dispatchPlaybackAction("previous")
+                }
+
+                override fun onSkipToNext() {
+                    MainActivity.dispatchPlaybackAction("next")
+                }
+
+                override fun onSeekTo(pos: Long) {
+                    MainActivity.dispatchPlaybackAction("seek:${pos.coerceAtLeast(0L)}")
+                }
+            })
+            isActive = true
+        }
+        mediaSession = session
+        return session
+    }
+
+    private fun updateMediaSession(
+        session: MediaSessionCompat,
+        title: String,
+        artist: String,
+        isPlaying: Boolean,
+        positionMs: Int,
+        durationMs: Int,
+        hasPrevious: Boolean,
+        hasNext: Boolean,
+    ) {
+        val actions = PlaybackStateCompat.ACTION_PLAY_PAUSE or
+            PlaybackStateCompat.ACTION_PLAY or
+            PlaybackStateCompat.ACTION_PAUSE or
+            PlaybackStateCompat.ACTION_SEEK_TO or
+            (if (hasPrevious) PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS else 0L) or
+            (if (hasNext) PlaybackStateCompat.ACTION_SKIP_TO_NEXT else 0L)
+
+        session.setMetadata(
+            MediaMetadataCompat.Builder()
+                .putString(MediaMetadataCompat.METADATA_KEY_TITLE, title)
+                .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, artist)
+                .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, durationMs.toLong())
+                .build()
+        )
+        session.setPlaybackState(
+            PlaybackStateCompat.Builder()
+                .setActions(actions)
+                .setState(
+                    if (isPlaying) PlaybackStateCompat.STATE_PLAYING else PlaybackStateCompat.STATE_PAUSED,
+                    positionMs.toLong(),
+                    if (isPlaying) 1.0f else 0.0f,
+                )
+                .build()
+        )
     }
 
     private fun buildPlaybackActionIntent(action: String, requestCode: Int): PendingIntent {
@@ -288,6 +380,7 @@ class MainActivity : FlutterActivity() {
     private fun hidePlaybackNotification() {
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.cancel(NOTIFICATION_ID)
+        mediaSession?.isActive = false
     }
 
     private fun requestNotificationPermission() {

@@ -21,6 +21,7 @@ class AudioVersion {
   final String? md5;
   final int? bitDepth;
   final double? loudness;
+  final bool metadataScanned;
 
   const AudioVersion({
     required this.id,
@@ -37,6 +38,7 @@ class AudioVersion {
     this.md5,
     this.bitDepth,
     this.loudness,
+    required this.metadataScanned,
   });
 
   @override
@@ -54,7 +56,8 @@ class AudioVersion {
       isPrimary.hashCode ^
       md5.hashCode ^
       bitDepth.hashCode ^
-      loudness.hashCode;
+      loudness.hashCode ^
+      metadataScanned.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -74,7 +77,8 @@ class AudioVersion {
           isPrimary == other.isPrimary &&
           md5 == other.md5 &&
           bitDepth == other.bitDepth &&
-          loudness == other.loudness;
+          loudness == other.loudness &&
+          metadataScanned == other.metadataScanned;
 }
 
 class PreviewInfo {

@@ -67,7 +67,7 @@ pub fn get_songs() -> Result<Vec<Song>, String> {
         let mut song = song_res.map_err(|e| e.to_string())?;
 
         let mut v_stmt = conn.prepare(
-            "SELECT id, song_id, filepath, original_name, format, bitrate, sample_rate, duration, file_size, is_enabled, is_primary, md5, bit_depth, loudness FROM audio_files WHERE song_id = ?1"
+            "SELECT id, song_id, filepath, original_name, format, bitrate, sample_rate, duration, file_size, is_enabled, is_primary, md5, bit_depth, loudness, metadata_scanned FROM audio_files WHERE song_id = ?1"
         ).map_err(|e| e.to_string())?;
 
         let v_rows = v_stmt
@@ -89,6 +89,7 @@ pub fn get_songs() -> Result<Vec<Song>, String> {
                     md5: row.get(11)?,
                     bit_depth: row.get(12)?,
                     loudness: row.get(13)?,
+                    metadata_scanned: row.get::<_, i32>(14)? != 0,
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -483,7 +484,7 @@ pub fn import_song(filepath: String) -> Result<Song, String> {
         .map_err(|e| e.to_string())?;
 
     let mut v_stmt = conn.prepare(
-        "SELECT id, song_id, filepath, original_name, format, bitrate, sample_rate, duration, file_size, is_enabled, is_primary, md5, bit_depth, loudness FROM audio_files WHERE song_id = ?1"
+        "SELECT id, song_id, filepath, original_name, format, bitrate, sample_rate, duration, file_size, is_enabled, is_primary, md5, bit_depth, loudness, metadata_scanned FROM audio_files WHERE song_id = ?1"
     ).map_err(|e| e.to_string())?;
     let v_rows = v_stmt
         .query_map(params![song.id], |row| {
@@ -504,6 +505,7 @@ pub fn import_song(filepath: String) -> Result<Song, String> {
                 md5: row.get(11)?,
                 bit_depth: row.get(12)?,
                 loudness: row.get(13)?,
+                metadata_scanned: row.get::<_, i32>(14)? != 0,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -783,6 +785,7 @@ pub fn import_audio_version_for_song(
         md5: Some(file_md5),
         bit_depth,
         loudness,
+        metadata_scanned: false,
     })
 }
 
@@ -1319,6 +1322,10 @@ pub fn get_rust_audio_output_info() -> crate::audio::player::AudioOutputInfo {
     crate::audio::player::get_output_info()
 }
 
+pub fn get_rust_default_output_device_name() -> Result<String, String> {
+    crate::audio::player::default_output_device_name()
+}
+
 pub fn get_rust_playback_position() -> f64 {
     crate::audio::player::get_position()
 }
@@ -1354,13 +1361,13 @@ fn refresh_audio_file_metadata_impl(
         let bit_depth = properties.bit_depth().map(|d| d as i32);
 
         conn.execute(
-            "UPDATE audio_files SET bitrate = ?1, sample_rate = ?2, duration = ?3, bit_depth = ?4, loudness = ?5 WHERE id = ?6",
+            "UPDATE audio_files SET bitrate = ?1, sample_rate = ?2, duration = ?3, bit_depth = ?4, loudness = ?5, metadata_scanned = 1 WHERE id = ?6",
             params![bitrate, sample_rate, duration, bit_depth, loudness, id],
         )
         .map_err(|e| e.to_string())?;
     } else {
         conn.execute(
-            "UPDATE audio_files SET loudness = ?1 WHERE id = ?2",
+            "UPDATE audio_files SET loudness = ?1, metadata_scanned = 1 WHERE id = ?2",
             params![loudness, id],
         )
         .map_err(|e| e.to_string())?;

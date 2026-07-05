@@ -604,6 +604,11 @@ class _SettingsModalState extends State<SettingsModal> {
               ),
             ),
             const SizedBox(height: 6),
+            Text(
+              '控制系统音频设备本身的回调块大小：默认跟随系统；低延迟响应更快但更容易欠载；稳定模式使用更大的设备块来减少爆音风险。',
+              style: TextStyle(color: cfg.textSub, fontSize: 10, height: 1.5),
+            ),
+            const SizedBox(height: 8),
             Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -717,6 +722,11 @@ class _SettingsModalState extends State<SettingsModal> {
               ),
             ),
             const SizedBox(height: 6),
+            Text(
+              '这是软件内部预先解码和 DSP 处理好的音频队列长度，表示当前播放点之后大约有多少毫秒音频已经准备好送往设备。',
+              style: TextStyle(color: cfg.textSub, fontSize: 10, height: 1.5),
+            ),
+            const SizedBox(height: 8),
             Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -771,6 +781,35 @@ class _SettingsModalState extends State<SettingsModal> {
                   checkmarkColor: cfg.accent,
                   labelStyle: TextStyle(
                     color: audioProvider.pitchBufferMs == 960
+                        ? cfg.accent
+                        : cfg.textMain,
+                  ),
+                ),
+                ChoiceChip(
+                  label: Text(
+                    [120, 240, 480, 960].contains(audioProvider.pitchBufferMs)
+                        ? '自定义...'
+                        : '自定义 ${audioProvider.pitchBufferMs}ms',
+                    style: const TextStyle(fontSize: 10),
+                  ),
+                  selected: ![
+                    120,
+                    240,
+                    480,
+                    960,
+                  ].contains(audioProvider.pitchBufferMs),
+                  onSelected: (_) =>
+                      _showCustomBufferDialog(context, cfg, audioProvider),
+                  selectedColor: cfg.accent.withOpacity(0.2),
+                  checkmarkColor: cfg.accent,
+                  labelStyle: TextStyle(
+                    color:
+                        ![
+                          120,
+                          240,
+                          480,
+                          960,
+                        ].contains(audioProvider.pitchBufferMs)
                         ? cfg.accent
                         : cfg.textMain,
                   ),
@@ -1061,18 +1100,22 @@ class _SettingsModalState extends State<SettingsModal> {
               ),
             ),
             const SizedBox(height: 12),
-            Row(
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
               children: [
                 ElevatedButton.icon(
                   onPressed: libraryProvider.isRefreshingDatabase
                       ? null
                       : () async {
+                          final messenger = ScaffoldMessenger.of(context);
                           await libraryProvider.refreshDatabase();
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('歌曲数据已全部刷新完成！')),
-                            );
+                          if (!mounted) {
+                            return;
                           }
+                          messenger.showSnackBar(
+                            const SnackBar(content: Text('歌曲数据已全部刷新完成！')),
+                          );
                         },
                   icon: libraryProvider.isRefreshingDatabase
                       ? const SizedBox(
@@ -1087,12 +1130,41 @@ class _SettingsModalState extends State<SettingsModal> {
                   label: Text(
                     libraryProvider.isRefreshingDatabase
                         ? '正在刷新中...'
-                        : '刷新并重新扫描歌曲数据',
+                        : '刷新扫描全部歌曲',
                     style: const TextStyle(fontSize: 12),
                   ),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: cfg.accent,
                     foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 12,
+                      horizontal: 16,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+                OutlinedButton.icon(
+                  onPressed: libraryProvider.isRefreshingDatabase
+                      ? null
+                      : () async {
+                          final messenger = ScaffoldMessenger.of(context);
+                          await libraryProvider.refreshDatabase(
+                            onlyUnscanned: true,
+                          );
+                          if (!mounted) {
+                            return;
+                          }
+                          messenger.showSnackBar(
+                            const SnackBar(content: Text('新增歌曲扫描已完成！')),
+                          );
+                        },
+                  icon: const Icon(Icons.playlist_add_check, size: 14),
+                  label: const Text('刷新扫描新增歌曲', style: TextStyle(fontSize: 12)),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: cfg.accent,
+                    side: BorderSide(color: cfg.accent.withOpacity(0.65)),
                     padding: const EdgeInsets.symmetric(
                       vertical: 12,
                       horizontal: 16,
@@ -1140,7 +1212,7 @@ class _SettingsModalState extends State<SettingsModal> {
             ],
             const SizedBox(height: 8),
             Text(
-              '* 点击将深度重新扫描所有音频（包括时长、比特率、声道、位深度），并完整解码全部音频文件以计算最精准的全局听感音量指标（耗时可能较长，请重新加载应用生效）。',
+              '* 全量扫描会重新处理所有音频；新增扫描只处理尚未完整扫描的版本。完整扫描会写入标记，后续新增扫描会自动跳过它们。',
               style: TextStyle(fontSize: 10, color: cfg.textSub, height: 1.5),
             ),
           ],
@@ -1260,6 +1332,62 @@ class _SettingsModalState extends State<SettingsModal> {
         ),
       ),
     );
+  }
+
+  Future<void> _showCustomBufferDialog(
+    BuildContext context,
+    AppThemeConfig cfg,
+    AudioPlayerProvider audioProvider,
+  ) async {
+    final controller = TextEditingController(
+      text: audioProvider.pitchBufferMs.toString(),
+    );
+    final result = await showDialog<int>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('自定义处理缓冲'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            labelText: '缓冲长度 (ms)',
+            helperText: '可输入 60 到 1500 毫秒',
+          ),
+          onSubmitted: (_) {
+            final value = int.tryParse(controller.text.trim());
+            if (value != null) {
+              Navigator.of(ctx).pop(value);
+            }
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('取消'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: cfg.accent,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () {
+              final value = int.tryParse(controller.text.trim());
+              if (value != null) {
+                Navigator.of(ctx).pop(value);
+              }
+            },
+            child: const Text('应用'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+
+    if (result == null) {
+      return;
+    }
+    await audioProvider.setPitchBufferMs(result.clamp(60, 1500).toInt());
   }
 
   Future<void> _changeLibraryPath(

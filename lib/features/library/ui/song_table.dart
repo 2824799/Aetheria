@@ -16,28 +16,28 @@ enum _SongColumnKey { title, artist, tags, versions, spec }
 
 extension on _SongColumnKey {
   String get label => switch (this) {
-        _SongColumnKey.title => '歌曲名称',
-        _SongColumnKey.artist => '歌手',
-        _SongColumnKey.tags => '标签',
-        _SongColumnKey.versions => '版本数',
-        _SongColumnKey.spec => '默认音质',
-      };
+    _SongColumnKey.title => '歌曲名称',
+    _SongColumnKey.artist => '歌手',
+    _SongColumnKey.tags => '标签',
+    _SongColumnKey.versions => '版本数',
+    _SongColumnKey.spec => '默认音质',
+  };
 
   double get defaultWidth => switch (this) {
-        _SongColumnKey.title => 280,
-        _SongColumnKey.artist => 200,
-        _SongColumnKey.tags => 240,
-        _SongColumnKey.versions => 92,
-        _SongColumnKey.spec => 170,
-      };
+    _SongColumnKey.title => 280,
+    _SongColumnKey.artist => 200,
+    _SongColumnKey.tags => 240,
+    _SongColumnKey.versions => 92,
+    _SongColumnKey.spec => 170,
+  };
 
   double get minWidth => switch (this) {
-        _SongColumnKey.title => 180,
-        _SongColumnKey.artist => 140,
-        _SongColumnKey.tags => 160,
-        _SongColumnKey.versions => 76,
-        _SongColumnKey.spec => 140,
-      };
+    _SongColumnKey.title => 180,
+    _SongColumnKey.artist => 140,
+    _SongColumnKey.tags => 160,
+    _SongColumnKey.versions => 92,
+    _SongColumnKey.spec => 140,
+  };
 }
 
 class SongTable extends StatefulWidget {
@@ -52,9 +52,9 @@ class _SongTableState extends State<SongTable> {
   static const double _rowHeight = 52;
   static const double _leadingColumnWidth = 52;
   static const double _dragThreshold = 6;
+  static const double _scrollbarHitTestWidth = 18;
   static const String _columnOrderKey = 'aetheria-song-table-column-order';
-  static const String _columnWidthPrefix =
-      'aetheria-song-table-column-width-';
+  static const String _columnWidthPrefix = 'aetheria-song-table-column-width-';
 
   final ScrollController _verticalController = ScrollController();
   final Set<String> _selectedSongIds = <String>{};
@@ -74,6 +74,7 @@ class _SongTableState extends State<SongTable> {
   bool _boxSelectionAdditive = false;
   DateTime? _lastPrimaryTapAt;
   String? _lastPrimaryTapSongId;
+  double _viewportWidth = 0;
 
   @override
   void initState() {
@@ -198,8 +199,7 @@ class _SongTableState extends State<SongTable> {
     final isDoubleTap =
         _lastPrimaryTapSongId == song.id &&
         _lastPrimaryTapAt != null &&
-        now.difference(_lastPrimaryTapAt!) <
-            const Duration(milliseconds: 260);
+        now.difference(_lastPrimaryTapAt!) < const Duration(milliseconds: 260);
 
     _lastPrimaryTapSongId = song.id;
     _lastPrimaryTapAt = now;
@@ -351,12 +351,7 @@ class _SongTableState extends State<SongTable> {
     if (provider.activePlaylistId != null && clipboardCount != null) {
       items.add(const PopupMenuDivider(height: 8));
       items.add(
-        _menuItem(
-          'paste',
-          Icons.paste,
-          '粘贴歌曲 ($clipboardCount 首)',
-          cfg,
-        ),
+        _menuItem('paste', Icons.paste, '粘贴歌曲 ($clipboardCount 首)', cfg),
       );
     }
 
@@ -431,9 +426,7 @@ class _SongTableState extends State<SongTable> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('彻底删除歌曲？'),
-        content: Text(
-          '您确定要将这 ${songIds.length} 首歌曲从音乐库彻底删除吗？这会同时删除本地物理音频文件！',
-        ),
+        content: Text('您确定要将这 ${songIds.length} 首歌曲从音乐库彻底删除吗？这会同时删除本地物理音频文件！'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
@@ -478,6 +471,11 @@ class _SongTableState extends State<SongTable> {
   void _handlePointerDown(PointerDownEvent event) {
     if (event.kind != PointerDeviceKind.mouse ||
         event.buttons != kPrimaryMouseButton) {
+      return;
+    }
+    if (_viewportWidth > 0 &&
+        event.localPosition.dx >= _viewportWidth - _scrollbarHitTestWidth) {
+      _isPointerDownForSelection = false;
       return;
     }
     _isPointerDownForSelection = true;
@@ -579,7 +577,8 @@ class _SongTableState extends State<SongTable> {
   }
 
   double _tableWidth(double availableWidth) {
-    final contentWidth = _leadingColumnWidth +
+    final contentWidth =
+        _leadingColumnWidth +
         _columnOrder.fold<double>(
           0,
           (sum, column) => sum + (_columnWidths[column] ?? column.defaultWidth),
@@ -614,8 +613,7 @@ class _SongTableState extends State<SongTable> {
       height: _headerHeight,
       child: DragTarget<_SongColumnKey>(
         onWillAcceptWithDetails: (details) => details.data != column,
-        onAcceptWithDetails: (details) =>
-            _reorderColumn(details.data, column),
+        onAcceptWithDetails: (details) => _reorderColumn(details.data, column),
         builder: (context, candidateData, rejectedData) {
           final isDropTarget = candidateData.isNotEmpty;
           return Container(
@@ -642,7 +640,9 @@ class _SongTableState extends State<SongTable> {
                         decoration: BoxDecoration(
                           color: cfg.bgPanel.withOpacity(0.96),
                           borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: cfg.accent.withOpacity(0.55)),
+                          border: Border.all(
+                            color: cfg.accent.withOpacity(0.55),
+                          ),
                           boxShadow: [
                             BoxShadow(
                               color: Colors.black.withOpacity(0.22),
@@ -697,13 +697,17 @@ class _SongTableState extends State<SongTable> {
   }
 
   Widget _buildHeaderLabel(_SongColumnKey column, AppThemeConfig cfg) {
-    final centered = column == _SongColumnKey.versions || column == _SongColumnKey.spec;
+    final centered =
+        column == _SongColumnKey.versions || column == _SongColumnKey.spec;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12),
       alignment: centered ? Alignment.center : Alignment.centerLeft,
       child: Text(
         column.label,
         textAlign: centered ? TextAlign.center : TextAlign.left,
+        maxLines: 1,
+        softWrap: false,
+        overflow: TextOverflow.clip,
         style: TextStyle(
           color: cfg.textSub,
           fontWeight: FontWeight.w700,
@@ -829,18 +833,21 @@ class _SongTableState extends State<SongTable> {
               : '';
           final bitDepth =
               (primaryVersion.format?.toLowerCase() == 'flac' &&
-                      primaryVersion.bitDepth != null)
-                  ? '${primaryVersion.bitDepth}b'
-                  : '';
+                  primaryVersion.bitDepth != null)
+              ? '${primaryVersion.bitDepth}b'
+              : '';
           final bitrate = primaryVersion.bitrate != null
               ? '${(primaryVersion.bitrate! / 1000).round()}kbps'
               : '';
           final loudness = primaryVersion.loudness != null
               ? '${primaryVersion.loudness!.toStringAsFixed(1)}dB'
               : '';
-          specText = [frequency, bitDepth, bitrate, loudness]
-              .where((item) => item.isNotEmpty)
-              .join('/');
+          specText = [
+            frequency,
+            bitDepth,
+            bitrate,
+            loudness,
+          ].where((item) => item.isNotEmpty).join('/');
           if (specText.isEmpty) {
             specText = '未知';
           }
@@ -901,9 +908,11 @@ class _SongTableState extends State<SongTable> {
 
     return LayoutBuilder(
       builder: (context, constraints) {
+        _viewportWidth = constraints.maxWidth;
         final tableWidth = _tableWidth(constraints.maxWidth);
-        final bodyHeight =
-            math.max(0.0, constraints.maxHeight - _headerHeight).toDouble();
+        final bodyHeight = math
+            .max(0.0, constraints.maxHeight - _headerHeight)
+            .toDouble();
 
         return Scrollbar(
           thumbVisibility: true,
@@ -917,9 +926,7 @@ class _SongTableState extends State<SongTable> {
                   Container(
                     height: _headerHeight,
                     decoration: BoxDecoration(
-                      border: Border(
-                        bottom: BorderSide(color: cfg.border),
-                      ),
+                      border: Border(bottom: BorderSide(color: cfg.border)),
                     ),
                     child: Row(
                       children: [
@@ -943,7 +950,8 @@ class _SongTableState extends State<SongTable> {
                     child: Listener(
                       behavior: HitTestBehavior.translucent,
                       onPointerDown: _handlePointerDown,
-                      onPointerMove: (event) => _handlePointerMove(event, songs),
+                      onPointerMove: (event) =>
+                          _handlePointerMove(event, songs),
                       onPointerUp: (_) => _handlePointerUp(),
                       onPointerCancel: (_) => _handlePointerUp(),
                       child: Stack(
@@ -957,8 +965,9 @@ class _SongTableState extends State<SongTable> {
                                   audioProvider.playingSong?.id == song.id;
                               final isActive =
                                   audioProvider.activeSong?.id == song.id;
-                              final isSelected =
-                                  _selectedSongIds.contains(song.id);
+                              final isSelected = _selectedSongIds.contains(
+                                song.id,
+                              );
                               final primaryVersion = _primaryVersionFor(song);
 
                               return SizedBox(
@@ -990,8 +999,8 @@ class _SongTableState extends State<SongTable> {
                                         color: isSelected
                                             ? cfg.bgHover.withOpacity(0.12)
                                             : isActive
-                                                ? cfg.bgHover.withOpacity(0.08)
-                                                : Colors.transparent,
+                                            ? cfg.bgHover.withOpacity(0.08)
+                                            : Colors.transparent,
                                         border: Border(
                                           bottom: BorderSide(
                                             color: cfg.border.withOpacity(0.45),
@@ -1021,7 +1030,8 @@ class _SongTableState extends State<SongTable> {
                                               ),
                                               onPressed: () async {
                                                 if (isCurrentlyPlaying) {
-                                                  await audioProvider.playPause();
+                                                  await audioProvider
+                                                      .playPause();
                                                   return;
                                                 }
                                                 try {
@@ -1051,9 +1061,9 @@ class _SongTableState extends State<SongTable> {
                                               padding: EdgeInsets.zero,
                                               constraints:
                                                   const BoxConstraints.tightFor(
-                                                width: 36,
-                                                height: 36,
-                                              ),
+                                                    width: 36,
+                                                    height: 36,
+                                                  ),
                                             ),
                                           ),
                                           for (final column in _columnOrder)

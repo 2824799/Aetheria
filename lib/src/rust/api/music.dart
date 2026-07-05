@@ -222,6 +222,9 @@ Future<void> setRustAudioQualitySettings({
 Future<AudioOutputInfo> getRustAudioOutputInfo() =>
     RustLib.instance.api.crateApiMusicGetRustAudioOutputInfo();
 
+Future<String> getRustDefaultOutputDeviceName() =>
+    RustLib.instance.api.crateApiMusicGetRustDefaultOutputDeviceName();
+
 Future<double> getRustPlaybackPosition() =>
     RustLib.instance.api.crateApiMusicGetRustPlaybackPosition();
 

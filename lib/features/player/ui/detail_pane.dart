@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'dart:ui';
 import 'package:file_picker/file_picker.dart';
 import 'package:provider/provider.dart';
-import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
+import 'package:flutter/services.dart';
 import 'package:aetheria/core/providers/audio_player_provider.dart';
 import 'package:aetheria/core/providers/library_provider.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
@@ -34,11 +34,79 @@ class DetailPane extends StatelessWidget {
     return '${d.toStringAsFixed(1)} ${suffixes[i]}';
   }
 
+  Future<void> _saveSongMetadata(
+    BuildContext context,
+    Song song, {
+    String? title,
+    String? artist,
+  }) async {
+    final nextTitle = (title ?? song.title).trim();
+    final nextArtist = (artist ?? song.artist ?? '').trim();
+    if (nextTitle.isEmpty) {
+      throw Exception('歌曲名称不能为空');
+    }
+    if (nextTitle == song.title && nextArtist == (song.artist ?? '')) {
+      return;
+    }
+
+    final libraryProvider = context.read<LibraryProvider>();
+    final audioProvider = context.read<AudioPlayerProvider>();
+    await libraryProvider.updateSongMetadata(song.id, nextTitle, nextArtist);
+    final updatedSong = libraryProvider.songs.firstWhere(
+      (entry) => entry.id == song.id,
+      orElse: () => song,
+    );
+    audioProvider.syncSongSnapshot(updatedSong);
+  }
+
+  Future<void> _setPrimaryVersion(
+    BuildContext context,
+    Song song,
+    AudioVersion version,
+    LibraryProvider libraryProvider,
+    AudioPlayerProvider audioProvider,
+  ) async {
+    if (version.isPrimary) {
+      return;
+    }
+
+    final shouldSwitchCurrentPlayback =
+        audioProvider.playingSong?.id == song.id &&
+        audioProvider.playingVersion?.id != version.id;
+    final position = audioProvider.currentPosition;
+    final startPaused = !audioProvider.isPlaying;
+
+    await libraryProvider.updateVersionStatus(version.id, true, true);
+
+    if (!shouldSwitchCurrentPlayback) {
+      return;
+    }
+
+    final updatedSong = libraryProvider.songs.firstWhere(
+      (entry) => entry.id == song.id,
+      orElse: () => song,
+    );
+    final updatedVersion = updatedSong.versions.firstWhere(
+      (entry) => entry.id == version.id,
+      orElse: () => version,
+    );
+
+    await audioProvider.switchToVersion(
+      updatedSong,
+      updatedVersion,
+      libraryProvider.libraryPath,
+      audioServerPort: libraryProvider.audioServerPort,
+      startPosition: position,
+      startPaused: startPaused,
+    );
+  }
+
   Future<void> _linkNewVersion(
     BuildContext context,
     Song song,
     LibraryProvider provider,
   ) async {
+    var loaderShown = false;
     try {
       FilePickerResult? result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
@@ -47,21 +115,35 @@ class DetailPane extends StatelessWidget {
 
       if (result == null || result.files.single.path == null) return;
       final path = result.files.single.path!;
+      if (!context.mounted) {
+        return;
+      }
 
       showDialog(
         context: context,
         barrierDismissible: false,
         builder: (ctx) => const Center(child: CircularProgressIndicator()),
       );
+      loaderShown = true;
 
       await provider.importAudioVersionForSong(song.id, path);
+      if (!context.mounted) {
+        return;
+      }
 
-      Navigator.of(context).pop(); // pop progress indicator
+      if (loaderShown) {
+        Navigator.of(context).pop(); // pop progress indicator
+      }
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('成功关联新音源版本')));
     } catch (e) {
-      Navigator.of(context).pop(); // pop loader if failed
+      if (!context.mounted) {
+        return;
+      }
+      if (loaderShown) {
+        Navigator.of(context).pop(); // pop loader if failed
+      }
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('关联失败: $e')));
@@ -204,26 +286,36 @@ class DetailPane extends StatelessWidget {
 
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 24),
-                child: Text(
-                  song.title,
+                child: _EditableMetadataText(
+                  value: song.title,
+                  emptyText: '未命名歌曲',
+                  textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
                     color: cfg.textMain,
                     fontFamily: 'Outfit',
                   ),
-                  textAlign: TextAlign.center,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                  cfg: cfg,
+                  onSave: (value) =>
+                      _saveSongMetadata(context, song, title: value),
                 ),
               ),
               const SizedBox(height: 4),
-              Text(
-                song.artist ?? '未知歌手',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: cfg.textSub,
-                  fontFamily: 'Outfit',
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 32),
+                child: _EditableMetadataText(
+                  value: song.artist ?? '',
+                  emptyText: '未知歌手',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: cfg.textSub,
+                    fontFamily: 'Outfit',
+                  ),
+                  cfg: cfg,
+                  onSave: (value) =>
+                      _saveSongMetadata(context, song, artist: value),
                 ),
               ),
               const SizedBox(height: 16),
@@ -301,9 +393,16 @@ class DetailPane extends StatelessWidget {
     if (audioProvider.activeTab == 'versions') {
       return Column(
         children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            child: Text(
+              '“可用于播放”决定这个文件是否参与播放选择；“默认播放版本”是在播放这首歌时优先使用的音源。',
+              style: TextStyle(color: cfg.textSub, fontSize: 10, height: 1.5),
+            ),
+          ),
           Expanded(
             child: ListView.builder(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
               itemCount: song.versions.length,
               itemBuilder: (context, index) {
                 final v = song.versions[index];
@@ -350,74 +449,103 @@ class DetailPane extends StatelessWidget {
                             fontFamily: 'Outfit',
                           ),
                         ),
+                        const SizedBox(height: 6),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 7,
+                              vertical: 3,
+                            ),
+                            decoration: BoxDecoration(
+                              color:
+                                  (v.metadataScanned
+                                          ? const Color(0xFF10B981)
+                                          : cfg.textSub)
+                                      .withOpacity(0.12),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              v.metadataScanned ? '已完整扫描' : '待完整扫描',
+                              style: TextStyle(
+                                color: v.metadataScanned
+                                    ? const Color(0xFF10B981)
+                                    : cfg.textSub,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ),
                         const SizedBox(height: 10),
 
-                        // Checkbox for Enable & Radio for Primary
                         Row(
                           children: [
-                            // Enabled Checkbox
-                            InkWell(
-                              onTap: () async {
-                                await libraryProvider.updateVersionStatus(
-                                  v.id,
-                                  !v.isEnabled,
-                                  v.isPrimary,
-                                );
-                              },
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    v.isEnabled
-                                        ? Icons.check_box
-                                        : Icons.check_box_outline_blank,
-                                    size: 16,
-                                    color: v.isEnabled
-                                        ? cfg.accent
-                                        : cfg.textSub,
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    '启用版本',
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      color: cfg.textMain,
+                            Tooltip(
+                              message: '关闭后，这个版本不会被自动选来播放；已在播放时不会立刻中断。',
+                              child: InkWell(
+                                onTap: () async {
+                                  await libraryProvider.updateVersionStatus(
+                                    v.id,
+                                    !v.isEnabled,
+                                    v.isPrimary,
+                                  );
+                                },
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      v.isEnabled
+                                          ? Icons.check_box
+                                          : Icons.check_box_outline_blank,
+                                      size: 16,
+                                      color: v.isEnabled
+                                          ? cfg.accent
+                                          : cfg.textSub,
                                     ),
-                                  ),
-                                ],
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      '可用于播放',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: cfg.textMain,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                             const SizedBox(width: 24),
-                            // Primary Radio (can only set true, cannot set false manually as something must be primary)
-                            InkWell(
-                              onTap: () async {
-                                if (!v.isPrimary) {
-                                  await libraryProvider.updateVersionStatus(
-                                    v.id,
-                                    true,
-                                    true,
-                                  );
-                                }
-                              },
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    v.isPrimary
-                                        ? Icons.radio_button_checked
-                                        : Icons.radio_button_off,
-                                    size: 16,
-                                    color: v.isPrimary
-                                        ? cfg.accent
-                                        : cfg.textSub,
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    '设为主音源',
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      color: cfg.textMain,
+                            Tooltip(
+                              message: '播放这首歌时优先使用的版本；若正在播放，会按当前进度切到新版本。',
+                              child: InkWell(
+                                onTap: () => _setPrimaryVersion(
+                                  context,
+                                  song,
+                                  v,
+                                  libraryProvider,
+                                  audioProvider,
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      v.isPrimary
+                                          ? Icons.radio_button_checked
+                                          : Icons.radio_button_off,
+                                      size: 16,
+                                      color: v.isPrimary
+                                          ? cfg.accent
+                                          : cfg.textSub,
                                     ),
-                                  ),
-                                ],
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      '默认播放版本',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: cfg.textMain,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                           ],
@@ -453,15 +581,24 @@ class DetailPane extends StatelessWidget {
                             if (song.versions.length > 1)
                               TextButton.icon(
                                 onPressed: () async {
+                                  final messenger = ScaffoldMessenger.of(
+                                    context,
+                                  );
                                   try {
                                     await libraryProvider.deleteAudioVersion(
                                       v.id,
                                     );
-                                    ScaffoldMessenger.of(context).showSnackBar(
+                                    if (!context.mounted) {
+                                      return;
+                                    }
+                                    messenger.showSnackBar(
                                       const SnackBar(content: Text('音频版本已删除')),
                                     );
                                   } catch (e) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
+                                    if (!context.mounted) {
+                                      return;
+                                    }
+                                    messenger.showSnackBar(
                                       SnackBar(content: Text('删除失败: $e')),
                                     );
                                   }
@@ -600,5 +737,220 @@ class DetailPane extends StatelessWidget {
     }
 
     return const SizedBox.shrink();
+  }
+}
+
+class _EditableMetadataText extends StatefulWidget {
+  const _EditableMetadataText({
+    required this.value,
+    required this.emptyText,
+    required this.style,
+    required this.cfg,
+    required this.onSave,
+    this.textAlign = TextAlign.left,
+  });
+
+  final String value;
+  final String emptyText;
+  final TextStyle style;
+  final AppThemeConfig cfg;
+  final TextAlign textAlign;
+  final Future<void> Function(String value) onSave;
+
+  @override
+  State<_EditableMetadataText> createState() => _EditableMetadataTextState();
+}
+
+class _EditableMetadataTextState extends State<_EditableMetadataText> {
+  late final TextEditingController _controller;
+  late final FocusNode _focusNode;
+  bool _isHovered = false;
+  bool _isEditing = false;
+  bool _isSaving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.value);
+    _focusNode = FocusNode();
+    _focusNode.addListener(_handleFocusChanged);
+  }
+
+  @override
+  void didUpdateWidget(covariant _EditableMetadataText oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_isEditing && oldWidget.value != widget.value) {
+      _controller.text = widget.value;
+    }
+  }
+
+  @override
+  void dispose() {
+    _focusNode.removeListener(_handleFocusChanged);
+    _focusNode.dispose();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _handleFocusChanged() {
+    if (_isEditing && !_focusNode.hasFocus && !_isSaving) {
+      _commit();
+    }
+  }
+
+  void _startEditing() {
+    if (_isEditing) {
+      return;
+    }
+    setState(() {
+      _isEditing = true;
+      _controller.text = widget.value;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      _focusNode.requestFocus();
+      _controller.selection = TextSelection(
+        baseOffset: 0,
+        extentOffset: _controller.text.length,
+      );
+    });
+  }
+
+  void _cancel() {
+    _controller.text = widget.value;
+    setState(() {
+      _isEditing = false;
+    });
+    _focusNode.unfocus();
+  }
+
+  Future<void> _commit() async {
+    if (_isSaving) {
+      return;
+    }
+    final nextValue = _controller.text.trim();
+    setState(() {
+      _isSaving = true;
+    });
+    try {
+      await widget.onSave(nextValue);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isEditing = false;
+      });
+      _focusNode.unfocus();
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('保存失败: $e')));
+      _controller.text = widget.value;
+      setState(() {
+        _isEditing = false;
+      });
+      _focusNode.unfocus();
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSaving = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cfg = widget.cfg;
+    final showEditFrame = _isHovered || _isEditing;
+    final displayValue = widget.value.trim().isEmpty
+        ? widget.emptyText
+        : widget.value.trim();
+
+    return MouseRegion(
+      cursor: SystemMouseCursors.text,
+      onEnter: (_) => setState(() {
+        _isHovered = true;
+      }),
+      onExit: (_) => setState(() {
+        _isHovered = false;
+      }),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: _startEditing,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 140),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: showEditFrame
+                ? cfg.bgHover.withOpacity(0.18)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(7),
+            border: Border.all(
+              color: showEditFrame
+                  ? cfg.accent.withOpacity(0.34)
+                  : Colors.transparent,
+            ),
+          ),
+          child: _isEditing
+              ? Focus(
+                  onKeyEvent: (node, event) {
+                    if (event is! KeyDownEvent) {
+                      return KeyEventResult.ignored;
+                    }
+                    if (event.logicalKey == LogicalKeyboardKey.escape) {
+                      _cancel();
+                      return KeyEventResult.handled;
+                    }
+                    return KeyEventResult.ignored;
+                  },
+                  child: TextField(
+                    controller: _controller,
+                    focusNode: _focusNode,
+                    textAlign: widget.textAlign,
+                    maxLines: 1,
+                    enabled: !_isSaving,
+                    onSubmitted: (_) => _commit(),
+                    style: widget.style,
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      border: InputBorder.none,
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ),
+                )
+              : Row(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: widget.textAlign == TextAlign.center
+                      ? MainAxisAlignment.center
+                      : MainAxisAlignment.start,
+                  children: [
+                    Flexible(
+                      child: Text(
+                        displayValue,
+                        textAlign: widget.textAlign,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: widget.style,
+                      ),
+                    ),
+                    if (showEditFrame) ...[
+                      const SizedBox(width: 6),
+                      Icon(
+                        Icons.edit,
+                        size: 12,
+                        color: cfg.textSub.withOpacity(0.8),
+                      ),
+                    ],
+                  ],
+                ),
+        ),
+      ),
+    );
   }
 }

@@ -86,28 +86,51 @@ class LibraryProvider extends ChangeNotifier {
   int refreshProgressTotal = 0;
   String refreshProgressLabel = '';
 
-  Future<void> refreshDatabase() async {
+  bool isSongFullyScanned(Song song) {
+    return song.versions.isNotEmpty &&
+        song.versions.every((version) => version.metadataScanned);
+  }
+
+  Future<void> refreshDatabase({bool onlyUnscanned = false}) async {
     isRefreshingDatabase = true;
     refreshProgressCurrent = 0;
     refreshProgressTotal = 0;
-    refreshProgressLabel = '正在准备刷新任务...';
+    refreshProgressLabel = onlyUnscanned ? '正在查找新增歌曲...' : '正在准备刷新任务...';
     notifyListeners();
     try {
-      final snapshotSongs = songs.isNotEmpty ? List<Song>.from(songs) : await music.getSongs();
-      refreshProgressTotal = snapshotSongs.length;
-      if (snapshotSongs.isEmpty) {
-        refreshProgressLabel = '音乐库为空，无需刷新。';
+      final snapshotSongs = songs.isNotEmpty
+          ? List<Song>.from(songs)
+          : await music.getSongs();
+      final targetSongs = onlyUnscanned
+          ? snapshotSongs
+                .where(
+                  (song) =>
+                      song.versions.any((version) => !version.metadataScanned),
+                )
+                .toList()
+          : snapshotSongs;
+
+      refreshProgressTotal = targetSongs.length;
+      if (targetSongs.isEmpty) {
+        refreshProgressLabel = onlyUnscanned
+            ? '没有找到新增或未完整扫描的歌曲。'
+            : '音乐库为空，无需刷新。';
       }
       notifyListeners();
 
-      for (int songIndex = 0; songIndex < snapshotSongs.length; songIndex++) {
-        final song = snapshotSongs[songIndex];
+      for (int songIndex = 0; songIndex < targetSongs.length; songIndex++) {
+        final song = targetSongs[songIndex];
+        final targetVersions = onlyUnscanned
+            ? song.versions
+                  .where((version) => !version.metadataScanned)
+                  .toList()
+            : song.versions;
         refreshProgressCurrent = songIndex;
         refreshProgressLabel =
-            '正在刷新 ${songIndex + 1} / ${snapshotSongs.length} 首歌曲: ${song.title}';
+            '正在刷新 ${songIndex + 1} / ${targetSongs.length} 首歌曲: ${song.title}';
         notifyListeners();
 
-        for (final version in song.versions) {
+        for (final version in targetVersions) {
           await music.refreshAudioFileMetadata(versionId: version.id);
         }
 

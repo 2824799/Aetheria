@@ -39,6 +39,7 @@ pub fn init_db() -> Result<()> {
             md5 TEXT,
             bit_depth INTEGER,
             loudness REAL,
+            metadata_scanned INTEGER DEFAULT 0,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (song_id) REFERENCES songs(id) ON DELETE CASCADE
         );",
@@ -144,6 +145,22 @@ pub fn init_db() -> Result<()> {
 
     if !has_loudness {
         let _ = conn.execute("ALTER TABLE audio_files ADD COLUMN loudness REAL;", []);
+    }
+
+    // 数据库迁移：自动检查并补全 metadata_scanned 列（针对已有旧数据库文件）
+    let has_metadata_scanned: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('audio_files') WHERE name='metadata_scanned'",
+            [],
+            |row| row.get::<_, i64>(0).map(|count| count > 0),
+        )
+        .unwrap_or(false);
+
+    if !has_metadata_scanned {
+        let _ = conn.execute(
+            "ALTER TABLE audio_files ADD COLUMN metadata_scanned INTEGER DEFAULT 0;",
+            [],
+        );
     }
 
     // 插入默认种子标签（若库为空）

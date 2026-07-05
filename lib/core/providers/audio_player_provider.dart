@@ -15,6 +15,7 @@ class AudioPlayerProvider extends ChangeNotifier {
   static const String _playbackVersionIdKey = 'aetheria-playback-version-id';
   static const String _playbackPositionMsKey = 'aetheria-playback-position-ms';
   static const String _playbackQueueIdsKey = 'aetheria-playback-queue-ids';
+  static const String _volumeKey = 'aetheria-playback-volume';
   static const String _pitchEnabledKey = 'pitch-enabled';
   static const String _pitchBufferMsKey = 'pitch-buffer-ms';
   static const String _peakProtectionKey = 'peak-protection-enabled';
@@ -65,6 +66,8 @@ class AudioPlayerProvider extends ChangeNotifier {
   bool _isHandlingPlaybackEnd = false;
   bool _hasPreparedPlayback = false;
   Duration? _pendingRestorePosition;
+  String? _lastDefaultOutputDeviceName;
+  bool _isCheckingOutputDeviceChange = false;
 
   AudioPlayerProvider() {
     NativeAudioHelper.setNotificationActionHandler(_handleNotificationAction);
@@ -148,9 +151,9 @@ class AudioPlayerProvider extends ChangeNotifier {
 
   void _startOutputInfoTimer() {
     _outputInfoTimer?.cancel();
-    unawaited(refreshAudioOutputInfo());
+    unawaited(_refreshOutputInfoAndDeviceChange());
     _outputInfoTimer = Timer.periodic(const Duration(seconds: 2), (_) {
-      unawaited(refreshAudioOutputInfo());
+      unawaited(_refreshOutputInfoAndDeviceChange());
     });
   }
 
@@ -165,6 +168,9 @@ class AudioPlayerProvider extends ChangeNotifier {
       }
       final prefs = await SharedPreferences.getInstance();
       playAlongside = prefs.getBool('play-alongside') ?? false;
+      volume = (prefs.getDouble(_volumeKey) ?? volume)
+          .clamp(0.0, 1.0)
+          .toDouble();
       volumeBalanceEnabled = prefs.getBool('volume-balance-enabled') ?? false;
       volumeBalanceStrength = prefs.getDouble('volume-balance-strength') ?? 0.5;
       pitchEnabled = prefs.getBool(_pitchEnabledKey) ?? false;
@@ -191,6 +197,7 @@ class AudioPlayerProvider extends ChangeNotifier {
       );
       await music.setRustOutputBufferMs(ms: pitchBufferMs);
       await music.setRustOutputLatencyMode(mode: outputLatencyMode);
+      await music.setRustVolume(vol: volume);
       await _syncAudioQualitySettings();
       await music.setRustPitch(
         pitch: _effectivePitchSemitones,
@@ -354,6 +361,58 @@ class AudioPlayerProvider extends ChangeNotifier {
       audioOutputInfo = await music.getRustAudioOutputInfo();
       notifyListeners();
     } catch (_) {}
+  }
+
+  Future<void> _refreshOutputInfoAndDeviceChange() async {
+    await refreshAudioOutputInfo();
+    await _handleDefaultOutputDeviceChange();
+  }
+
+  Future<void> _handleDefaultOutputDeviceChange() async {
+    if (Platform.isAndroid || Platform.isIOS || _isCheckingOutputDeviceChange) {
+      return;
+    }
+
+    _isCheckingOutputDeviceChange = true;
+    try {
+      final defaultDeviceName = await music.getRustDefaultOutputDeviceName();
+      if (defaultDeviceName.isEmpty) {
+        return;
+      }
+
+      if (_lastDefaultOutputDeviceName == null) {
+        _lastDefaultOutputDeviceName = defaultDeviceName;
+        return;
+      }
+
+      if (_lastDefaultOutputDeviceName == defaultDeviceName) {
+        return;
+      }
+
+      _lastDefaultOutputDeviceName = defaultDeviceName;
+      await _restartPlaybackOnDefaultOutputDevice();
+    } catch (_) {
+      // Device probing can fail transiently while Windows is switching endpoints.
+    } finally {
+      _isCheckingOutputDeviceChange = false;
+    }
+  }
+
+  Future<void> _restartPlaybackOnDefaultOutputDevice() async {
+    if (playingSong == null ||
+        playingVersion == null ||
+        !_hasPreparedPlayback ||
+        _cachedLibraryPath.isEmpty) {
+      return;
+    }
+
+    final wasPlaying = isPlaying;
+    final position = currentPosition;
+    _hasPreparedPlayback = false;
+    await _startCurrentVersionPlayback(
+      startPosition: position,
+      startPaused: !wasPlaying,
+    );
   }
 
   double _computeNormalizationGain(AudioVersion version) {
@@ -613,10 +672,19 @@ class AudioPlayerProvider extends ChangeNotifier {
   }
 
   void setVolume(double vol) {
-    volume = vol;
-    music.setRustVolume(vol: vol);
+    final normalized = vol.clamp(0.0, 1.0).toDouble();
+    volume = normalized;
+    unawaited(music.setRustVolume(vol: normalized));
     notifyListeners();
-    unawaited(_persistPlaybackState());
+    unawaited(_persistVolume());
+    _updateNotification();
+  }
+
+  Future<void> _persistVolume() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setDouble(_volumeKey, volume);
+    } catch (_) {}
   }
 
   void togglePlayMode() {
@@ -645,6 +713,7 @@ class AudioPlayerProvider extends ChangeNotifier {
           );
           return;
         }
+        await _handleDefaultOutputDeviceChange();
         await music.resumeRustPlayback();
         isPlaying = true;
         _startPositionTimer();
@@ -665,6 +734,7 @@ class AudioPlayerProvider extends ChangeNotifier {
         );
         return;
       }
+      await _handleDefaultOutputDeviceChange();
       await music.resumeRustPlayback();
       isPlaying = true;
       _startPositionTimer();
@@ -756,6 +826,57 @@ class AudioPlayerProvider extends ChangeNotifier {
     );
   }
 
+  Future<void> switchToVersion(
+    Song song,
+    AudioVersion version,
+    String libraryPath, {
+    int? audioServerPort,
+    Duration? startPosition,
+    bool startPaused = false,
+  }) async {
+    activeSong = song;
+    playingSong = song;
+    playingVersion = version;
+    currentQueue = currentQueue
+        .map((entry) => entry.id == song.id ? song : entry)
+        .toList(growable: false);
+    if (!currentQueue.any((entry) => entry.id == song.id)) {
+      currentQueue = <Song>[song];
+    }
+    _cachedLibraryPath = libraryPath;
+    _cachedAudioServerPort = audioServerPort;
+    totalDuration = Duration(milliseconds: (version.duration * 1000).round());
+    _hasPreparedPlayback = false;
+    _pendingRestorePosition = null;
+    await _startCurrentVersionPlayback(
+      startPosition: startPosition ?? currentPosition,
+      startPaused: startPaused,
+    );
+  }
+
+  void syncSongSnapshot(Song song) {
+    var changed = false;
+    if (activeSong?.id == song.id) {
+      activeSong = song;
+      changed = true;
+    }
+    if (playingSong?.id == song.id) {
+      playingSong = song;
+      changed = true;
+    }
+    final nextQueue = currentQueue
+        .map((entry) => entry.id == song.id ? song : entry)
+        .toList(growable: false);
+    if (nextQueue.length == currentQueue.length) {
+      currentQueue = nextQueue;
+    }
+    if (changed) {
+      notifyListeners();
+      _updateNotification();
+      unawaited(_persistPlaybackState());
+    }
+  }
+
   void playNext() {
     if (currentQueue.isEmpty || playingSong == null) return;
 
@@ -835,6 +956,14 @@ class AudioPlayerProvider extends ChangeNotifier {
   }
 
   Future<void> _handleNotificationAction(String action) async {
+    if (action.startsWith('seek:')) {
+      final positionMs = int.tryParse(action.substring('seek:'.length));
+      if (positionMs != null) {
+        await seek(Duration(milliseconds: positionMs));
+      }
+      return;
+    }
+
     switch (action) {
       case 'previous':
         playPrevious();

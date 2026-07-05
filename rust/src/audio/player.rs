@@ -797,6 +797,14 @@ fn build_output(
     Ok((SendStream(stream), output_info, buffer))
 }
 
+pub fn default_output_device_name() -> Result<String, String> {
+    let host = cpal::default_host();
+    let device = host
+        .default_output_device()
+        .ok_or_else(|| "No default audio output device found".to_string())?;
+    device.name().map_err(|e| e.to_string())
+}
+
 /// Start streaming playback of `path` with the given DSP parameters.
 pub fn start_playback(
     path: String,

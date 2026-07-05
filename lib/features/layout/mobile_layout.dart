@@ -107,7 +107,8 @@ class _MobileLayoutState extends State<MobileLayout> {
         allowMultiple: true,
       );
 
-      final selectedPaths = result?.paths.whereType<String>().toList() ?? const [];
+      final selectedPaths =
+          result?.paths.whereType<String>().toList() ?? const [];
       if (selectedPaths.isEmpty) return;
 
       _updateImportProgress(
@@ -164,10 +165,7 @@ class _MobileLayoutState extends State<MobileLayout> {
       String? selectedDirectory = await FilePicker.platform.getDirectoryPath();
       if (selectedDirectory == null) return;
 
-      _updateImportProgress(
-        title: '正在扫描文件夹...',
-        subtitle: '正在搜索支持的音频文件...',
-      );
+      _updateImportProgress(title: '正在扫描文件夹...', subtitle: '正在搜索支持的音频文件...');
 
       // Scan directory for preview
       final filepaths = await music.scanDirectoryForPreview(
@@ -369,7 +367,11 @@ class _MobileLayoutState extends State<MobileLayout> {
                             ElevatedButton(
                               onPressed: () async {
                                 final selectedPreviews = <PreviewInfo>[];
-                                for (int index = 0; index < previews.length; index++) {
+                                for (
+                                  int index = 0;
+                                  index < previews.length;
+                                  index++
+                                ) {
                                   if (checkedItems[index]) {
                                     selectedPreviews.add(previews[index]);
                                   }
@@ -379,22 +381,31 @@ class _MobileLayoutState extends State<MobileLayout> {
 
                                 if (selectedPreviews.isEmpty) {
                                   if (!mounted) return;
-                                  ScaffoldMessenger.of(this.context).showSnackBar(
-                                    const SnackBar(content: Text('请至少选择一首歌曲再导入')),
+                                  ScaffoldMessenger.of(
+                                    this.context,
+                                  ).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('请至少选择一首歌曲再导入'),
+                                    ),
                                   );
                                   return;
                                 }
 
                                 _updateImportProgress(
                                   title: '正在导入已选歌曲...',
-                                  subtitle: '已完成 0 / ${selectedPreviews.length} 首歌曲',
+                                  subtitle:
+                                      '已完成 0 / ${selectedPreviews.length} 首歌曲',
                                   current: 0,
                                   total: selectedPreviews.length,
                                   indeterminate: false,
                                 );
 
                                 int imported = 0;
-                                for (int i = 0; i < selectedPreviews.length; i++) {
+                                for (
+                                  int i = 0;
+                                  i < selectedPreviews.length;
+                                  i++
+                                ) {
                                   final item = selectedPreviews[i];
                                   _updateImportProgress(
                                     title: '正在导入已选歌曲...',
@@ -1020,72 +1031,135 @@ class _MobileLayoutState extends State<MobileLayout> {
                           '${v.format?.toUpperCase() ?? "未知"} | ${(v.bitrate ?? 0) ~/ 1000}kbps | ${v.sampleRate != null ? (v.sampleRate! / 1000).toStringAsFixed(1) : "未知"}kHz | $durationMin:$durationSec | ${_formatFileSize(v.fileSize.toInt())}',
                           style: TextStyle(fontSize: 9, color: cfg.textSub),
                         ),
+                        const SizedBox(height: 6),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color:
+                                  (v.metadataScanned
+                                          ? const Color(0xFF10B981)
+                                          : cfg.textSub)
+                                      .withOpacity(0.12),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              v.metadataScanned ? '已完整扫描' : '待完整扫描',
+                              style: TextStyle(
+                                color: v.metadataScanned
+                                    ? const Color(0xFF10B981)
+                                    : cfg.textSub,
+                                fontSize: 9,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ),
                         const SizedBox(height: 8),
                         Row(
                           children: [
                             // Enable check
-                            InkWell(
-                              onTap: () async {
-                                await libraryProvider.updateVersionStatus(
-                                  v.id,
-                                  !v.isEnabled,
-                                  v.isPrimary,
-                                );
-                              },
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    v.isEnabled
-                                        ? Icons.check_box
-                                        : Icons.check_box_outline_blank,
-                                    size: 14,
-                                    color: v.isEnabled
-                                        ? cfg.accent
-                                        : cfg.textSub,
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    '启用',
-                                    style: TextStyle(
-                                      fontSize: 10,
-                                      color: cfg.textMain,
+                            Tooltip(
+                              message: '关闭后不会被自动选来播放。',
+                              child: InkWell(
+                                onTap: () async {
+                                  await libraryProvider.updateVersionStatus(
+                                    v.id,
+                                    !v.isEnabled,
+                                    v.isPrimary,
+                                  );
+                                },
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      v.isEnabled
+                                          ? Icons.check_box
+                                          : Icons.check_box_outline_blank,
+                                      size: 14,
+                                      color: v.isEnabled
+                                          ? cfg.accent
+                                          : cfg.textSub,
                                     ),
-                                  ),
-                                ],
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      '播放',
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        color: cfg.textMain,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                             const SizedBox(width: 16),
                             // Primary radio
-                            InkWell(
-                              onTap: () async {
-                                if (!v.isPrimary) {
+                            Tooltip(
+                              message: '设为播放这首歌时优先使用的版本。',
+                              child: InkWell(
+                                onTap: () async {
+                                  if (v.isPrimary) {
+                                    return;
+                                  }
+                                  final shouldSwitch =
+                                      audioProvider.playingSong?.id ==
+                                          song.id &&
+                                      audioProvider.playingVersion?.id != v.id;
+                                  final position =
+                                      audioProvider.currentPosition;
+                                  final startPaused = !audioProvider.isPlaying;
                                   await libraryProvider.updateVersionStatus(
                                     v.id,
                                     true,
                                     true,
                                   );
-                                }
-                              },
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    v.isPrimary
-                                        ? Icons.radio_button_checked
-                                        : Icons.radio_button_off,
-                                    size: 14,
-                                    color: v.isPrimary
-                                        ? cfg.accent
-                                        : cfg.textSub,
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    '主音源',
-                                    style: TextStyle(
-                                      fontSize: 10,
-                                      color: cfg.textMain,
+                                  if (shouldSwitch) {
+                                    final updatedSong = libraryProvider.songs
+                                        .firstWhere(
+                                          (entry) => entry.id == song.id,
+                                          orElse: () => song,
+                                        );
+                                    final updatedVersion = updatedSong.versions
+                                        .firstWhere(
+                                          (entry) => entry.id == v.id,
+                                          orElse: () => v,
+                                        );
+                                    await audioProvider.switchToVersion(
+                                      updatedSong,
+                                      updatedVersion,
+                                      libraryProvider.libraryPath,
+                                      audioServerPort:
+                                          libraryProvider.audioServerPort,
+                                      startPosition: position,
+                                      startPaused: startPaused,
+                                    );
+                                  }
+                                },
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      v.isPrimary
+                                          ? Icons.radio_button_checked
+                                          : Icons.radio_button_off,
+                                      size: 14,
+                                      color: v.isPrimary
+                                          ? cfg.accent
+                                          : cfg.textSub,
                                     ),
-                                  ),
-                                ],
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      '默认',
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        color: cfg.textMain,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                             const Spacer(),
@@ -2002,11 +2076,11 @@ class _MobileLayoutState extends State<MobileLayout> {
                             minHeight: 6,
                             value:
                                 _importProgressIndeterminate ||
-                                        _importProgressTotal <= 0
-                                    ? null
-                                    : (_importProgressCurrent /
-                                            _importProgressTotal)
-                                        .clamp(0.0, 1.0),
+                                    _importProgressTotal <= 0
+                                ? null
+                                : (_importProgressCurrent /
+                                          _importProgressTotal)
+                                      .clamp(0.0, 1.0),
                             color: cfg.accent,
                             backgroundColor: cfg.border.withOpacity(0.45),
                           ),

@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:provider/provider.dart';
 import 'package:aetheria/core/providers/library_provider.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
@@ -114,35 +113,7 @@ class _TagFilterState extends State<TagFilter> {
 
               // Tag Manager Button
               if (MediaQuery.of(context).size.width >= 768)
-                ElevatedButton.icon(
-                  onPressed: () => TagManagerModal.show(context),
-                  icon: Icon(
-                    Icons.sell_outlined,
-                    size: 12,
-                    color: cfg.textMain,
-                  ),
-                  label: Text(
-                    '标签管理',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: cfg.textMain,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: cfg.border,
-                    elevation: 0,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
-                    ),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                  ),
-                ),
+                _buildTagManagerButton(context, cfg),
             ],
           ),
 
@@ -275,6 +246,39 @@ class _TagFilterState extends State<TagFilter> {
             fontWeight: FontWeight.bold,
             color: isActive ? Colors.white : cfg.textSub,
             fontFamily: 'Outfit',
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTagManagerButton(BuildContext context, AppThemeConfig cfg) {
+    return Material(
+      color: cfg.border,
+      borderRadius: BorderRadius.circular(7),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => TagManagerModal.show(context),
+        child: SizedBox(
+          height: 32,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.sell_outlined, size: 13, color: cfg.textMain),
+                const SizedBox(width: 6),
+                Text(
+                  '标签管理',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: cfg.textMain,
+                    fontWeight: FontWeight.bold,
+                    fontFamily: 'Outfit',
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
