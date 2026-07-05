@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:aetheria/core/providers/audio_player_provider.dart';
 import 'package:aetheria/core/providers/library_provider.dart';
+import 'package:aetheria/services/native_audio_helper.dart';
 import 'package:aetheria/src/rust/api/music.dart' as music;
 
 class SyncDevice {
@@ -57,21 +58,17 @@ class _SyncSession {
 }
 
 class _RemoteFileInfo {
-  const _RemoteFileInfo({
-    required this.path,
-    required this.size,
-    required this.md5,
-  });
+  const _RemoteFileInfo({required this.path, required this.size, this.md5});
 
   final String path;
   final int size;
-  final String md5;
+  final String? md5;
 
   factory _RemoteFileInfo.fromJson(Map<String, dynamic> json) {
     return _RemoteFileInfo(
       path: json['path']?.toString() ?? '',
       size: (json['size'] as num?)?.toInt() ?? 0,
-      md5: json['md5']?.toString() ?? '',
+      md5: json['md5']?.toString(),
     );
   }
 }
@@ -125,6 +122,9 @@ class SyncProvider extends ChangeNotifier {
       return;
     }
 
+    if (Platform.isAndroid) {
+      await NativeAudioHelper.acquireMulticastLock();
+    }
     _deviceId = await _loadOrCreateDeviceId();
     _deviceName = await _resolveDeviceName();
 
@@ -168,6 +168,10 @@ class SyncProvider extends ChangeNotifier {
   }
 
   Future<void> announceNow() async {
+    await _sendAnnouncement();
+  }
+
+  Future<void> _sendAnnouncement({InternetAddress? targetAddress}) async {
     final socket = _udpSocket;
     final server = _server;
     final libraryProvider = _libraryProvider;
@@ -186,9 +190,17 @@ class SyncProvider extends ChangeNotifier {
         0,
         (sum, song) => sum + song.versions.length,
       ),
+      'reply': targetAddress != null,
     });
     final data = utf8.encode(payload);
-    socket.send(data, InternetAddress('255.255.255.255'), _discoveryPort);
+    if (targetAddress != null) {
+      socket.send(data, targetAddress, _discoveryPort);
+      return;
+    }
+    final targets = await _broadcastTargets();
+    for (final target in targets) {
+      socket.send(data, target, _discoveryPort);
+    }
   }
 
   void clearDevices() {
@@ -216,7 +228,8 @@ class SyncProvider extends ChangeNotifier {
     Directory? backupDir;
     try {
       final token = await _requestRemoteApproval(device);
-      statusMessage = '正在读取远端清单...';
+      progress = null;
+      statusMessage = '正在读取远端文件清单...';
       notifyListeners();
 
       final manifest = await _fetchManifest(device, token);
@@ -228,11 +241,24 @@ class SyncProvider extends ChangeNotifier {
 
       tempDir = await _createTempDir(libraryProvider.libraryPath);
       final tempDb = File(_joinPath(tempDir.path, ['database.db']));
+      progress = null;
+      statusMessage = '正在下载远端数据库...';
+      notifyListeners();
       await _downloadToFile(
         Uri.http(device.endpoint, '/sync/database'),
         tempDb,
         token,
       );
+      final remoteDatabase = manifest['database'] is Map<String, dynamic>
+          ? manifest['database'] as Map<String, dynamic>
+          : const <String, dynamic>{};
+      final remoteDatabaseMd5 = remoteDatabase['md5']?.toString();
+      if (remoteDatabaseMd5 != null && remoteDatabaseMd5.isNotEmpty) {
+        final downloadedDbHash = await _fileMd5(tempDb);
+        if (downloadedDbHash != remoteDatabaseMd5) {
+          throw Exception('数据库校验失败');
+        }
+      }
 
       final plan = await _buildFileSyncPlan(
         libraryProvider.libraryPath,
@@ -256,9 +282,12 @@ class SyncProvider extends ChangeNotifier {
           destination,
           token,
         );
-        final downloadedHash = await _fileMd5(destination);
-        if (downloadedHash != file.md5) {
-          throw Exception('文件校验失败: ${file.path}');
+        final remoteMd5 = file.md5;
+        if (remoteMd5 != null && remoteMd5.isNotEmpty) {
+          final downloadedHash = await _fileMd5(destination);
+          if (downloadedHash != remoteMd5) {
+            throw Exception('文件校验失败: ${file.path}');
+          }
         }
         completed++;
       }
@@ -405,10 +434,13 @@ class SyncProvider extends ChangeNotifier {
         continue;
       }
 
-      final hash = await _fileMd5(localFile);
-      if (hash != remote.md5) {
-        removeOrReplace.add(local);
-        downloads.add(remote);
+      final remoteMd5 = remote.md5;
+      if (remoteMd5 != null && remoteMd5.isNotEmpty) {
+        final hash = await _fileMd5(localFile);
+        if (hash != remoteMd5) {
+          removeOrReplace.add(local);
+          downloads.add(remote);
+        }
       }
     }
 
@@ -612,11 +644,7 @@ class SyncProvider extends ChangeNotifier {
         _resolveLibraryRelativePath(libraryProvider.libraryPath, relPath),
       );
       final stat = await file.stat();
-      files.add({
-        'path': relPath,
-        'size': stat.size,
-        'md5': await _fileMd5(file),
-      });
+      files.add({'path': relPath, 'size': stat.size});
     }
 
     request.response.headers.contentType = ContentType.json;
@@ -727,13 +755,16 @@ class SyncProvider extends ChangeNotifier {
       }
       _devices[deviceId] = SyncDevice(
         id: deviceId,
-        name: json['deviceName']?.toString() ?? '未知设备',
+        name: _sanitizeDeviceName(json['deviceName']?.toString()),
         address: datagram.address.address,
         port: port,
         songCount: (json['songCount'] as num?)?.toInt() ?? 0,
         versionCount: (json['versionCount'] as num?)?.toInt() ?? 0,
         lastSeen: DateTime.now(),
       );
+      if (json['reply'] != true) {
+        unawaited(_sendAnnouncement(targetAddress: datagram.address));
+      }
       notifyListeners();
     } catch (_) {}
   }
@@ -765,10 +796,19 @@ class SyncProvider extends ChangeNotifier {
   }
 
   Future<String> _resolveDeviceName() async {
+    if (Platform.isAndroid) {
+      final nativeName = _sanitizeDeviceName(
+        await NativeAudioHelper.getDeviceName(),
+      );
+      if (nativeName != '未知设备') {
+        return nativeName;
+      }
+    }
     try {
       final hostname = Platform.localHostname;
-      if (hostname.trim().isNotEmpty) {
-        return hostname.trim();
+      final sanitized = _sanitizeDeviceName(hostname);
+      if (sanitized != '未知设备') {
+        return sanitized;
       }
     } catch (_) {}
     if (Platform.isAndroid) {
@@ -778,6 +818,37 @@ class SyncProvider extends ChangeNotifier {
       return 'Windows 电脑';
     }
     return 'Aetheria 设备';
+  }
+
+  String _sanitizeDeviceName(String? value) {
+    final name = value?.trim();
+    if (name == null || name.isEmpty) {
+      return '未知设备';
+    }
+    final lower = name.toLowerCase();
+    if (lower == 'localhost' || lower == 'localhost.localdomain') {
+      return '未知设备';
+    }
+    return name;
+  }
+
+  Future<List<InternetAddress>> _broadcastTargets() async {
+    final targets = <String>{'255.255.255.255'};
+    try {
+      final interfaces = await NetworkInterface.list(
+        type: InternetAddressType.IPv4,
+        includeLoopback: false,
+      );
+      for (final interface in interfaces) {
+        for (final address in interface.addresses) {
+          final parts = address.address.split('.');
+          if (parts.length == 4) {
+            targets.add('${parts[0]}.${parts[1]}.${parts[2]}.255');
+          }
+        }
+      }
+    } catch (_) {}
+    return targets.map(InternetAddress.new).toList();
   }
 
   Future<List<String>> _listLibraryFiles(
@@ -869,6 +940,9 @@ class SyncProvider extends ChangeNotifier {
     _udpSocket?.close();
     _server?.close(force: true);
     _client.close(force: true);
+    if (Platform.isAndroid) {
+      unawaited(NativeAudioHelper.releaseMulticastLock());
+    }
     super.dispose();
   }
 }

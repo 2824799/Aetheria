@@ -57,4 +57,24 @@ class NativeAudioHelper {
       'fileName': fileName,
     });
   }
+
+  static Future<void> acquireMulticastLock() async {
+    try {
+      await _channel.invokeMethod('acquireMulticastLock');
+    } catch (_) {}
+  }
+
+  static Future<void> releaseMulticastLock() async {
+    try {
+      await _channel.invokeMethod('releaseMulticastLock');
+    } catch (_) {}
+  }
+
+  static Future<String?> getDeviceName() async {
+    try {
+      return await _channel.invokeMethod<String>('getDeviceName');
+    } catch (_) {
+      return null;
+    }
+  }
 }

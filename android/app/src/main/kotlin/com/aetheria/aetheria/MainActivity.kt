@@ -12,6 +12,7 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -38,6 +39,7 @@ class MainActivity : FlutterActivity() {
     private var mediaSession: MediaSessionCompat? = null
     private var cachedArtworkPath: String? = null
     private var cachedArtworkBitmap: Bitmap? = null
+    private var multicastLock: WifiManager.MulticastLock? = null
 
     private external fun initAudioContext(context: Context)
 
@@ -74,6 +76,7 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        releaseMulticastLock()
         mediaSession?.release()
         mediaSession = null
         super.onDestroy()
@@ -134,11 +137,62 @@ class MainActivity : FlutterActivity() {
                         result.error("SAVE_ERROR", e.message, null)
                     }
                 }
+                "acquireMulticastLock" -> {
+                    acquireMulticastLock()
+                    result.success(null)
+                }
+                "releaseMulticastLock" -> {
+                    releaseMulticastLock()
+                    result.success(null)
+                }
+                "getDeviceName" -> {
+                    result.success(resolveDeviceName())
+                }
                 else -> {
                     result.notImplemented()
                 }
             }
         }
+    }
+
+    private fun acquireMulticastLock() {
+        try {
+            if (multicastLock?.isHeld == true) {
+                return
+            }
+            val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+            multicastLock = wifiManager.createMulticastLock("aetheria_lan_sync").apply {
+                setReferenceCounted(false)
+                acquire()
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun releaseMulticastLock() {
+        try {
+            multicastLock?.let {
+                if (it.isHeld) {
+                    it.release()
+                }
+            }
+        } catch (_: Exception) {
+        } finally {
+            multicastLock = null
+        }
+    }
+
+    private fun resolveDeviceName(): String {
+        val model = Build.MODEL?.trim().orEmpty()
+        val manufacturer = Build.MANUFACTURER?.trim().orEmpty()
+        val fallback = "Android 设备"
+        if (model.isEmpty()) {
+            return fallback
+        }
+        if (manufacturer.isEmpty() || model.lowercase().contains(manufacturer.lowercase())) {
+            return model
+        }
+        return "$manufacturer $model"
     }
 
     private fun flushPendingNotificationActions() {

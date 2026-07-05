@@ -1531,6 +1531,7 @@ class _SettingsModalState extends State<SettingsModal> {
         border: Border.all(color: cfg.border),
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Icon(Icons.devices_other, color: cfg.accent, size: 18),
           const SizedBox(width: 10),
@@ -1550,10 +1551,27 @@ class _SettingsModalState extends State<SettingsModal> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '${device.endpoint} · ${device.songCount} 首 · ${device.versionCount} 个版本',
+                  device.endpoint,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(color: cfg.textSub, fontSize: 10),
+                ),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: [
+                    _buildSyncMetricPill(
+                      cfg,
+                      Icons.library_music_outlined,
+                      '${device.songCount} 首',
+                    ),
+                    _buildSyncMetricPill(
+                      cfg,
+                      Icons.layers_outlined,
+                      '${device.versionCount} 个版本',
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -1579,6 +1597,35 @@ class _SettingsModalState extends State<SettingsModal> {
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(8),
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSyncMetricPill(AppThemeConfig cfg, IconData icon, String label) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: cfg.accent.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: cfg.accent.withOpacity(0.22)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 10, color: cfg.accent),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            maxLines: 1,
+            softWrap: false,
+            overflow: TextOverflow.visible,
+            style: TextStyle(
+              color: cfg.textMain,
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
             ),
           ),
         ],
