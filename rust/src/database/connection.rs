@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection, Result};
+use rusqlite::{Connection, Result};
 use std::path::PathBuf;
 use std::sync::RwLock;
 
@@ -43,6 +43,7 @@ pub fn get_files_dir() -> PathBuf {
 pub fn init_storage() -> std::io::Result<()> {
     let files_dir = get_files_dir();
     std::fs::create_dir_all(files_dir)?;
+    std::fs::create_dir_all(get_library_dir().join("covers"))?;
     Ok(())
 }
 

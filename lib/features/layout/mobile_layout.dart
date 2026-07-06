@@ -10,6 +10,7 @@ import 'package:aetheria/features/library/ui/tag_filter.dart';
 import 'package:aetheria/features/library/ui/tag_manager_modal.dart';
 import 'package:aetheria/features/library/ui/settings_modal.dart';
 import 'package:aetheria/features/player/ui/lyrics_panel.dart';
+import 'package:aetheria/features/player/ui/song_cover_art.dart';
 import 'package:aetheria/src/rust/models/song.dart';
 import 'package:aetheria/src/rust/models/playlist.dart';
 import 'package:aetheria/src/rust/api/music.dart' as music;
@@ -682,10 +683,12 @@ class _MobileLayoutState extends State<MobileLayout> {
     AudioPlayerProvider audioProvider,
     AppThemeConfig cfg,
     VoidCallback? openLyricManager,
+    Widget? versionHeader,
   ) {
     if (activeTab == 'versions') {
       return Column(
         children: [
+          ?versionHeader,
           Expanded(
             child: ListView.builder(
               padding: const EdgeInsets.all(12),
@@ -1744,6 +1747,99 @@ class _SongDetailSheetBodyState extends State<_SongDetailSheetBody> {
     }
   }
 
+  Widget _buildVersionHeader(Song song, AppThemeConfig cfg) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 4, 20, 10),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SongCoverArt(
+            song: song,
+            cfg: cfg,
+            size: 108,
+            borderRadius: 16,
+            iconSize: 44,
+          ),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: TextField(
+              controller: titleController,
+              focusNode: focusNodeTitle,
+              textAlign: TextAlign.center,
+              onSubmitted: (_) => _saveMetadata(),
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: cfg.textMain,
+              ),
+              decoration: const InputDecoration(
+                border: InputBorder.none,
+                isDense: true,
+                contentPadding: EdgeInsets.symmetric(vertical: 2),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: TextField(
+              controller: artistController,
+              focusNode: focusNodeArtist,
+              textAlign: TextAlign.center,
+              onSubmitted: (_) => _saveMetadata(),
+              style: TextStyle(fontSize: 12, color: cfg.textSub),
+              decoration: const InputDecoration(
+                border: InputBorder.none,
+                isDense: true,
+                contentPadding: EdgeInsets.symmetric(vertical: 2),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBottomTab(
+    String title,
+    String tabId,
+    AppThemeConfig cfg, {
+    double fontSize = 11,
+  }) {
+    final active = activeTab == tabId;
+    return Expanded(
+      child: InkWell(
+        onTap: () {
+          setState(() {
+            activeTab = tabId;
+          });
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            border: Border(
+              top: BorderSide(
+                color: active ? cfg.accent : Colors.transparent,
+                width: 2,
+              ),
+            ),
+          ),
+          child: Text(
+            title,
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: fontSize,
+              fontWeight: active ? FontWeight.bold : FontWeight.normal,
+              color: active ? cfg.textMain : cfg.textSub,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final libraryProvider = context.watch<LibraryProvider>();
@@ -1822,240 +1918,34 @@ class _SongDetailSheetBodyState extends State<_SongDetailSheetBody> {
               ),
             ),
 
-            // Cover section with radial-glow
-            Container(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 110,
-                    height: 110,
-                    decoration: BoxDecoration(
-                      color: cfg.accentGlow,
-                      borderRadius: BorderRadius.circular(16),
-                      boxShadow: [
-                        BoxShadow(
-                          color: cfg.accent.withOpacity(0.12),
-                          blurRadius: 20,
-                          spreadRadius: 2,
-                        ),
-                      ],
-                      border: Border.all(color: cfg.border),
-                    ),
-                    child: Icon(Icons.music_note, size: 45, color: cfg.accent),
-                  ),
-                  const SizedBox(height: 8),
-
-                  // Editable Title field
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 40),
-                    child: TextField(
-                      controller: titleController,
-                      focusNode: focusNodeTitle,
-                      textAlign: TextAlign.center,
-                      onSubmitted: (_) => _saveMetadata(),
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: cfg.textMain,
-                      ),
-                      decoration: const InputDecoration(
-                        border: InputBorder.none,
-                        isDense: true,
-                        contentPadding: EdgeInsets.symmetric(vertical: 2),
-                      ),
-                    ),
-                  ),
-
-                  // Editable Artist field
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 40),
-                    child: TextField(
-                      controller: artistController,
-                      focusNode: focusNodeArtist,
-                      textAlign: TextAlign.center,
-                      onSubmitted: (_) => _saveMetadata(),
-                      style: TextStyle(fontSize: 12, color: cfg.textSub),
-                      decoration: const InputDecoration(
-                        border: InputBorder.none,
-                        isDense: true,
-                        contentPadding: EdgeInsets.symmetric(vertical: 2),
-                      ),
-                    ),
-                  ),
-                ],
+            Expanded(
+              child: widget.state._buildTabContent(
+                context,
+                song,
+                activeTab,
+                libraryProvider,
+                audioProvider,
+                cfg,
+                () {
+                  setState(() {
+                    activeTab = 'lyric_manager';
+                  });
+                },
+                _buildVersionHeader(song, cfg),
               ),
             ),
-
-            // Three tab buttons, expanded to fill available height
-            Expanded(
-              child: Column(
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: InkWell(
-                          onTap: () {
-                            setState(() {
-                              activeTab = 'lyrics';
-                            });
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(vertical: 10),
-                            decoration: BoxDecoration(
-                              border: Border(
-                                bottom: BorderSide(
-                                  color: activeTab == 'lyrics'
-                                      ? cfg.accent
-                                      : Colors.transparent,
-                                  width: 2,
-                                ),
-                              ),
-                            ),
-                            child: Text(
-                              '滚动歌词',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: activeTab == 'lyrics'
-                                    ? FontWeight.bold
-                                    : FontWeight.normal,
-                                color: activeTab == 'lyrics'
-                                    ? cfg.textMain
-                                    : cfg.textSub,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      Expanded(
-                        child: InkWell(
-                          onTap: () {
-                            setState(() {
-                              activeTab = 'lyric_manager';
-                            });
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(vertical: 10),
-                            decoration: BoxDecoration(
-                              border: Border(
-                                bottom: BorderSide(
-                                  color: activeTab == 'lyric_manager'
-                                      ? cfg.accent
-                                      : Colors.transparent,
-                                  width: 2,
-                                ),
-                              ),
-                            ),
-                            child: Text(
-                              '歌词管理',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: activeTab == 'lyric_manager'
-                                    ? FontWeight.bold
-                                    : FontWeight.normal,
-                                color: activeTab == 'lyric_manager'
-                                    ? cfg.textMain
-                                    : cfg.textSub,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      Expanded(
-                        child: InkWell(
-                          onTap: () {
-                            setState(() {
-                              activeTab = 'tags';
-                            });
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(vertical: 10),
-                            decoration: BoxDecoration(
-                              border: Border(
-                                bottom: BorderSide(
-                                  color: activeTab == 'tags'
-                                      ? cfg.accent
-                                      : Colors.transparent,
-                                  width: 2,
-                                ),
-                              ),
-                            ),
-                            child: Text(
-                              '关联标签 (${song.tags.length})',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: activeTab == 'tags'
-                                    ? FontWeight.bold
-                                    : FontWeight.normal,
-                                color: activeTab == 'tags'
-                                    ? cfg.textMain
-                                    : cfg.textSub,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      Expanded(
-                        child: InkWell(
-                          onTap: () {
-                            setState(() {
-                              activeTab = 'versions';
-                            });
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(vertical: 10),
-                            decoration: BoxDecoration(
-                              border: Border(
-                                bottom: BorderSide(
-                                  color: activeTab == 'versions'
-                                      ? cfg.accent
-                                      : Colors.transparent,
-                                  width: 2,
-                                ),
-                              ),
-                            ),
-                            child: Text(
-                              '音频源 (${song.versions.length})',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: activeTab == 'versions'
-                                    ? FontWeight.bold
-                                    : FontWeight.normal,
-                                color: activeTab == 'versions'
-                                    ? cfg.textMain
-                                    : cfg.textSub,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  Divider(height: 1, color: cfg.border),
-
-                  // Scrollable list tab content is now Expanded
-                  Expanded(
-                    child: widget.state._buildTabContent(
-                      context,
-                      song,
-                      activeTab,
-                      libraryProvider,
-                      audioProvider,
-                      cfg,
-                      () {
-                        setState(() {
-                          activeTab = 'lyric_manager';
-                        });
-                      },
-                    ),
-                  ),
-                ],
-              ),
+            Divider(height: 1, color: cfg.border),
+            Row(
+              children: [
+                _buildBottomTab('滚动歌词', 'lyrics', cfg, fontSize: 12),
+                _buildBottomTab('歌词管理', 'lyric_manager', cfg),
+                _buildBottomTab('关联标签 (${song.tags.length})', 'tags', cfg),
+                _buildBottomTab(
+                  '音频源 (${song.versions.length})',
+                  'versions',
+                  cfg,
+                ),
+              ],
             ),
 
             // Bottom Seeker & Control Area

@@ -26,6 +26,14 @@ String _sourceLabel(String source) {
   };
 }
 
+const _lyricsFontFallback = <String>[
+  'Microsoft YaHei UI',
+  'Microsoft YaHei',
+  'PingFang SC',
+  'Noto Sans CJK SC',
+  'sans-serif',
+];
+
 class LyricsPanel extends StatefulWidget {
   const LyricsPanel({
     super.key,
@@ -1550,7 +1558,8 @@ class _LyricLineTile extends StatelessWidget {
     final baseStyle = TextStyle(
       color: active ? cfg.textMain : cfg.textSub,
       fontSize: active ? (compact ? 14 : 15) : (compact ? 12 : 12.5),
-      fontWeight: active ? FontWeight.w900 : FontWeight.w500,
+      fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+      fontFamilyFallback: _lyricsFontFallback,
       height: 1.24,
     );
     return AnimatedScale(
@@ -1587,6 +1596,7 @@ class _LyricLineTile extends StatelessWidget {
                         : cfg.textSub.withValues(alpha: 0.65),
                     fontSize: compact ? 10.5 : 11.5,
                     fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                    fontFamilyFallback: _lyricsFontFallback,
                     height: 1.2,
                   ),
                 ),

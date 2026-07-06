@@ -39,11 +39,12 @@ Color audioQualityColor(AudioVersion? version, Color fallback) {
       format == 'wav' ||
       format == 'alac' ||
       format == 'ape';
-  final isHiRes =
-      (version.bitDepth != null && version.bitDepth! > 16) ||
-      (version.sampleRate != null && version.sampleRate! >= 48000);
+  final isHiResLossless =
+      isLossless &&
+      ((version.bitDepth != null && version.bitDepth! > 16) ||
+          (version.sampleRate != null && version.sampleRate! >= 48000));
 
-  if (isLossless || isHiRes || (bitrateKbps != null && bitrateKbps >= 320)) {
+  if (isHiResLossless || isLossless) {
     return const Color(0xFF10B981);
   }
   if (bitrateKbps != null && bitrateKbps < 192) {
@@ -51,6 +52,9 @@ Color audioQualityColor(AudioVersion? version, Color fallback) {
   }
   if (bitrateKbps != null && bitrateKbps < 256) {
     return const Color(0xFFF59E0B);
+  }
+  if (bitrateKbps != null && bitrateKbps >= 320) {
+    return const Color(0xFF10B981);
   }
   if (bitrateKbps != null) {
     return const Color(0xFF3B82F6);

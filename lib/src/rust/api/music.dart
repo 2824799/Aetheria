@@ -9,7 +9,7 @@ import '../models/playlist.dart';
 import '../models/song.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `absolute_audio_path_from_relative`, `copy_sidecar_lyrics`, `embedded_lyrics_from_audio`, `ensure_version_belongs_to_song`, `estimate_duration_from_bitrate`, `estimate_duration_with_symphonia`, `explorer_style_compare`, `is_raw_aac_path`, `read_text_file_if_exists`, `refresh_audio_file_metadata_impl`, `reliable_duration`, `remove_sidecar_lyrics`, `saved_lyric_from_row`, `scan_directory`, `selected_lyric_query`, `sort_songs_like_explorer`
+// These functions are ignored because they are not marked as `pub`: `absolute_audio_path_from_relative`, `copy_sidecar_lyrics`, `embedded_lyrics_from_audio`, `ensure_song_cover_path`, `ensure_version_belongs_to_song`, `estimate_duration_from_bitrate`, `estimate_duration_with_symphonia`, `explorer_style_compare`, `extract_embedded_cover`, `get_covers_dir`, `is_raw_aac_path`, `picture_extension`, `read_text_file_if_exists`, `refresh_audio_file_metadata_impl`, `reliable_duration`, `remove_sidecar_lyrics`, `saved_lyric_from_row`, `scan_directory`, `selected_lyric_query`, `sort_songs_like_explorer`
 
 bool isLibraryInitialized() =>
     RustLib.instance.api.crateApiMusicIsLibraryInitialized();
@@ -50,6 +50,9 @@ Future<AudioVersion> importAudioVersionForSong({
   songId: songId,
   filepath: filepath,
 );
+
+Future<String?> ensureSongCover({required String songId}) =>
+    RustLib.instance.api.crateApiMusicEnsureSongCover(songId: songId);
 
 Future<void> updateVersionStatus({
   required String versionId,

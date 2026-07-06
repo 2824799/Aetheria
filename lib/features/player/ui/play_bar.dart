@@ -241,6 +241,7 @@ class PlayBar extends StatelessWidget {
                       const SizedBox(width: 6),
                       SizedBox(
                         width: 80,
+                        height: 24,
                         child: SliderTheme(
                           data: SliderTheme.of(context).copyWith(
                             trackHeight: 3,

@@ -83,6 +83,43 @@ class LibraryProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<String?> ensureSongCover(Song song) async {
+    if (song.id.isEmpty) {
+      return null;
+    }
+    try {
+      final coverPath = await music.ensureSongCover(songId: song.id);
+      if (coverPath == null || coverPath.trim().isEmpty) {
+        return null;
+      }
+      if (song.coverPath == coverPath) {
+        return coverPath;
+      }
+      songs = songs
+          .map(
+            (entry) => entry.id == song.id
+                ? Song(
+                    id: entry.id,
+                    title: entry.title,
+                    artist: entry.artist,
+                    album: entry.album,
+                    lyrics: entry.lyrics,
+                    coverPath: coverPath,
+                    rating: entry.rating,
+                    createdAt: entry.createdAt,
+                    versions: entry.versions,
+                    tags: entry.tags,
+                  )
+                : entry,
+          )
+          .toList();
+      notifyListeners();
+      return coverPath;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<Set<String>> _loadSongLyricFlags(List<Song> sourceSongs) async {
     final result = <String>{};
     const batchSize = 24;

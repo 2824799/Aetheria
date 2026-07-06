@@ -7,6 +7,7 @@ import 'package:aetheria/core/providers/audio_player_provider.dart';
 import 'package:aetheria/core/providers/library_provider.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
 import 'package:aetheria/features/player/ui/lyrics_panel.dart';
+import 'package:aetheria/features/player/ui/song_cover_art.dart';
 import 'package:aetheria/src/rust/models/song.dart';
 import 'package:aetheria/src/rust/api/music.dart' as music;
 import 'package:aetheria/services/native_audio_helper.dart';
@@ -282,8 +283,6 @@ class DetailPane extends StatelessWidget {
     if (song.id.isEmpty) {
       return const SizedBox.shrink();
     }
-    final displayVersion = _displayVersionForSong(song, audioProvider);
-
     return ClipRRect(
       borderRadius: const BorderRadius.horizontal(left: Radius.circular(22)),
       child: BackdropFilter(
@@ -304,7 +303,6 @@ class DetailPane extends StatelessWidget {
           ),
           child: Column(
             children: [
-              // Close button
               Align(
                 alignment: Alignment.topRight,
                 child: IconButton(
@@ -313,88 +311,16 @@ class DetailPane extends StatelessWidget {
                 ),
               ),
 
-              // Header (Artwork Cover placeholder, Title, Artist)
-              Container(
-                width: 130,
-                height: 130,
-                margin: const EdgeInsets.only(bottom: 16),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(16),
-                  gradient: LinearGradient(
-                    colors: [Colors.white.withOpacity(0.06), cfg.border],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  border: Border.all(color: cfg.border),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.2),
-                      blurRadius: 20,
-                      offset: const Offset(0, 8),
-                    ),
-                  ],
-                ),
-                child: Icon(Icons.music_note, size: 48, color: cfg.accent),
-              ),
-
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
-                child: _EditableMetadataText(
-                  value: song.title,
-                  emptyText: '未命名歌曲',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: cfg.textMain,
-                  ),
-                  cfg: cfg,
-                  onSave: (value) =>
-                      _saveSongMetadata(context, song, title: value),
+              Expanded(
+                child: _buildContent(
+                  context,
+                  song,
+                  audioProvider,
+                  libraryProvider,
+                  cfg,
                 ),
               ),
-              const SizedBox(height: 4),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 32),
-                child: _EditableMetadataText(
-                  value: song.artist ?? '',
-                  emptyText: '未知歌手',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 12, color: cfg.textSub),
-                  cfg: cfg,
-                  onSave: (value) =>
-                      _saveSongMetadata(context, song, artist: value),
-                ),
-              ),
-              if (displayVersion != null) ...[
-                const SizedBox(height: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: cfg.bgHover.withOpacity(0.14),
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(color: cfg.border.withOpacity(0.65)),
-                  ),
-                  child: Text(
-                    _formatLoudness(displayVersion.loudness),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: displayVersion.loudness == null
-                          ? cfg.textSub
-                          : cfg.textMain,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-              ],
-              const SizedBox(height: 16),
-
-              // Tabs (Lyrics, Tags, Versions)
+              Divider(height: 1, color: cfg.border),
               Row(
                 children: [
                   _buildTab(context, '滚动歌词', 'lyrics', audioProvider, cfg),
@@ -408,18 +334,6 @@ class DetailPane extends StatelessWidget {
                   _buildTab(context, '标签管理', 'tags', audioProvider, cfg),
                   _buildTab(context, '音源版本', 'versions', audioProvider, cfg),
                 ],
-              ),
-              Divider(height: 1, color: cfg.border),
-
-              // Content Area
-              Expanded(
-                child: _buildContent(
-                  context,
-                  song,
-                  audioProvider,
-                  libraryProvider,
-                  cfg,
-                ),
               ),
             ],
           ),
@@ -443,7 +357,7 @@ class DetailPane extends StatelessWidget {
           padding: const EdgeInsets.symmetric(vertical: 12),
           decoration: BoxDecoration(
             border: Border(
-              bottom: BorderSide(
+              top: BorderSide(
                 color: isActive ? cfg.accent : Colors.transparent,
                 width: 2.0,
               ),
@@ -459,6 +373,50 @@ class DetailPane extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildVersionHeader(
+    BuildContext context,
+    Song song,
+    AppThemeConfig cfg,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(18, 2, 18, 8),
+      child: Column(
+        children: [
+          SongCoverArt(song: song, cfg: cfg, size: 124, borderRadius: 16),
+          const SizedBox(height: 14),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            child: _EditableMetadataText(
+              value: song.title,
+              emptyText: '未命名歌曲',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: cfg.textMain,
+              ),
+              cfg: cfg,
+              onSave: (value) => _saveSongMetadata(context, song, title: value),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            child: _EditableMetadataText(
+              value: song.artist ?? '',
+              emptyText: '未知歌手',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 12, color: cfg.textSub),
+              cfg: cfg,
+              onSave: (value) =>
+                  _saveSongMetadata(context, song, artist: value),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -489,6 +447,7 @@ class DetailPane extends StatelessWidget {
     if (audioProvider.activeTab == 'versions') {
       return Column(
         children: [
+          _buildVersionHeader(context, song, cfg),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
             child: Text(

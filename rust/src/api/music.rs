@@ -7,6 +7,7 @@ use crate::models::{
 };
 use flutter_rust_bridge::frb;
 use lofty::file::{AudioFile, TaggedFileExt};
+use lofty::picture::{MimeType, PictureType};
 use lofty::probe::Probe;
 use lofty::tag::{Accessor, ItemKey};
 use rusqlite::params;
@@ -59,6 +60,98 @@ fn sort_songs_like_explorer(songs: &mut [Song]) {
             })
             .then_with(|| a.id.cmp(&b.id))
     });
+}
+
+fn get_covers_dir() -> PathBuf {
+    get_library_dir().join("covers")
+}
+
+fn picture_extension(mime_type: Option<&MimeType>) -> &'static str {
+    match mime_type {
+        Some(MimeType::Png) => "png",
+        Some(MimeType::Jpeg) => "jpg",
+        Some(MimeType::Gif) => "gif",
+        Some(MimeType::Bmp) => "bmp",
+        Some(MimeType::Tiff) => "tiff",
+        _ => "jpg",
+    }
+}
+
+fn extract_embedded_cover(src_path: &Path, song_id: &str) -> Option<String> {
+    let tagged_file = Probe::open(src_path).ok()?.read().ok()?;
+    let picture = tagged_file
+        .primary_tag()
+        .and_then(|tag| {
+            tag.get_picture_type(PictureType::CoverFront)
+                .or_else(|| tag.pictures().first())
+        })
+        .or_else(|| {
+            tagged_file.tags().iter().find_map(|tag| {
+                tag.get_picture_type(PictureType::CoverFront)
+                    .or_else(|| tag.pictures().first())
+            })
+        })?;
+
+    let data = picture.data();
+    if data.is_empty() {
+        return None;
+    }
+
+    let covers_dir = get_covers_dir();
+    if fs::create_dir_all(&covers_dir).is_err() {
+        return None;
+    }
+    let ext = picture_extension(picture.mime_type());
+    let filename = format!("{}.{}", song_id, ext);
+    let absolute_path = covers_dir.join(&filename);
+    if fs::write(&absolute_path, data).is_err() {
+        return None;
+    }
+    Some(format!("covers/{}", filename))
+}
+
+fn ensure_song_cover_path(
+    conn: &rusqlite::Connection,
+    song_id: &str,
+) -> Result<Option<String>, String> {
+    let current: Option<String> = conn
+        .query_row(
+            "SELECT cover_path FROM songs WHERE id = ?1",
+            params![song_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+        .flatten();
+
+    if let Some(path) = current {
+        if get_library_dir().join(&path).exists() {
+            return Ok(Some(path));
+        }
+    }
+
+    let audio_path: Option<String> = conn
+        .query_row(
+            "SELECT filepath FROM audio_files WHERE song_id = ?1 ORDER BY is_primary DESC, created_at ASC LIMIT 1",
+            params![song_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+
+    let Some(filepath) = audio_path else {
+        return Ok(None);
+    };
+    let absolute_audio_path = get_library_dir().join(filepath);
+    let cover_path = extract_embedded_cover(&absolute_audio_path, song_id);
+    if let Some(path) = &cover_path {
+        conn.execute(
+            "UPDATE songs SET cover_path = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2",
+            params![path, song_id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(cover_path)
 }
 
 fn saved_lyric_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SavedLyric> {
@@ -598,6 +691,8 @@ pub fn import_song(filepath: String) -> Result<Song, String> {
         ]
     ).map_err(|e| e.to_string())?;
 
+    let _ = ensure_song_cover_path(&conn, &song_id);
+
     let mut stmt = conn.prepare(
         "SELECT id, title, artist, album, lyrics, cover_path, rating, created_at FROM songs WHERE id = ?1"
     ).map_err(|e| e.to_string())?;
@@ -810,6 +905,8 @@ pub fn import_song_with_metadata(
         ]
     ).map_err(|e| e.to_string())?;
 
+    let _ = ensure_song_cover_path(&conn, &song_id);
+
     Ok(())
 }
 
@@ -908,6 +1005,8 @@ pub fn import_audio_version_for_song(
         ]
     ).map_err(|e| e.to_string())?;
 
+    let _ = ensure_song_cover_path(&conn, &song_id);
+
     Ok(AudioVersion {
         id: version_id,
         song_id,
@@ -925,6 +1024,11 @@ pub fn import_audio_version_for_song(
         loudness,
         metadata_scanned: false,
     })
+}
+
+pub fn ensure_song_cover(song_id: String) -> Result<Option<String>, String> {
+    let conn = establish_connection().map_err(|e| e.to_string())?;
+    ensure_song_cover_path(&conn, &song_id)
 }
 
 pub fn update_version_status(
@@ -1266,6 +1370,16 @@ pub fn delete_lyric(lyric_id: String) -> Result<(), String> {
 pub fn delete_song(song_id: String) -> Result<(), String> {
     let conn = establish_connection().map_err(|e| e.to_string())?;
 
+    let cover_path: Option<String> = conn
+        .query_row(
+            "SELECT cover_path FROM songs WHERE id = ?1",
+            params![song_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+        .flatten();
+
     let mut stmt = conn
         .prepare("SELECT filepath FROM audio_files WHERE song_id = ?1")
         .map_err(|e| e.to_string())?;
@@ -1286,6 +1400,13 @@ pub fn delete_song(song_id: String) -> Result<(), String> {
     let _ = conn.execute("DELETE FROM lyrics WHERE song_id = ?1", params![song_id]);
     conn.execute("DELETE FROM songs WHERE id = ?1", params![song_id])
         .map_err(|e| e.to_string())?;
+
+    if let Some(path) = cover_path {
+        let absolute_path = get_library_dir().join(path);
+        if absolute_path.exists() {
+            let _ = fs::remove_file(absolute_path);
+        }
+    }
     Ok(())
 }
 
