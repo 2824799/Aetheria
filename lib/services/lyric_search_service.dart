@@ -60,10 +60,10 @@ class LyricSearchService {
   ) async {
     final tasks = <Future<List<LyricSearchCandidate>>>[
       _guard(_searchLocal(song, version)),
-      _guard(_searchLrclib(song, version)),
       _guard(_searchNetease(song, version)),
       _guard(_searchQq(song, version)),
       _guard(_searchKugou(song, version)),
+      _guard(_searchLrclib(song, version)),
     ];
 
     final groups = await Future.wait(tasks);

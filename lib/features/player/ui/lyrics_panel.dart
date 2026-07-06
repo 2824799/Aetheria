@@ -2,8 +2,10 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
+import 'package:aetheria/core/providers/library_provider.dart';
 import 'package:aetheria/core/providers/audio_player_provider.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
 import 'package:aetheria/services/lyric_search_service.dart';
@@ -310,6 +312,9 @@ class _LyricsPanelState extends State<LyricsPanel> {
         _savedLyric = lyric;
         _loadingSaved = false;
       });
+      if (lyric != null) {
+        context.read<LibraryProvider>().markSongHasLyrics(widget.song.id);
+      }
     } catch (e) {
       if (!mounted || key != _loadKey) {
         return;
@@ -370,6 +375,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
       _candidates = const <LyricSearchCandidate>[];
       _error = null;
     });
+    context.read<LibraryProvider>().markSongHasLyrics(widget.song.id);
   }
 
   Future<void> _openManualEditor() async {
@@ -389,6 +395,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
       _candidates = const <LyricSearchCandidate>[];
       _error = null;
     });
+    context.read<LibraryProvider>().markSongHasLyrics(widget.song.id);
   }
 
   Future<void> _setOffset(int offsetMs) async {
@@ -399,7 +406,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
     try {
       final updated = await music.updateLyricOffset(
         lyricId: lyric.id,
-        offsetMs: offsetMs.clamp(-30000, 30000),
+        offsetMs: offsetMs.clamp(-1000000, 1000000),
       );
       if (!mounted) {
         return;
@@ -559,12 +566,11 @@ class _LyricsPanelState extends State<LyricsPanel> {
 
   Widget _buildCurrentLyricPreview(AppThemeConfig cfg, String content) {
     final lyric = _savedLyric;
-    final previewLines = content
+    final previewText = content
         .replaceAll('\r\n', '\n')
         .replaceAll('\r', '\n')
         .split('\n')
         .where((line) => line.trim().isNotEmpty)
-        .take(18)
         .join('\n');
 
     return Padding(
@@ -604,6 +610,31 @@ class _LyricsPanelState extends State<LyricsPanel> {
                       fontWeight: FontWeight.w700,
                     ),
                   ),
+                  const SizedBox(width: 4),
+                  Tooltip(
+                    message: '复制歌词',
+                    child: IconButton(
+                      onPressed: () async {
+                        await Clipboard.setData(ClipboardData(text: content));
+                        if (!mounted) {
+                          return;
+                        }
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('歌词已复制到剪切板')),
+                        );
+                      },
+                      icon: Icon(
+                        Icons.copy_all_outlined,
+                        size: 16,
+                        color: cfg.textSub,
+                      ),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints.tightFor(
+                        width: 30,
+                        height: 30,
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -612,7 +643,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(12),
                 child: SelectableText(
-                  previewLines.isEmpty ? '暂无可预览内容' : previewLines,
+                  previewText.isEmpty ? '暂无可预览内容' : previewText,
                   style: TextStyle(
                     color: cfg.textSub,
                     fontSize: widget.compact ? 11 : 12,
@@ -629,7 +660,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
 
   Widget _buildCandidateStrip(AppThemeConfig cfg) {
     return Container(
-      height: widget.compact ? 118 : 132,
+      height: widget.compact ? 174 : 220,
       margin: const EdgeInsets.fromLTRB(16, 6, 16, 8),
       decoration: BoxDecoration(
         color: cfg.bgHover.withValues(alpha: 0.08),
@@ -686,11 +717,11 @@ class _LyricsPanelState extends State<LyricsPanel> {
                         ),
                         Text(
                           [
-                            candidate.artist,
-                            candidate.album,
                             candidate.durationSec == null
                                 ? null
                                 : _formatDuration(candidate.durationSec!),
+                            candidate.artist,
+                            candidate.album,
                           ].whereType<String>().join(' · '),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
@@ -1103,7 +1134,7 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
   bool _guideVisible = false;
   bool _autoScrolling = false;
 
-  double get _lineExtent => widget.compact ? 44 : 52;
+  double get _lineExtent => widget.compact ? 72 : 84;
 
   @override
   void dispose() {
@@ -1536,8 +1567,9 @@ class _LyricLineTile extends StatelessWidget {
               child: Text(
                 line.text.isEmpty ? ' ' : line.text,
                 textAlign: TextAlign.center,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+                softWrap: true,
+                maxLines: active ? 3 : 2,
+                overflow: TextOverflow.fade,
               ),
             ),
             if (translation != null && translation!.isNotEmpty)
@@ -1546,8 +1578,9 @@ class _LyricLineTile extends StatelessWidget {
                 child: Text(
                   translation!,
                   textAlign: TextAlign.center,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                  softWrap: true,
+                  maxLines: 2,
+                  overflow: TextOverflow.fade,
                   style: TextStyle(
                     color: active
                         ? cfg.accent

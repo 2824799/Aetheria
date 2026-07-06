@@ -799,23 +799,16 @@ class AudioPlayerProvider extends ChangeNotifier {
     // Find target version
     AudioVersion? targetVersion;
     for (var v in song.versions) {
-      if (v.isPrimary && v.isEnabled) {
+      if (v.isPrimary) {
         targetVersion = v;
         break;
       }
     }
 
-    if (targetVersion == null) {
-      for (var v in song.versions) {
-        if (v.isEnabled) {
-          targetVersion = v;
-          break;
-        }
-      }
-    }
+    targetVersion ??= song.versions.isNotEmpty ? song.versions.first : null;
 
     if (targetVersion == null) {
-      throw Exception('该歌曲暂无可用的启用音频版本！请先启用至少一个版本。');
+      throw Exception('该歌曲暂无可播放的音源版本。');
     }
 
     await playSongVersion(

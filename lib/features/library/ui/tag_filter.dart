@@ -5,7 +5,14 @@ import 'package:aetheria/core/providers/ui_theme_provider.dart';
 import 'package:aetheria/features/library/ui/tag_manager_modal.dart';
 
 class TagFilter extends StatefulWidget {
-  const TagFilter({super.key});
+  const TagFilter({
+    super.key,
+    this.scrollCollapseFactor = 0,
+    this.onExpandRequested,
+  });
+
+  final double scrollCollapseFactor;
+  final VoidCallback? onExpandRequested;
 
   @override
   State<TagFilter> createState() => _TagFilterState();
@@ -27,6 +34,9 @@ class _TagFilterState extends State<TagFilter> {
     final libraryProvider = context.watch<LibraryProvider>();
     final themeProvider = context.watch<UIThemeProvider>();
     final cfg = themeProvider.currentTheme;
+    final contentHeightFactor = _isExpanded
+        ? (1 - widget.scrollCollapseFactor.clamp(0.0, 1.0))
+        : 0.0;
 
     return Container(
       decoration: BoxDecoration(
@@ -78,6 +88,9 @@ class _TagFilterState extends State<TagFilter> {
                   setState(() {
                     _isExpanded = !_isExpanded;
                   });
+                  if (_isExpanded) {
+                    widget.onExpandRequested?.call();
+                  }
                 },
                 borderRadius: BorderRadius.circular(4),
                 child: Padding(
@@ -95,7 +108,6 @@ class _TagFilterState extends State<TagFilter> {
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
                           color: cfg.textSub,
-                          fontFamily: 'Outfit',
                         ),
                       ),
                       const SizedBox(width: 4),
@@ -117,107 +129,17 @@ class _TagFilterState extends State<TagFilter> {
             ],
           ),
 
-          // Collapsible Tag Chips Pool
-          AnimatedCrossFade(
-            firstChild: const SizedBox.shrink(),
-            secondChild: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const SizedBox(height: 12),
-                libraryProvider.tags.isEmpty
-                    ? Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        child: Text(
-                          '暂无预设标签，可点击右侧标签管理新建',
-                          style: TextStyle(color: cfg.textSub, fontSize: 12),
-                        ),
-                      )
-                    : Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: libraryProvider.tags.map((tag) {
-                          final isSelected = libraryProvider.selectedTags
-                              .contains(tag.id);
-                          final isExcluded = libraryProvider.excludedTags
-                              .contains(tag.id);
-
-                          Color tagColor = tag.color != null
-                              ? _parseHexColor(tag.color!, cfg.textSub)
-                              : cfg.textSub;
-
-                          if (isExcluded) {
-                            tagColor = Colors.redAccent;
-                          }
-
-                          return InkWell(
-                            onTap: () => libraryProvider.toggleTag(tag.id),
-                            borderRadius: BorderRadius.circular(14),
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 150),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 5,
-                              ),
-                              decoration: BoxDecoration(
-                                color: (isSelected || isExcluded)
-                                    ? cfg.bgHover
-                                    : cfg.bgPanel,
-                                borderRadius: BorderRadius.circular(14),
-                                border: Border.all(
-                                  color: (isSelected || isExcluded)
-                                      ? tagColor
-                                      : cfg.border,
-                                  width: 1.0,
-                                ),
-                                boxShadow: (isSelected || isExcluded)
-                                    ? [
-                                        BoxShadow(
-                                          color: tagColor.withOpacity(0.25),
-                                          blurRadius: 8,
-                                        ),
-                                      ]
-                                    : null,
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Container(
-                                    width: 8,
-                                    height: 8,
-                                    decoration: BoxDecoration(
-                                      color: tagColor,
-                                      shape: BoxShape.circle,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    tag.name,
-                                    style: TextStyle(
-                                      color: (isSelected || isExcluded)
-                                          ? cfg.textMain
-                                          : tagColor,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w500,
-                                      fontFamily: 'Outfit',
-                                      decoration: isExcluded
-                                          ? TextDecoration.lineThrough
-                                          : null,
-                                      decorationColor: Colors.redAccent,
-                                      decorationThickness: 2.0,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          );
-                        }).toList(),
-                      ),
-              ],
+          AnimatedSize(
+            duration: const Duration(milliseconds: 160),
+            curve: Curves.easeOut,
+            alignment: Alignment.topCenter,
+            child: ClipRect(
+              child: Align(
+                alignment: Alignment.topCenter,
+                heightFactor: contentHeightFactor,
+                child: _buildTagPool(libraryProvider, cfg),
+              ),
             ),
-            crossFadeState: _isExpanded
-                ? CrossFadeState.showSecond
-                : CrossFadeState.showFirst,
-            duration: const Duration(milliseconds: 200),
           ),
         ],
       ),
@@ -245,10 +167,107 @@ class _TagFilterState extends State<TagFilter> {
             fontSize: 11,
             fontWeight: FontWeight.bold,
             color: isActive ? Colors.white : cfg.textSub,
-            fontFamily: 'Outfit',
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildTagPool(LibraryProvider libraryProvider, AppThemeConfig cfg) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SizedBox(height: 12),
+        libraryProvider.tags.isEmpty
+            ? Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Text(
+                  '暂无预设标签，可点击右侧标签管理新建',
+                  style: TextStyle(color: cfg.textSub, fontSize: 12),
+                ),
+              )
+            : Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: libraryProvider.tags.map((tag) {
+                  final isSelected = libraryProvider.selectedTags.contains(
+                    tag.id,
+                  );
+                  final isExcluded = libraryProvider.excludedTags.contains(
+                    tag.id,
+                  );
+
+                  Color tagColor = tag.color != null
+                      ? _parseHexColor(tag.color!, cfg.textSub)
+                      : cfg.textSub;
+
+                  if (isExcluded) {
+                    tagColor = Colors.redAccent;
+                  }
+
+                  return InkWell(
+                    onTap: () => libraryProvider.toggleTag(tag.id),
+                    borderRadius: BorderRadius.circular(14),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 150),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: (isSelected || isExcluded)
+                            ? cfg.bgHover
+                            : cfg.bgPanel,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: (isSelected || isExcluded)
+                              ? tagColor
+                              : cfg.border,
+                          width: 1.0,
+                        ),
+                        boxShadow: (isSelected || isExcluded)
+                            ? [
+                                BoxShadow(
+                                  color: tagColor.withOpacity(0.25),
+                                  blurRadius: 8,
+                                ),
+                              ]
+                            : null,
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              color: tagColor,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            tag.name,
+                            style: TextStyle(
+                              color: (isSelected || isExcluded)
+                                  ? cfg.textMain
+                                  : tagColor,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                              decoration: isExcluded
+                                  ? TextDecoration.lineThrough
+                                  : null,
+                              decorationColor: Colors.redAccent,
+                              decorationThickness: 2.0,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+      ],
     );
   }
 
@@ -274,7 +293,6 @@ class _TagFilterState extends State<TagFilter> {
                     fontSize: 11,
                     color: cfg.textMain,
                     fontWeight: FontWeight.bold,
-                    fontFamily: 'Outfit',
                   ),
                 ),
               ],

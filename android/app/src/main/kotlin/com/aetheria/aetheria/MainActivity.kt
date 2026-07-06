@@ -13,10 +13,12 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.net.wifi.WifiManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.provider.MediaStore
 import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
@@ -65,6 +67,22 @@ class MainActivity : FlutterActivity() {
             }
             Handler(Looper.getMainLooper()).post {
                 bridge.invokeMethod("notificationAction", mapOf("action" to action))
+            }
+        }
+
+        fun dispatchFloatingLyricBounds(x: Int, y: Int, width: Int, height: Int) {
+            val bridge = notificationChannelBridge ?: return
+            Handler(Looper.getMainLooper()).post {
+                bridge.invokeMethod(
+                    "floatingLyricsEvent",
+                    mapOf(
+                        "type" to "boundsChanged",
+                        "x" to x,
+                        "y" to y,
+                        "width" to width,
+                        "height" to height,
+                    ),
+                )
             }
         }
     }
@@ -147,6 +165,37 @@ class MainActivity : FlutterActivity() {
                 }
                 "getDeviceName" -> {
                     result.success(resolveDeviceName())
+                }
+                "canDrawOverlays" -> {
+                    result.success(canDrawOverlays())
+                }
+                "requestOverlayPermission" -> {
+                    requestOverlayPermission()
+                    result.success(null)
+                }
+                "showFloatingLyrics" -> {
+                    FloatingLyricService.show(applicationContext)
+                    result.success(null)
+                }
+                "hideFloatingLyrics" -> {
+                    FloatingLyricService.hide(applicationContext)
+                    result.success(null)
+                }
+                "updateFloatingLyricsStyle" -> {
+                    @Suppress("UNCHECKED_CAST")
+                    FloatingLyricService.updateStyle(
+                        applicationContext,
+                        call.arguments as? Map<String, Any?> ?: emptyMap(),
+                    )
+                    result.success(null)
+                }
+                "updateFloatingLyrics" -> {
+                    @Suppress("UNCHECKED_CAST")
+                    FloatingLyricService.updateLyrics(
+                        applicationContext,
+                        call.arguments as? Map<String, Any?> ?: emptyMap(),
+                    )
+                    result.success(null)
                 }
                 else -> {
                     result.notImplemented()
@@ -510,6 +559,23 @@ class MainActivity : FlutterActivity() {
                 ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 101)
             }
         }
+    }
+
+    private fun canDrawOverlays(): Boolean {
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this)
+    }
+
+    private fun requestOverlayPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this)) {
+            return
+        }
+        val intent = Intent(
+            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+            Uri.parse("package:$packageName"),
+        ).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        startActivity(intent)
     }
 
     private fun saveFileToDownloads(filePath: String, fileName: String): String? {

@@ -8,6 +8,7 @@ class LibraryProvider extends ChangeNotifier {
   List<Song> songs = [];
   List<Tag> tags = [];
   List<Playlist> playlists = [];
+  Set<String> songIdsWithLyrics = {};
 
   String? activePlaylistId;
   List<String> playlistSongIds = [];
@@ -46,6 +47,7 @@ class LibraryProvider extends ChangeNotifier {
       tags = await music.getTags();
       playlists = await music.getPlaylists();
       libraryPath = await music.getLibraryPath();
+      songIdsWithLyrics = await _loadSongLyricFlags(songs);
 
       if (activePlaylistId != null) {
         try {
@@ -66,6 +68,45 @@ class LibraryProvider extends ChangeNotifier {
       isLoading = false;
       notifyListeners();
     }
+  }
+
+  bool songHasLyrics(Song song) {
+    final legacy = song.lyrics?.trim();
+    return legacy?.isNotEmpty == true || songIdsWithLyrics.contains(song.id);
+  }
+
+  void markSongHasLyrics(String songId) {
+    if (songId.isEmpty || songIdsWithLyrics.contains(songId)) {
+      return;
+    }
+    songIdsWithLyrics = {...songIdsWithLyrics, songId};
+    notifyListeners();
+  }
+
+  Future<Set<String>> _loadSongLyricFlags(List<Song> sourceSongs) async {
+    final result = <String>{};
+    const batchSize = 24;
+    for (var start = 0; start < sourceSongs.length; start += batchSize) {
+      final batch = sourceSongs.skip(start).take(batchSize).toList();
+      final flags = await Future.wait(
+        batch.map((song) async {
+          final legacy = song.lyrics?.trim();
+          if (legacy?.isNotEmpty == true) {
+            return song.id;
+          }
+          try {
+            final lyrics = await music.getLyricsForSong(songId: song.id);
+            return lyrics.any((lyric) => lyric.content.trim().isNotEmpty)
+                ? song.id
+                : null;
+          } catch (_) {
+            return null;
+          }
+        }),
+      );
+      result.addAll(flags.whereType<String>());
+    }
+    return result;
   }
 
   Future<void> initializeLibrary(String path) async {
@@ -191,16 +232,12 @@ class LibraryProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> updateVersionStatus(
-    String versionId,
-    bool isEnabled,
-    bool isPrimary,
-  ) async {
+  Future<void> setPrimaryVersion(String versionId) async {
     try {
       await music.updateVersionStatus(
         versionId: versionId,
-        isEnabled: isEnabled,
-        isPrimary: isPrimary,
+        isEnabled: true,
+        isPrimary: true,
       );
       await loadLibrary();
     } catch (e) {

@@ -929,17 +929,10 @@ pub fn import_audio_version_for_song(
 
 pub fn update_version_status(
     version_id: String,
-    is_enabled: bool,
+    _is_enabled: bool,
     is_primary: bool,
 ) -> Result<(), String> {
     let conn = establish_connection().map_err(|e| e.to_string())?;
-    let is_enabled_int = if is_enabled { 1 } else { 0 };
-
-    conn.execute(
-        "UPDATE audio_files SET is_enabled = ?1 WHERE id = ?2",
-        params![is_enabled_int, version_id],
-    )
-    .map_err(|e| e.to_string())?;
 
     if is_primary {
         let song_id: String = conn
@@ -957,7 +950,7 @@ pub fn update_version_status(
         .map_err(|e| e.to_string())?;
 
         conn.execute(
-            "UPDATE audio_files SET is_primary = 1 WHERE id = ?1",
+            "UPDATE audio_files SET is_primary = 1, is_enabled = 1 WHERE id = ?1",
             params![version_id],
         )
         .map_err(|e| e.to_string())?;
@@ -1331,28 +1324,16 @@ pub fn delete_audio_version(version_id: String) -> Result<(), String> {
     if is_primary != 0 {
         let next_primary_id: Option<String> = conn
             .query_row(
-                "SELECT id FROM audio_files WHERE song_id = ?1 AND is_enabled = 1 LIMIT 1",
+                "SELECT id FROM audio_files WHERE song_id = ?1 LIMIT 1",
                 params![song_id],
                 |row| row.get(0),
             )
             .optional()
             .map_err(|e| e.to_string())?;
 
-        let target_id = match next_primary_id {
-            Some(id) => Some(id),
-            None => conn
-                .query_row(
-                    "SELECT id FROM audio_files WHERE song_id = ?1 LIMIT 1",
-                    params![song_id],
-                    |row| row.get(0),
-                )
-                .optional()
-                .map_err(|e| e.to_string())?,
-        };
-
-        if let Some(tid) = target_id {
+        if let Some(tid) = next_primary_id {
             conn.execute(
-                "UPDATE audio_files SET is_primary = 1 WHERE id = ?1",
+                "UPDATE audio_files SET is_primary = 1, is_enabled = 1 WHERE id = ?1",
                 params![tid],
             )
             .map_err(|e| e.to_string())?;

@@ -8,7 +8,9 @@ import 'package:aetheria/core/providers/ui_theme_provider.dart';
 import 'package:aetheria/core/providers/library_provider.dart';
 import 'package:aetheria/core/providers/audio_player_provider.dart';
 import 'package:aetheria/core/providers/sync_provider.dart';
+import 'package:aetheria/core/providers/floating_lyrics_provider.dart';
 import 'package:aetheria/features/layout/main_layout.dart';
+import 'package:aetheria/features/lyrics/floating_lyrics_bridge.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -81,6 +83,7 @@ Future<void> main() async {
               ChangeNotifierProvider(create: (_) => LibraryProvider()),
               ChangeNotifierProvider(create: (_) => AudioPlayerProvider()),
               ChangeNotifierProvider(create: (_) => SyncProvider()),
+              ChangeNotifierProvider(create: (_) => FloatingLyricsProvider()),
             ],
             child: const AetheriaApp(),
           ),
@@ -107,7 +110,7 @@ class AetheriaApp extends StatelessWidget {
       title: 'Aetheria',
       theme: themeProvider.themeData,
       debugShowCheckedModeBanner: false,
-      home: const MainLayout(),
+      home: const FloatingLyricsBridge(child: MainLayout()),
     );
   }
 }

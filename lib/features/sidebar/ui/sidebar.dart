@@ -60,7 +60,6 @@ class Sidebar extends StatelessWidget {
                     fontWeight: FontWeight.w800,
                     letterSpacing: 0.8,
                     color: cfg.textMain,
-                    fontFamily: 'Outfit',
                   ),
                 ),
               ],
@@ -138,7 +137,6 @@ class Sidebar extends StatelessWidget {
           fontWeight: FontWeight.w600,
           letterSpacing: 1.2,
           color: cfg.textSub,
-          fontFamily: 'Outfit',
         ),
       ),
     );
@@ -175,7 +173,6 @@ class Sidebar extends StatelessWidget {
                   fontSize: 13,
                   fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
                   color: isActive ? cfg.textMain : cfg.textSub,
-                  fontFamily: 'Outfit',
                 ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
@@ -184,11 +181,7 @@ class Sidebar extends StatelessWidget {
             if (count != null)
               Text(
                 count.toString(),
-                style: TextStyle(
-                  fontSize: 11,
-                  color: cfg.textSub,
-                  fontFamily: 'Outfit',
-                ),
+                style: TextStyle(fontSize: 11, color: cfg.textSub),
               ),
           ],
         ),

@@ -10,13 +10,14 @@ import 'package:aetheria/features/library/ui/song_table.dart';
 import 'package:aetheria/src/rust/api/music.dart' as music;
 import 'package:aetheria/src/rust/models/song.dart' show PreviewInfo;
 
-typedef ProgressDialogUpdate = void Function({
-  String? title,
-  String? subtitle,
-  int? current,
-  int? total,
-  bool? indeterminate,
-});
+typedef ProgressDialogUpdate =
+    void Function({
+      String? title,
+      String? subtitle,
+      int? current,
+      int? total,
+      bool? indeterminate,
+    });
 
 class MainContent extends StatefulWidget {
   const MainContent({super.key});
@@ -27,6 +28,7 @@ class MainContent extends StatefulWidget {
 
 class _MainContentState extends State<MainContent> {
   final TextEditingController _searchController = TextEditingController();
+  double _tagCollapseFactor = 0;
 
   Future<T?> _runProgressDialog<T>({
     required String initialTitle,
@@ -53,10 +55,9 @@ class _MainContentState extends State<MainContent> {
           setDialogState = updateDialogState;
           progressDialogOpen = true;
           final cfg = dialogContext.read<UIThemeProvider>().currentTheme;
-          final progressValue =
-              progressIndeterminate || progressTotal <= 0
-                  ? null
-                  : (progressCurrent / progressTotal).clamp(0.0, 1.0);
+          final progressValue = progressIndeterminate || progressTotal <= 0
+              ? null
+              : (progressCurrent / progressTotal).clamp(0.0, 1.0);
 
           return Center(
             child: Material(
@@ -171,7 +172,8 @@ class _MainContentState extends State<MainContent> {
         allowMultiple: true,
       );
 
-      final selectedPaths = result?.paths.whereType<String>().toList() ?? const [];
+      final selectedPaths =
+          result?.paths.whereType<String>().toList() ?? const [];
       if (selectedPaths.isEmpty) return;
 
       int successCount = 0;
@@ -420,7 +422,11 @@ class _MainContentState extends State<MainContent> {
                             ElevatedButton(
                               onPressed: () async {
                                 final selectedPreviews = <PreviewInfo>[];
-                                for (int index = 0; index < previews.length; index++) {
+                                for (
+                                  int index = 0;
+                                  index < previews.length;
+                                  index++
+                                ) {
                                   if (checkedItems[index]) {
                                     selectedPreviews.add(previews[index]);
                                   }
@@ -432,8 +438,12 @@ class _MainContentState extends State<MainContent> {
                                   if (!mounted) {
                                     return;
                                   }
-                                  ScaffoldMessenger.of(this.context).showSnackBar(
-                                    const SnackBar(content: Text('请至少选择一首歌曲再导入')),
+                                  ScaffoldMessenger.of(
+                                    this.context,
+                                  ).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('请至少选择一首歌曲再导入'),
+                                    ),
                                   );
                                   return;
                                 }
@@ -449,9 +459,11 @@ class _MainContentState extends State<MainContent> {
                                       total: selectedPreviews.length,
                                       indeterminate: false,
                                     );
-                                    for (int index = 0;
-                                        index < selectedPreviews.length;
-                                        index++) {
+                                    for (
+                                      int index = 0;
+                                      index < selectedPreviews.length;
+                                      index++
+                                    ) {
                                       final item = selectedPreviews[index];
                                       updateProgress(
                                         subtitle:
@@ -615,7 +627,6 @@ class _MainContentState extends State<MainContent> {
                           color: Colors.white,
                           fontWeight: FontWeight.bold,
                           fontSize: 13,
-                          fontFamily: 'Outfit',
                         ),
                       ),
                       const SizedBox(width: 4),
@@ -633,7 +644,14 @@ class _MainContentState extends State<MainContent> {
           const SizedBox(height: 16),
 
           // Custom Multi-dimensional Tag Filter Panel
-          const TagFilter(),
+          TagFilter(
+            scrollCollapseFactor: _tagCollapseFactor,
+            onExpandRequested: () {
+              setState(() {
+                _tagCollapseFactor = 0;
+              });
+            },
+          ),
           const SizedBox(height: 16),
 
           // Custom Songs Grid List Table
@@ -644,7 +662,23 @@ class _MainContentState extends State<MainContent> {
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: cfg.border),
               ),
-              child: const SongTable(),
+              child: NotificationListener<ScrollUpdateNotification>(
+                onNotification: (notification) {
+                  final delta = notification.scrollDelta ?? 0;
+                  if (notification.metrics.axis == Axis.vertical &&
+                      delta > 0 &&
+                      _tagCollapseFactor < 1) {
+                    setState(() {
+                      _tagCollapseFactor = math.min(
+                        1,
+                        _tagCollapseFactor + delta / 140,
+                      );
+                    });
+                  }
+                  return false;
+                },
+                child: const SongTable(),
+              ),
             ),
           ),
         ],

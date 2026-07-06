@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:aetheria/core/providers/audio_player_provider.dart';
 import 'package:aetheria/core/providers/library_provider.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
+import 'package:aetheria/core/utils/audio_quality.dart';
 import 'package:aetheria/src/rust/models/playlist.dart';
 import 'package:aetheria/src/rust/models/song.dart';
 
@@ -776,6 +777,7 @@ class _SongTableState extends State<SongTable> {
     AudioVersion? primaryVersion,
     AppThemeConfig cfg,
     bool isCurrentlyPlaying,
+    bool hasLyrics,
   ) {
     final width = _columnWidths[column] ?? column.defaultWidth;
 
@@ -785,16 +787,25 @@ class _SongTableState extends State<SongTable> {
           width: width,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Text(
-              song.title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: isCurrentlyPlaying ? cfg.accent : cfg.textMain,
-                fontWeight: FontWeight.w600,
-                fontSize: 13,
-                fontFamily: 'Outfit',
-              ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    song.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: isCurrentlyPlaying ? cfg.accent : cfg.textMain,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+                if (hasLyrics) ...[
+                  const SizedBox(width: 6),
+                  _buildLrcBadge(cfg),
+                ],
+              ],
             ),
           ),
         );
@@ -807,11 +818,7 @@ class _SongTableState extends State<SongTable> {
               song.artist ?? '未知歌手',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: cfg.textSub,
-                fontSize: 12,
-                fontFamily: 'Outfit',
-              ),
+              style: TextStyle(color: cfg.textSub, fontSize: 12),
             ),
           ),
         );
@@ -878,45 +885,8 @@ class _SongTableState extends State<SongTable> {
           ),
         );
       case _SongColumnKey.spec:
-        var specText = '未知';
-        var formatText = '';
-        if (primaryVersion != null) {
-          final frequency = primaryVersion.sampleRate != null
-              ? '${(primaryVersion.sampleRate! / 1000).toStringAsFixed(1).replaceAll('.0', '')}k'
-              : '';
-          final bitDepth =
-              (primaryVersion.format?.toLowerCase() == 'flac' &&
-                  primaryVersion.bitDepth != null)
-              ? '${primaryVersion.bitDepth}b'
-              : '';
-          final bitrate = primaryVersion.bitrate != null
-              ? '${(primaryVersion.bitrate! / 1000).round()}kbps'
-              : '';
-          final loudness = primaryVersion.loudness != null
-              ? '${primaryVersion.loudness!.toStringAsFixed(1)}dB'
-              : '';
-          specText = [
-            frequency,
-            bitDepth,
-            bitrate,
-            loudness,
-          ].where((item) => item.isNotEmpty).join('/');
-          if (specText.isEmpty) {
-            specText = '未知';
-          }
-          formatText = primaryVersion.format ?? '';
-        }
-
-        final badgeColor = switch (formatText.toLowerCase()) {
-          'flac' => const Color(0xFF10B981),
-          'wav' => Colors.blue,
-          _ => cfg.textSub,
-        };
-        final badgeBg = switch (formatText.toLowerCase()) {
-          'flac' => const Color(0xFF10B981).withOpacity(0.12),
-          'wav' => Colors.blue.withOpacity(0.12),
-          _ => cfg.border,
-        };
+        final specText = audioQualityText(primaryVersion);
+        final badgeColor = audioQualityColor(primaryVersion, cfg.textSub);
 
         return SizedBox(
           width: width,
@@ -924,7 +894,7 @@ class _SongTableState extends State<SongTable> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
-                color: badgeBg,
+                color: badgeColor.withOpacity(0.12),
                 borderRadius: BorderRadius.circular(4),
               ),
               child: Text(
@@ -939,6 +909,26 @@ class _SongTableState extends State<SongTable> {
           ),
         );
     }
+  }
+
+  Widget _buildLrcBadge(AppThemeConfig cfg) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+      decoration: BoxDecoration(
+        color: cfg.accent.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: cfg.accent.withOpacity(0.55)),
+      ),
+      child: Text(
+        'LRC',
+        style: TextStyle(
+          color: cfg.accent,
+          fontSize: 8.5,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0,
+        ),
+      ),
+    );
   }
 
   @override
@@ -1140,6 +1130,9 @@ class _SongTableState extends State<SongTable> {
                                               primaryVersion,
                                               cfg,
                                               isCurrentlyPlaying,
+                                              libraryProvider.songHasLyrics(
+                                                song,
+                                              ),
                                             ),
                                         ],
                                       ),

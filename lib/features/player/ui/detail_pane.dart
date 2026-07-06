@@ -128,7 +128,7 @@ class DetailPane extends StatelessWidget {
     final position = audioProvider.currentPosition;
     final startPaused = !audioProvider.isPlaying;
 
-    await libraryProvider.updateVersionStatus(version.id, true, true);
+    await libraryProvider.setPrimaryVersion(version.id);
 
     if (!shouldSwitchCurrentPlayback) {
       return;
@@ -347,7 +347,6 @@ class DetailPane extends StatelessWidget {
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
                     color: cfg.textMain,
-                    fontFamily: 'Outfit',
                   ),
                   cfg: cfg,
                   onSave: (value) =>
@@ -361,11 +360,7 @@ class DetailPane extends StatelessWidget {
                   value: song.artist ?? '',
                   emptyText: '未知歌手',
                   textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: cfg.textSub,
-                    fontFamily: 'Outfit',
-                  ),
+                  style: TextStyle(fontSize: 12, color: cfg.textSub),
                   cfg: cfg,
                   onSave: (value) =>
                       _saveSongMetadata(context, song, artist: value),
@@ -461,7 +456,6 @@ class DetailPane extends StatelessWidget {
               fontSize: 12,
               fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
               color: isActive ? cfg.textMain : cfg.textSub,
-              fontFamily: 'Outfit',
             ),
           ),
         ),
@@ -498,7 +492,7 @@ class DetailPane extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
             child: Text(
-              '“可用于播放”决定这个文件是否参与播放选择；“默认播放版本”是在播放这首歌时优先使用的音源。',
+              '“默认播放版本”是在播放这首歌时优先使用的音源；若正在播放，会按当前进度切到新版本。',
               style: TextStyle(color: cfg.textSub, fontSize: 10, height: 1.5),
             ),
           ),
@@ -535,7 +529,6 @@ class DetailPane extends StatelessWidget {
                             fontWeight: FontWeight.bold,
                             fontSize: 13,
                             color: cfg.textMain,
-                            fontFamily: 'Outfit',
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
@@ -545,11 +538,7 @@ class DetailPane extends StatelessWidget {
                         // Technical specs
                         Text(
                           '${v.format?.toUpperCase() ?? "未知"} | ${(v.bitrate ?? 0) ~/ 1000}kbps | ${v.sampleRate != null ? (v.sampleRate! / 1000).toStringAsFixed(1) : "未知"}kHz | $durationMin:$durationSec | ${_formatFileSize(v.fileSize.toInt())} | ${_formatLoudness(v.loudness)}',
-                          style: TextStyle(
-                            fontSize: 10,
-                            color: cfg.textSub,
-                            fontFamily: 'Outfit',
-                          ),
+                          style: TextStyle(fontSize: 10, color: cfg.textSub),
                         ),
                         const SizedBox(height: 6),
                         Align(
@@ -581,76 +570,42 @@ class DetailPane extends StatelessWidget {
                         ),
                         const SizedBox(height: 10),
 
-                        Row(
-                          children: [
-                            Tooltip(
-                              message: '关闭后，这个版本不会被自动选来播放；已在播放时不会立刻中断。',
-                              child: InkWell(
-                                onTap: () async {
-                                  await libraryProvider.updateVersionStatus(
-                                    v.id,
-                                    !v.isEnabled,
-                                    v.isPrimary,
-                                  );
-                                },
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      v.isEnabled
-                                          ? Icons.check_box
-                                          : Icons.check_box_outline_blank,
-                                      size: 16,
-                                      color: v.isEnabled
-                                          ? cfg.accent
-                                          : cfg.textSub,
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: Tooltip(
+                            message: '播放这首歌时优先使用的版本；若正在播放，会按当前进度切到新版本。',
+                            child: InkWell(
+                              onTap: () => _setPrimaryVersion(
+                                context,
+                                song,
+                                v,
+                                libraryProvider,
+                                audioProvider,
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    v.isPrimary
+                                        ? Icons.radio_button_checked
+                                        : Icons.radio_button_off,
+                                    size: 16,
+                                    color: v.isPrimary
+                                        ? cfg.accent
+                                        : cfg.textSub,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    '默认播放版本',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: cfg.textMain,
                                     ),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      '可用于播放',
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        color: cfg.textMain,
-                                      ),
-                                    ),
-                                  ],
-                                ),
+                                  ),
+                                ],
                               ),
                             ),
-                            const SizedBox(width: 24),
-                            Tooltip(
-                              message: '播放这首歌时优先使用的版本；若正在播放，会按当前进度切到新版本。',
-                              child: InkWell(
-                                onTap: () => _setPrimaryVersion(
-                                  context,
-                                  song,
-                                  v,
-                                  libraryProvider,
-                                  audioProvider,
-                                ),
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      v.isPrimary
-                                          ? Icons.radio_button_checked
-                                          : Icons.radio_button_off,
-                                      size: 16,
-                                      color: v.isPrimary
-                                          ? cfg.accent
-                                          : cfg.textSub,
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      '默认播放版本',
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        color: cfg.textMain,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ],
+                          ),
                         ),
                         const SizedBox(height: 8),
                         const Divider(height: 1),

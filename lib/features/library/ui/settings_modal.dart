@@ -7,7 +7,10 @@ import 'package:aetheria/core/providers/ui_theme_provider.dart';
 import 'package:aetheria/core/providers/library_provider.dart';
 import 'package:aetheria/core/providers/audio_player_provider.dart';
 import 'package:aetheria/core/providers/sync_provider.dart';
+import 'package:aetheria/core/providers/floating_lyrics_provider.dart';
 import 'package:aetheria/core/widgets/glass_panel.dart';
+import 'package:aetheria/services/native_audio_helper.dart';
+import 'package:aetheria/src/rust/api/music.dart' as music;
 
 class SettingsModal extends StatefulWidget {
   const SettingsModal({super.key});
@@ -41,6 +44,7 @@ class _AudioOutputInfoView extends StatelessWidget {
     final hasUnderrun = (info?.underruns ?? BigInt.zero) > BigInt.zero;
     final latencyMode =
         info?.outputLatencyMode ?? audioProvider.outputLatencyMode;
+    final deviceName = _displayOutputDeviceName(info?.deviceName);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -49,7 +53,7 @@ class _AudioOutputInfoView extends StatelessWidget {
           spacing: 8,
           runSpacing: 8,
           children: [
-            _InfoPill(cfg: cfg, label: '设备', value: info?.deviceName ?? '未连接'),
+            _InfoPill(cfg: cfg, label: '设备', value: deviceName),
             _InfoPill(
               cfg: cfg,
               label: '格式',
@@ -65,7 +69,7 @@ class _AudioOutputInfoView extends StatelessWidget {
             ),
             _InfoPill(
               cfg: cfg,
-              label: '队列余量',
+              label: '1%low 队列余量',
               value: '${info?.queuedMs ?? 0} ms',
             ),
             _InfoPill(
@@ -93,6 +97,14 @@ class _AudioOutputInfoView extends StatelessWidget {
       ],
     );
   }
+}
+
+String _displayOutputDeviceName(String? name) {
+  final value = name?.trim();
+  if (value == null || value.isEmpty || value.toLowerCase() == 'default') {
+    return '系统默认输出';
+  }
+  return value;
 }
 
 String _outputLatencyModeLabel(String mode) {
@@ -148,10 +160,117 @@ class _InfoPill extends StatelessWidget {
   }
 }
 
+class _FloatingLyricPreview extends StatelessWidget {
+  const _FloatingLyricPreview({required this.cfg, required this.provider});
+
+  final AppThemeConfig cfg;
+  final FloatingLyricsProvider provider;
+
+  @override
+  Widget build(BuildContext context) {
+    final textAlign = switch (provider.align) {
+      FloatingLyricAlign.left => TextAlign.left,
+      FloatingLyricAlign.right => TextAlign.right,
+      FloatingLyricAlign.center => TextAlign.center,
+    };
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.24),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: cfg.border),
+      ),
+      child: AnimatedOpacity(
+        duration: const Duration(milliseconds: 160),
+        opacity: provider.opacity,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              '这是一行正在播放的悬浮歌词',
+              textAlign: textAlign,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: provider.playedColor,
+                fontSize: provider.fontSize.clamp(8, 38),
+                fontWeight: provider.boldCurrentLine
+                    ? FontWeight.w900
+                    : FontWeight.w600,
+                height: 1.1,
+                shadows: provider.textShadowEnabled
+                    ? [
+                        Shadow(
+                          color: provider.shadowColor,
+                          blurRadius: 3,
+                          offset: const Offset(0, 1),
+                        ),
+                      ]
+                    : null,
+              ),
+            ),
+            SizedBox(height: provider.lineGap.clamp(0, 18)),
+            if (provider.showTranslation)
+              Text(
+                'Floating lyric preview',
+                textAlign: textAlign,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: provider.unplayedColor.withOpacity(0.78),
+                  fontSize: provider.fontSize.clamp(8, 38) * 0.46,
+                  fontWeight: FontWeight.w600,
+                  height: 1.1,
+                ),
+              ),
+            if (provider.showNextLine) ...[
+              SizedBox(height: provider.lineGap.clamp(0, 18)),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    '下一行歌词会在这里轻轻等着',
+                    textAlign: textAlign,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: provider.unplayedColor.withOpacity(0.72),
+                      fontSize: provider.fontSize.clamp(8, 38) * 0.58,
+                      fontWeight: FontWeight.w500,
+                      height: 1.1,
+                    ),
+                  ),
+                  if (provider.compactMultiline) ...[
+                    SizedBox(height: provider.lineGap.clamp(0, 18) * 0.45),
+                    Text(
+                      '紧凑模式会继续显示更多行',
+                      textAlign: textAlign,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: provider.unplayedColor.withOpacity(0.55),
+                        fontSize: provider.fontSize.clamp(8, 38) * 0.48,
+                        fontWeight: FontWeight.w500,
+                        height: 1.05,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _SettingsModalState extends State<SettingsModal> {
   String _activeTab = 'theme'; // For Desktop view
   String?
   _selectedCategory; // For Mobile view: null = Level 1 menu, non-null = Level 2 detail page
+  bool _settingsImporting = false;
 
   @override
   Widget build(BuildContext context) {
@@ -159,6 +278,7 @@ class _SettingsModalState extends State<SettingsModal> {
     final libraryProvider = context.watch<LibraryProvider>();
     final audioProvider = context.watch<AudioPlayerProvider>();
     final syncProvider = context.watch<SyncProvider>();
+    final floatingLyricsProvider = context.watch<FloatingLyricsProvider>();
     final cfg = themeProvider.currentTheme;
 
     final isDesktop = !Platform.isAndroid && !Platform.isIOS;
@@ -244,6 +364,12 @@ class _SettingsModalState extends State<SettingsModal> {
                                 cfg,
                               ),
                               _buildSidebarItem(
+                                'floatingLyrics',
+                                Icons.closed_caption_outlined,
+                                '桌面歌词',
+                                cfg,
+                              ),
+                              _buildSidebarItem(
                                 'library',
                                 Icons.folder_open_outlined,
                                 '音乐库管理',
@@ -268,6 +394,7 @@ class _SettingsModalState extends State<SettingsModal> {
                               libraryProvider,
                               audioProvider,
                               syncProvider,
+                              floatingLyricsProvider,
                               themeProvider,
                               isDesktop,
                               _activeTab,
@@ -290,6 +417,8 @@ class _SettingsModalState extends State<SettingsModal> {
           ? '个性外观'
           : _selectedCategory == 'playback'
           ? '播放设置'
+          : _selectedCategory == 'floatingLyrics'
+          ? '桌面歌词'
           : _selectedCategory == 'sync'
           ? '局域网同步'
           : '音乐库管理';
@@ -383,6 +512,7 @@ class _SettingsModalState extends State<SettingsModal> {
                               libraryProvider,
                               audioProvider,
                               syncProvider,
+                              floatingLyricsProvider,
                               themeProvider,
                               isDesktop,
                               _selectedCategory!,
@@ -401,6 +531,12 @@ class _SettingsModalState extends State<SettingsModal> {
                                 'playback',
                                 Icons.play_circle_outline,
                                 '播放设置',
+                                cfg,
+                              ),
+                              _buildMobileMenuItem(
+                                'floatingLyrics',
+                                Icons.closed_caption_outlined,
+                                '桌面歌词',
                                 cfg,
                               ),
                               _buildMobileMenuItem(
@@ -499,6 +635,7 @@ class _SettingsModalState extends State<SettingsModal> {
     LibraryProvider libraryProvider,
     AudioPlayerProvider audioProvider,
     SyncProvider syncProvider,
+    FloatingLyricsProvider floatingLyricsProvider,
     UIThemeProvider themeProvider,
     bool isDesktop,
     String activeTab,
@@ -506,6 +643,8 @@ class _SettingsModalState extends State<SettingsModal> {
     switch (activeTab) {
       case 'sync':
         return _buildSyncTab(cfg, libraryProvider, audioProvider, syncProvider);
+      case 'floatingLyrics':
+        return _buildFloatingLyricsTab(cfg, floatingLyricsProvider, isDesktop);
       case 'playback':
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1108,6 +1247,64 @@ class _SettingsModalState extends State<SettingsModal> {
                   fontStyle: FontStyle.italic,
                 ),
               ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  ElevatedButton.icon(
+                    onPressed: _settingsImporting
+                        ? null
+                        : () => _importFilesFromSettings(
+                            context,
+                            libraryProvider,
+                          ),
+                    icon: _settingsImporting
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Icon(Icons.audio_file, size: 14),
+                    label: const Text('导入音频', style: TextStyle(fontSize: 12)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: cfg.accent,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                        vertical: 12,
+                        horizontal: 16,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: _settingsImporting
+                        ? null
+                        : () => _importFolderFromSettings(
+                            context,
+                            libraryProvider,
+                          ),
+                    icon: const Icon(Icons.folder_open, size: 14),
+                    label: const Text('导入目录', style: TextStyle(fontSize: 12)),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: cfg.accent,
+                      side: BorderSide(color: cfg.accent.withOpacity(0.65)),
+                      padding: const EdgeInsets.symmetric(
+                        vertical: 12,
+                        horizontal: 16,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ],
             const SizedBox(height: 16),
             Divider(height: 1, color: cfg.border),
@@ -1306,6 +1503,463 @@ class _SettingsModalState extends State<SettingsModal> {
           ],
         );
     }
+  }
+
+  Widget _buildFloatingLyricsTab(
+    AppThemeConfig cfg,
+    FloatingLyricsProvider provider,
+    bool isDesktop,
+  ) {
+    final maxWindowWidth = isDesktop ? 1800.0 : 1080.0;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          isDesktop ? '电脑桌面歌词' : '安卓悬浮歌词',
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+            color: cfg.textSub,
+          ),
+        ),
+        const SizedBox(height: 10),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          value: provider.enabled,
+          title: Text(
+            provider.enabled ? '已显示悬浮歌词' : '显示悬浮歌词',
+            style: TextStyle(
+              color: cfg.textMain,
+              fontSize: 13,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          subtitle: Text(
+            isDesktop
+                ? '开启后会显示独立透明歌词窗口，支持拖动、置顶和锁定穿透。'
+                : '开启后会通过系统悬浮窗显示当前播放歌词，需要授予悬浮窗权限。',
+            style: TextStyle(color: cfg.textSub, fontSize: 11),
+          ),
+          activeColor: cfg.accent,
+          onChanged: provider.setEnabled,
+        ),
+        if (Platform.isAndroid) ...[
+          const SizedBox(height: 8),
+          FutureBuilder<bool>(
+            future: NativeAudioHelper.canDrawOverlays(),
+            builder: (context, snapshot) {
+              final allowed = snapshot.data ?? false;
+              return OutlinedButton.icon(
+                onPressed: allowed
+                    ? null
+                    : () => NativeAudioHelper.requestOverlayPermission(),
+                icon: Icon(
+                  allowed ? Icons.verified_outlined : Icons.open_in_new,
+                  size: 15,
+                ),
+                label: Text(
+                  allowed ? '悬浮窗权限已授权' : '授予悬浮窗权限',
+                  style: const TextStyle(fontSize: 12),
+                ),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: allowed ? cfg.textSub : cfg.accent,
+                  side: BorderSide(
+                    color: allowed ? cfg.border : cfg.accent.withOpacity(0.65),
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              );
+            },
+          ),
+        ],
+        const SizedBox(height: 12),
+        Divider(height: 1, color: cfg.border),
+        const SizedBox(height: 12),
+        Text(
+          '窗口行为',
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+            color: cfg.textSub,
+          ),
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          value: provider.locked,
+          title: Text(
+            provider.locked ? '已锁定并穿透鼠标' : '锁定歌词窗口',
+            style: TextStyle(
+              color: cfg.textMain,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          subtitle: Text(
+            provider.locked ? '锁定后歌词不会挡住鼠标点击。' : '关闭锁定时可以拖动窗口；打开锁定后可正常点击背后的应用。',
+            style: TextStyle(color: cfg.textSub, fontSize: 11),
+          ),
+          activeColor: cfg.accent,
+          onChanged: provider.setLocked,
+        ),
+        if (isDesktop)
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            value: provider.alwaysOnTop,
+            title: Text(
+              '保持置顶',
+              style: TextStyle(
+                color: cfg.textMain,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            activeColor: cfg.accent,
+            onChanged: provider.setAlwaysOnTop,
+          ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          value: provider.pauseFade,
+          title: Text(
+            '暂停时降低透明度',
+            style: TextStyle(
+              color: cfg.textMain,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          activeColor: cfg.accent,
+          onChanged: provider.setPauseFade,
+        ),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            ChoiceChip(
+              label: const Text('左对齐', style: TextStyle(fontSize: 10)),
+              selected: provider.align == FloatingLyricAlign.left,
+              onSelected: (_) => provider.setAlign(FloatingLyricAlign.left),
+              selectedColor: cfg.accent.withOpacity(0.2),
+              checkmarkColor: cfg.accent,
+            ),
+            ChoiceChip(
+              label: const Text('居中', style: TextStyle(fontSize: 10)),
+              selected: provider.align == FloatingLyricAlign.center,
+              onSelected: (_) => provider.setAlign(FloatingLyricAlign.center),
+              selectedColor: cfg.accent.withOpacity(0.2),
+              checkmarkColor: cfg.accent,
+            ),
+            ChoiceChip(
+              label: const Text('右对齐', style: TextStyle(fontSize: 10)),
+              selected: provider.align == FloatingLyricAlign.right,
+              onSelected: (_) => provider.setAlign(FloatingLyricAlign.right),
+              selectedColor: cfg.accent.withOpacity(0.2),
+              checkmarkColor: cfg.accent,
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        Divider(height: 1, color: cfg.border),
+        const SizedBox(height: 12),
+        Text(
+          '歌词样式',
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+            color: cfg.textSub,
+          ),
+        ),
+        _buildSliderRow(
+          cfg,
+          label: '窗口宽度',
+          valueText: '${provider.windowWidth.round()} px',
+          value: provider.windowWidth.clamp(120, maxWindowWidth).toDouble(),
+          min: 120,
+          max: maxWindowWidth,
+          divisions: isDesktop ? 168 : 96,
+          onChanged: provider.setWindowWidth,
+        ),
+        _buildSliderRow(
+          cfg,
+          label: '窗口高度',
+          valueText: '${provider.windowHeight.round()} px',
+          value: provider.windowHeight,
+          min: 36,
+          max: 420,
+          divisions: 96,
+          onChanged: provider.setWindowHeight,
+        ),
+        _buildSliderRow(
+          cfg,
+          label: '字体大小',
+          valueText: '${provider.fontSize.round()} px',
+          value: provider.fontSize,
+          min: 8,
+          max: 72,
+          divisions: 64,
+          onChanged: provider.setFontSize,
+        ),
+        _buildSliderRow(
+          cfg,
+          label: '歌词间距',
+          valueText: '${provider.lineGap.round()} px',
+          value: provider.lineGap,
+          min: 0,
+          max: 32,
+          divisions: 32,
+          onChanged: provider.setLineGap,
+        ),
+        _buildSliderRow(
+          cfg,
+          label: '刷新帧率',
+          valueText: '${provider.refreshFps} fps',
+          value: provider.refreshFps.toDouble(),
+          min: 10,
+          max: 60,
+          divisions: 10,
+          onChanged: provider.setRefreshFps,
+        ),
+        _buildSliderRow(
+          cfg,
+          label: '透明度',
+          valueText: '${(provider.opacity * 100).round()}%',
+          value: provider.opacity,
+          min: 0.2,
+          max: 1.0,
+          divisions: 16,
+          onChanged: provider.setOpacity,
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          value: provider.boldCurrentLine,
+          title: Text(
+            '当前行加粗',
+            style: TextStyle(color: cfg.textMain, fontSize: 12),
+          ),
+          activeColor: cfg.accent,
+          onChanged: provider.setBoldCurrentLine,
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          value: provider.zoomCurrentLine,
+          title: Text(
+            '当前行轻微放大',
+            style: TextStyle(color: cfg.textMain, fontSize: 12),
+          ),
+          activeColor: cfg.accent,
+          onChanged: provider.setZoomCurrentLine,
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          value: provider.compactMultiline,
+          title: Text(
+            '紧凑显示多行',
+            style: TextStyle(color: cfg.textMain, fontSize: 12),
+          ),
+          subtitle: Text(
+            '开启后会在下一行下面继续显示更多后续歌词，适合小字号窗口。',
+            style: TextStyle(color: cfg.textSub, fontSize: 10),
+          ),
+          activeColor: cfg.accent,
+          onChanged: provider.setCompactMultiline,
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          value: provider.textShadowEnabled,
+          title: Text(
+            '文字阴影',
+            style: TextStyle(color: cfg.textMain, fontSize: 12),
+          ),
+          subtitle: Text(
+            '这里只控制文字描边/阴影；歌词框背景默认不会常驻显示。',
+            style: TextStyle(color: cfg.textSub, fontSize: 10),
+          ),
+          activeColor: cfg.accent,
+          onChanged: provider.setTextShadowEnabled,
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          value: provider.showTranslation,
+          title: Text(
+            '显示翻译歌词',
+            style: TextStyle(color: cfg.textMain, fontSize: 12),
+          ),
+          activeColor: cfg.accent,
+          onChanged: provider.setShowTranslation,
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          value: provider.showNextLine,
+          title: Text(
+            '显示下一行歌词',
+            style: TextStyle(color: cfg.textMain, fontSize: 12),
+          ),
+          activeColor: cfg.accent,
+          onChanged: provider.setShowNextLine,
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            _buildColorGroup(
+              cfg,
+              label: '未播放',
+              selected: provider.unplayedColor,
+              colors: const [
+                Color(0xFFFFFFFF),
+                Color(0xFFE0F2FE),
+                Color(0xFFFFF7ED),
+              ],
+              onChanged: provider.setUnplayedColor,
+            ),
+            _buildColorGroup(
+              cfg,
+              label: '已播放',
+              selected: provider.playedColor,
+              colors: const [
+                Color(0xFF22C55E),
+                Color(0xFF38BDF8),
+                Color(0xFFF97316),
+                Color(0xFFEC4899),
+              ],
+              onChanged: provider.setPlayedColor,
+            ),
+            _buildColorGroup(
+              cfg,
+              label: '阴影',
+              selected: provider.shadowColor,
+              colors: const [
+                Color(0x99000000),
+                Color(0xAA111827),
+                Color(0x770F172A),
+              ],
+              onChanged: provider.setShadowColor,
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        _FloatingLyricPreview(cfg: cfg, provider: provider),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: [
+            OutlinedButton.icon(
+              onPressed: provider.resetStyle,
+              icon: const Icon(Icons.restart_alt, size: 15),
+              label: const Text('重置样式', style: TextStyle(fontSize: 12)),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: cfg.accent,
+                side: BorderSide(color: cfg.accent.withOpacity(0.65)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+            ),
+            if (isDesktop)
+              OutlinedButton.icon(
+                onPressed: provider.resetWindowBounds,
+                icon: const Icon(Icons.center_focus_strong, size: 15),
+                label: const Text('重置窗口位置', style: TextStyle(fontSize: 12)),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: cfg.accent,
+                  side: BorderSide(color: cfg.accent.withOpacity(0.65)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSliderRow(
+    AppThemeConfig cfg, {
+    required String label,
+    required String valueText,
+    required double value,
+    required double min,
+    required double max,
+    required int divisions,
+    required ValueChanged<double> onChanged,
+  }) {
+    return Row(
+      children: [
+        SizedBox(
+          width: 92,
+          child: Text(
+            label,
+            style: TextStyle(color: cfg.textMain, fontSize: 11),
+          ),
+        ),
+        Expanded(
+          child: Slider(
+            value: value,
+            min: min,
+            max: max,
+            divisions: divisions,
+            activeColor: cfg.accent,
+            inactiveColor: cfg.border,
+            onChanged: onChanged,
+          ),
+        ),
+        SizedBox(
+          width: 56,
+          child: Text(
+            valueText,
+            textAlign: TextAlign.right,
+            style: TextStyle(color: cfg.textSub, fontSize: 10),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildColorGroup(
+    AppThemeConfig cfg, {
+    required String label,
+    required Color selected,
+    required List<Color> colors,
+    required ValueChanged<Color> onChanged,
+  }) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(label, style: TextStyle(color: cfg.textSub, fontSize: 10)),
+        const SizedBox(width: 6),
+        for (final color in colors)
+          Padding(
+            padding: const EdgeInsets.only(right: 5),
+            child: InkWell(
+              customBorder: const CircleBorder(),
+              onTap: () => onChanged(color),
+              child: Container(
+                width: 22,
+                height: 22,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: color,
+                  border: Border.all(
+                    color: selected == color ? cfg.accent : cfg.border,
+                    width: selected == color ? 2 : 1,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.12),
+                      blurRadius: 5,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
   }
 
   Widget _buildSyncTab(
@@ -1509,7 +2163,7 @@ class _SettingsModalState extends State<SettingsModal> {
           ],
         const SizedBox(height: 8),
         Text(
-          '* 第一版是镜像覆盖：从选中设备同步到本机后，本机 database.db 和 files 文件夹会以对方为准；对方没有的本机文件会删除。同步前会自动备份当前库。',
+          '* 第一版是曲库镜像覆盖：从选中设备同步到本机后，歌曲、音源版本、歌词、标签、歌单和 files 文件夹会以对方为准；主题、悬浮歌词、音频处理等本机设置不会同步。对方没有的本机文件会删除，同步前会自动备份当前库。',
           style: TextStyle(fontSize: 10, color: cfg.textSub, height: 1.5),
         ),
       ],
@@ -1647,7 +2301,7 @@ class _SettingsModalState extends State<SettingsModal> {
         title: const Text('从远端同步到本机？'),
         content: Text(
           '即将把 ${device.name} 的音乐库同步到本机。'
-          '\n\n本机数据库和 files 文件夹会以对方为准。',
+          '\n\n本机曲库数据和 files 文件夹会以对方为准，但主题、悬浮歌词、音频处理等本机设置不会被覆盖。',
         ),
         actions: [
           TextButton(
@@ -1670,7 +2324,7 @@ class _SettingsModalState extends State<SettingsModal> {
       builder: (ctx) => AlertDialog(
         title: const Text('再次确认覆盖本机'),
         content: const Text(
-          '本机多余的歌曲、数据库记录和 files 文件会被删除。同步前会备份当前库，但这仍然是一次覆盖操作。',
+          '本机多余的歌曲、歌词、数据库记录和 files 文件会被删除。同步前会备份当前库，但这仍然是一次覆盖操作；本机设置会保留。',
         ),
         actions: [
           TextButton(
@@ -1710,6 +2364,93 @@ class _SettingsModalState extends State<SettingsModal> {
         return;
       }
       messenger.showSnackBar(SnackBar(content: Text('同步失败: $e')));
+    }
+  }
+
+  Future<void> _importFilesFromSettings(
+    BuildContext context,
+    LibraryProvider libraryProvider,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['mp3', 'wav', 'flac', 'm4a', 'ogg', 'aac'],
+        allowMultiple: true,
+      );
+      final paths = result?.paths.whereType<String>().toList() ?? const [];
+      if (paths.isEmpty) {
+        return;
+      }
+      setState(() {
+        _settingsImporting = true;
+      });
+      var success = 0;
+      for (final path in paths) {
+        try {
+          await libraryProvider.importSong(path);
+          success++;
+        } catch (_) {}
+      }
+      if (!mounted) {
+        return;
+      }
+      messenger.showSnackBar(SnackBar(content: Text('已导入 $success 首歌曲')));
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      messenger.showSnackBar(SnackBar(content: Text('导入失败: $e')));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _settingsImporting = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _importFolderFromSettings(
+    BuildContext context,
+    LibraryProvider libraryProvider,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final path = await FilePicker.platform.getDirectoryPath();
+      if (path == null || path.isEmpty) {
+        return;
+      }
+      setState(() {
+        _settingsImporting = true;
+      });
+      final filepaths = await music.scanDirectoryForPreview(dirPath: path);
+      final previews = await music.previewAudioMetadata(filepaths: filepaths);
+      var success = 0;
+      for (final item in previews) {
+        try {
+          await libraryProvider.importSongWithMetadata(
+            item.filepath,
+            item.title,
+            item.artist,
+          );
+          success++;
+        } catch (_) {}
+      }
+      if (!mounted) {
+        return;
+      }
+      messenger.showSnackBar(SnackBar(content: Text('已从目录导入 $success 首歌曲')));
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      messenger.showSnackBar(SnackBar(content: Text('导入目录失败: $e')));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _settingsImporting = false;
+        });
+      }
     }
   }
 

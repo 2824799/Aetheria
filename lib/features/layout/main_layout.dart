@@ -178,7 +178,7 @@ class _MainLayoutState extends State<MainLayout>
         title: const Text('同步请求'),
         content: Text(
           '${request.deviceName} 请求从本设备同步音乐库。'
-          '\n\n同意后，对方会拉取本机 database.db 和 files 文件夹内容。',
+          '\n\n同意后，对方会拉取本机曲库数据和 files 文件夹内容。主题、悬浮歌词、音频处理等本机设置不会同步。',
         ),
         actions: [
           TextButton(

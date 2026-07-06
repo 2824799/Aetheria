@@ -5,6 +5,7 @@ import 'package:aetheria/core/providers/library_provider.dart';
 import 'package:aetheria/core/providers/audio_player_provider.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
 import 'package:aetheria/core/widgets/glass_panel.dart';
+import 'package:aetheria/core/utils/audio_quality.dart';
 import 'package:aetheria/features/library/ui/tag_filter.dart';
 import 'package:aetheria/features/library/ui/tag_manager_modal.dart';
 import 'package:aetheria/features/library/ui/settings_modal.dart';
@@ -13,6 +14,7 @@ import 'package:aetheria/src/rust/models/song.dart';
 import 'package:aetheria/src/rust/models/playlist.dart';
 import 'package:aetheria/src/rust/api/music.dart' as music;
 import 'dart:io';
+import 'dart:math' as math;
 import 'package:aetheria/services/native_audio_helper.dart';
 
 class MobileLayout extends StatefulWidget {
@@ -25,12 +27,7 @@ class MobileLayout extends StatefulWidget {
 class _MobileLayoutState extends State<MobileLayout> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final TextEditingController _searchController = TextEditingController();
-  bool _isImporting = false;
-  String _importProgressTitle = '正在处理...';
-  String _importProgressSubtitle = '';
-  int _importProgressCurrent = 0;
-  int _importProgressTotal = 0;
-  bool _importProgressIndeterminate = true;
+  double _tagCollapseFactor = 0;
 
   @override
   void initState() {
@@ -81,33 +78,24 @@ class _MobileLayoutState extends State<MobileLayout> {
     return song.versions.isNotEmpty ? song.versions.first : null;
   }
 
-  Color _qualityColor(AudioVersion? version, AppThemeConfig cfg) {
-    if (version == null) {
-      return cfg.textSub;
-    }
-    final format = version.format?.toLowerCase() ?? '';
-    final bitrateKbps = version.bitrate == null
-        ? null
-        : (version.bitrate! / 1000).round();
-    final isLossless =
-        format == 'flac' ||
-        format == 'wav' ||
-        format == 'alac' ||
-        format == 'ape';
-    final isHiRes =
-        (version.bitDepth != null && version.bitDepth! > 16) ||
-        (version.sampleRate != null && version.sampleRate! >= 48000);
-
-    if (isLossless || isHiRes || (bitrateKbps != null && bitrateKbps >= 320)) {
-      return const Color(0xFF10B981);
-    }
-    if (bitrateKbps != null && bitrateKbps < 192) {
-      return Colors.redAccent;
-    }
-    if (bitrateKbps != null && bitrateKbps < 256) {
-      return const Color(0xFFF59E0B);
-    }
-    return const Color(0xFF3B82F6);
+  Widget _buildMobileLrcBadge(AppThemeConfig cfg) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+      decoration: BoxDecoration(
+        color: cfg.accent.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: cfg.accent.withOpacity(0.55)),
+      ),
+      child: Text(
+        'LRC',
+        style: TextStyle(
+          color: cfg.accent,
+          fontSize: 8.5,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0,
+        ),
+      ),
+    );
   }
 
   Future<bool> _confirmDeleteSong(BuildContext context, Song song) async {
@@ -188,404 +176,6 @@ class _MobileLayoutState extends State<MobileLayout> {
       ),
     );
     return confirm == true;
-  }
-
-  void _updateImportProgress({
-    required String title,
-    required String subtitle,
-    int current = 0,
-    int total = 0,
-    bool indeterminate = true,
-  }) {
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      _isImporting = true;
-      _importProgressTitle = title;
-      _importProgressSubtitle = subtitle;
-      _importProgressCurrent = current;
-      _importProgressTotal = total;
-      _importProgressIndeterminate = indeterminate;
-    });
-  }
-
-  void _clearImportProgress() {
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      _isImporting = false;
-      _importProgressTitle = '正在处理...';
-      _importProgressSubtitle = '';
-      _importProgressCurrent = 0;
-      _importProgressTotal = 0;
-      _importProgressIndeterminate = true;
-    });
-  }
-
-  // Import audio files
-  Future<void> _importFiles(LibraryProvider provider) async {
-    try {
-      FilePickerResult? result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['mp3', 'wav', 'flac', 'm4a', 'ogg', 'aac'],
-        allowMultiple: true,
-      );
-
-      final selectedPaths =
-          result?.paths.whereType<String>().toList() ?? const [];
-      if (selectedPaths.isEmpty) return;
-
-      _updateImportProgress(
-        title: '正在导入音频文件...',
-        subtitle: '已完成 0 / ${selectedPaths.length} 首歌曲',
-        current: 0,
-        total: selectedPaths.length,
-        indeterminate: false,
-      );
-
-      int successCount = 0;
-      int failCount = 0;
-
-      for (int index = 0; index < selectedPaths.length; index++) {
-        _updateImportProgress(
-          title: '正在导入音频文件...',
-          subtitle: '正在导入 ${index + 1} / ${selectedPaths.length} 首歌曲',
-          current: index,
-          total: selectedPaths.length,
-          indeterminate: false,
-        );
-        try {
-          await provider.importSong(selectedPaths[index]);
-          successCount++;
-        } catch (_) {
-          failCount++;
-        }
-        _updateImportProgress(
-          title: '正在导入音频文件...',
-          subtitle: '已完成 ${index + 1} / ${selectedPaths.length} 首歌曲',
-          current: index + 1,
-          total: selectedPaths.length,
-          indeterminate: false,
-        );
-      }
-
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('导入完成: 成功 $successCount 首, 失败 $failCount 首')),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('导入文件错误: $e')));
-    } finally {
-      _clearImportProgress();
-    }
-  }
-
-  // Import folder
-  Future<void> _importFolder(LibraryProvider provider) async {
-    try {
-      String? selectedDirectory = await FilePicker.platform.getDirectoryPath();
-      if (selectedDirectory == null) return;
-
-      _updateImportProgress(title: '正在扫描文件夹...', subtitle: '正在搜索支持的音频文件...');
-
-      // Scan directory for preview
-      final filepaths = await music.scanDirectoryForPreview(
-        dirPath: selectedDirectory,
-      );
-      if (filepaths.isEmpty) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('所选文件夹中未找到支持的音频文件')));
-        return;
-      }
-
-      _updateImportProgress(
-        title: '正在读取音频元数据...',
-        subtitle: '已处理 0 / ${filepaths.length} 首候选歌曲',
-        current: 0,
-        total: filepaths.length,
-        indeterminate: false,
-      );
-
-      final previews = <PreviewInfo>[];
-      const batchSize = 24;
-      for (int start = 0; start < filepaths.length; start += batchSize) {
-        final end = start + batchSize > filepaths.length
-            ? filepaths.length
-            : start + batchSize;
-        final batch = await music.previewAudioMetadata(
-          filepaths: filepaths.sublist(start, end),
-        );
-        previews.addAll(batch);
-        _updateImportProgress(
-          title: '正在读取音频元数据...',
-          subtitle: '已处理 $end / ${filepaths.length} 首候选歌曲',
-          current: end,
-          total: filepaths.length,
-          indeterminate: false,
-        );
-      }
-
-      if (!mounted) return;
-      // Present import preview modal
-      _showImportPreviewModal(previews, provider);
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('扫描文件夹错误: $e')));
-    } finally {
-      _clearImportProgress();
-    }
-  }
-
-  // Import Preview Modal
-  void _showImportPreviewModal(
-    List<PreviewInfo> previews,
-    LibraryProvider provider,
-  ) {
-    final checkedItems = List<bool>.filled(previews.length, true);
-
-    showDialog(
-      context: context,
-      builder: (ctx) {
-        final cfg = context.read<UIThemeProvider>().currentTheme;
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            return Center(
-              child: Material(
-                color: Colors.transparent,
-                child: Container(
-                  width: MediaQuery.of(context).size.width * 0.9,
-                  height: MediaQuery.of(context).size.height * 0.65,
-                  child: GlassPanel(
-                    borderRadius: BorderRadius.circular(16),
-                    padding: const EdgeInsets.all(20),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                              '导入预览 (共 ${previews.length} 首)',
-                              style: TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.bold,
-                                color: cfg.textMain,
-                              ),
-                            ),
-                            IconButton(
-                              icon: Icon(
-                                Icons.close,
-                                color: cfg.textSub,
-                                size: 20,
-                              ),
-                              onPressed: () => Navigator.of(ctx).pop(),
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 10),
-                        Row(
-                          children: [
-                            TextButton(
-                              onPressed: () {
-                                setModalState(() {
-                                  checkedItems.fillRange(
-                                    0,
-                                    checkedItems.length,
-                                    true,
-                                  );
-                                });
-                              },
-                              child: const Text(
-                                '全选',
-                                style: TextStyle(fontSize: 12),
-                              ),
-                            ),
-                            TextButton(
-                              onPressed: () {
-                                setModalState(() {
-                                  checkedItems.fillRange(
-                                    0,
-                                    checkedItems.length,
-                                    false,
-                                  );
-                                });
-                              },
-                              child: const Text(
-                                '全不选',
-                                style: TextStyle(fontSize: 12),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        Expanded(
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: Colors.black.withOpacity(0.06),
-                              borderRadius: BorderRadius.circular(10),
-                              border: Border.all(color: cfg.border),
-                            ),
-                            child: ListView.separated(
-                              padding: const EdgeInsets.symmetric(vertical: 4),
-                              itemCount: previews.length,
-                              separatorBuilder: (_, __) => Divider(
-                                height: 1,
-                                color: cfg.border.withOpacity(0.5),
-                              ),
-                              itemBuilder: (context, index) {
-                                final item = previews[index];
-                                return CheckboxListTile(
-                                  dense: true,
-                                  value: checkedItems[index],
-                                  title: Text(
-                                    item.title.isNotEmpty
-                                        ? item.title
-                                        : item.filename,
-                                    style: TextStyle(
-                                      color: cfg.textMain,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  subtitle: Text(
-                                    item.artist.isNotEmpty
-                                        ? item.artist
-                                        : '未知歌手',
-                                    style: TextStyle(
-                                      color: cfg.textSub,
-                                      fontSize: 10,
-                                    ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  onChanged: (val) {
-                                    setModalState(() {
-                                      checkedItems[index] = val ?? false;
-                                    });
-                                  },
-                                );
-                              },
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            TextButton(
-                              onPressed: () => Navigator.of(ctx).pop(),
-                              child: const Text('取消'),
-                            ),
-                            const SizedBox(width: 8),
-                            ElevatedButton(
-                              onPressed: () async {
-                                final selectedPreviews = <PreviewInfo>[];
-                                for (
-                                  int index = 0;
-                                  index < previews.length;
-                                  index++
-                                ) {
-                                  if (checkedItems[index]) {
-                                    selectedPreviews.add(previews[index]);
-                                  }
-                                }
-
-                                Navigator.of(ctx).pop();
-
-                                if (selectedPreviews.isEmpty) {
-                                  if (!mounted) return;
-                                  ScaffoldMessenger.of(
-                                    this.context,
-                                  ).showSnackBar(
-                                    const SnackBar(
-                                      content: Text('请至少选择一首歌曲再导入'),
-                                    ),
-                                  );
-                                  return;
-                                }
-
-                                _updateImportProgress(
-                                  title: '正在导入已选歌曲...',
-                                  subtitle:
-                                      '已完成 0 / ${selectedPreviews.length} 首歌曲',
-                                  current: 0,
-                                  total: selectedPreviews.length,
-                                  indeterminate: false,
-                                );
-
-                                int imported = 0;
-                                for (
-                                  int i = 0;
-                                  i < selectedPreviews.length;
-                                  i++
-                                ) {
-                                  final item = selectedPreviews[i];
-                                  _updateImportProgress(
-                                    title: '正在导入已选歌曲...',
-                                    subtitle:
-                                        '正在导入 ${i + 1} / ${selectedPreviews.length} 首歌曲',
-                                    current: i,
-                                    total: selectedPreviews.length,
-                                    indeterminate: false,
-                                  );
-                                  try {
-                                    await provider.importSongWithMetadata(
-                                      item.filepath,
-                                      item.title,
-                                      item.artist,
-                                    );
-                                    imported++;
-                                  } catch (_) {}
-                                  _updateImportProgress(
-                                    title: '正在导入已选歌曲...',
-                                    subtitle:
-                                        '已完成 ${i + 1} / ${selectedPreviews.length} 首歌曲',
-                                    current: i + 1,
-                                    total: selectedPreviews.length,
-                                    indeterminate: false,
-                                  );
-                                }
-
-                                if (mounted) {
-                                  _clearImportProgress();
-                                }
-
-                                if (!mounted) return;
-                                ScaffoldMessenger.of(this.context).showSnackBar(
-                                  SnackBar(content: Text('成功导入 $imported 首歌曲')),
-                                );
-                              },
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: cfg.accent,
-                                foregroundColor: Colors.white,
-                              ),
-                              child: const Text('开始导入'),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
   }
 
   // Playlist Create dialog
@@ -1167,44 +757,9 @@ class _MobileLayoutState extends State<MobileLayout> {
                         const SizedBox(height: 8),
                         Row(
                           children: [
-                            // Enable check
-                            Tooltip(
-                              message: '关闭后不会被自动选来播放。',
-                              child: InkWell(
-                                onTap: () async {
-                                  await libraryProvider.updateVersionStatus(
-                                    v.id,
-                                    !v.isEnabled,
-                                    v.isPrimary,
-                                  );
-                                },
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      v.isEnabled
-                                          ? Icons.check_box
-                                          : Icons.check_box_outline_blank,
-                                      size: 14,
-                                      color: v.isEnabled
-                                          ? cfg.accent
-                                          : cfg.textSub,
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      '播放',
-                                      style: TextStyle(
-                                        fontSize: 10,
-                                        color: cfg.textMain,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 16),
                             // Primary radio
                             Tooltip(
-                              message: '设为播放这首歌时优先使用的版本。',
+                              message: '播放这首歌时优先使用的版本；若正在播放，会按当前进度切到新版本。',
                               child: InkWell(
                                 onTap: () async {
                                   if (v.isPrimary) {
@@ -1217,11 +772,7 @@ class _MobileLayoutState extends State<MobileLayout> {
                                   final position =
                                       audioProvider.currentPosition;
                                   final startPaused = !audioProvider.isPlaying;
-                                  await libraryProvider.updateVersionStatus(
-                                    v.id,
-                                    true,
-                                    true,
-                                  );
+                                  await libraryProvider.setPrimaryVersion(v.id);
                                   if (shouldSwitch) {
                                     final updatedSong = libraryProvider.songs
                                         .firstWhere(
@@ -1257,7 +808,7 @@ class _MobileLayoutState extends State<MobileLayout> {
                                     ),
                                     const SizedBox(width: 4),
                                     Text(
-                                      '默认',
+                                      '默认播放版本',
                                       style: TextStyle(
                                         fontSize: 10,
                                         color: cfg.textMain,
@@ -1638,21 +1189,36 @@ class _MobileLayoutState extends State<MobileLayout> {
           appBar: AppBar(
             backgroundColor: Colors.transparent,
             elevation: 0,
+            titleSpacing: 0,
             leading: IconButton(
               icon: Icon(Icons.menu, color: cfg.textMain),
               onPressed: () => _scaffoldKey.currentState?.openDrawer(),
             ),
-            title: ShaderMask(
-              shaderCallback: (bounds) => LinearGradient(
-                colors: [cfg.accent, Colors.orangeAccent],
-              ).createShader(bounds),
-              child: Text(
-                'Aetheria Mobile',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 18,
-                  fontFamily: 'Outfit',
+            title: SizedBox(
+              height: 38,
+              child: TextField(
+                controller: _searchController,
+                onChanged: (val) => libraryProvider.setSearchQuery(val),
+                style: TextStyle(color: cfg.textMain, fontSize: 13),
+                decoration: InputDecoration(
+                  prefixIcon: Icon(Icons.search, size: 18, color: cfg.textSub),
+                  hintText: '搜索歌曲、歌手、专辑...',
+                  hintStyle: TextStyle(color: cfg.textSub.withOpacity(0.5)),
+                  filled: true,
+                  fillColor: Colors.white.withOpacity(0.06),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(20),
+                    borderSide: BorderSide(color: cfg.border),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(20),
+                    borderSide: BorderSide(color: cfg.border),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(20),
+                    borderSide: BorderSide(color: cfg.accent, width: 1.5),
+                  ),
                 ),
               ),
             ),
@@ -1676,107 +1242,20 @@ class _MobileLayoutState extends State<MobileLayout> {
           body: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Search Input Box
+              // TagFilter widget
               Padding(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 16,
                   vertical: 8,
                 ),
-                child: SizedBox(
-                  height: 38,
-                  child: TextField(
-                    controller: _searchController,
-                    onChanged: (val) => libraryProvider.setSearchQuery(val),
-                    style: TextStyle(color: cfg.textMain, fontSize: 13),
-                    decoration: InputDecoration(
-                      prefixIcon: Icon(
-                        Icons.search,
-                        size: 18,
-                        color: cfg.textSub,
-                      ),
-                      hintText: '搜索歌名、歌手或格式...',
-                      hintStyle: TextStyle(color: cfg.textSub.withOpacity(0.5)),
-                      filled: true,
-                      fillColor: Colors.white.withOpacity(0.06),
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                      ),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(20),
-                        borderSide: BorderSide(color: cfg.border),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(20),
-                        borderSide: BorderSide(color: cfg.border),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(20),
-                        borderSide: BorderSide(color: cfg.accent, width: 2.0),
-                      ),
-                    ),
-                  ),
+                child: TagFilter(
+                  scrollCollapseFactor: _tagCollapseFactor,
+                  onExpandRequested: () {
+                    setState(() {
+                      _tagCollapseFactor = 0;
+                    });
+                  },
                 ),
-              ),
-
-              // Import buttons row
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 4,
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: SizedBox(
-                        height: 34,
-                        child: ElevatedButton.icon(
-                          onPressed: () => _importFiles(libraryProvider),
-                          icon: const Icon(Icons.audio_file, size: 14),
-                          label: const Text(
-                            '导入单歌',
-                            style: TextStyle(fontSize: 12),
-                          ),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: cfg.border,
-                            foregroundColor: cfg.textMain,
-                            elevation: 0,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: SizedBox(
-                        height: 34,
-                        child: ElevatedButton.icon(
-                          onPressed: () => _importFolder(libraryProvider),
-                          icon: const Icon(Icons.folder_open, size: 14),
-                          label: const Text(
-                            '导入目录',
-                            style: TextStyle(fontSize: 12),
-                          ),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: cfg.border,
-                            foregroundColor: cfg.textMain,
-                            elevation: 0,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              // TagFilter widget
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                child: TagFilter(),
               ),
 
               // Active playlist / songs count indicator
@@ -1809,231 +1288,246 @@ class _MobileLayoutState extends State<MobileLayout> {
                 child: songs.isEmpty
                     ? Center(
                         child: Text(
-                          '暂无歌曲，请点击上方按钮导入音源',
+                          '暂无歌曲，请在设置中导入音源',
                           style: TextStyle(color: cfg.textSub, fontSize: 13),
                         ),
                       )
-                    : ListView.builder(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 8,
-                        ),
-                        itemCount: songs.length,
-                        itemBuilder: (context, index) {
-                          final song = songs[index];
-                          final isCurrentlyPlaying = playingSong?.id == song.id;
-                          final isActive =
-                              audioProvider.activeSong?.id == song.id;
-                          AudioVersion? primary;
-                          for (final v in song.versions) {
-                            if (v.isPrimary) {
-                              primary = v;
-                              break;
+                    : NotificationListener<ScrollUpdateNotification>(
+                        onNotification: (notification) {
+                          final delta = notification.scrollDelta ?? 0;
+                          if (notification.metrics.axis == Axis.vertical &&
+                              delta > 0 &&
+                              _tagCollapseFactor < 1) {
+                            setState(() {
+                              _tagCollapseFactor = math.min(
+                                1,
+                                _tagCollapseFactor + delta / 140,
+                              );
+                            });
+                          }
+                          return false;
+                        },
+                        child: ListView.builder(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 8,
+                          ),
+                          itemCount: songs.length,
+                          itemBuilder: (context, index) {
+                            final song = songs[index];
+                            final isCurrentlyPlaying =
+                                playingSong?.id == song.id;
+                            final isActive =
+                                audioProvider.activeSong?.id == song.id;
+                            AudioVersion? primary;
+                            for (final v in song.versions) {
+                              if (v.isPrimary) {
+                                primary = v;
+                                break;
+                              }
                             }
-                          }
-                          if (primary == null && song.versions.isNotEmpty) {
-                            primary = song.versions.first;
-                          }
+                            if (primary == null && song.versions.isNotEmpty) {
+                              primary = song.versions.first;
+                            }
 
-                          // Build the specs label text
-                          String specsText = '无源';
-                          if (primary != null) {
-                            final specs = <String>[];
-                            if (primary.format != null)
-                              specs.add(primary.format!.toUpperCase());
-                            if (primary.format?.toLowerCase() == 'flac' &&
-                                primary.bitDepth != null) {
-                              specs.add('${primary.bitDepth}b');
-                            }
-                            if (primary.sampleRate != null) {
-                              final rateK = primary.sampleRate! / 1000;
-                              specs.add(
-                                '${rateK.toStringAsFixed(primary.sampleRate! % 1000 == 0 ? 0 : 1)}k',
-                              );
-                            }
-                            if (primary.bitrate != null) {
-                              specs.add(
-                                '${(primary.bitrate! / 1000).round()}kbps',
-                              );
-                            }
-                            if (primary.loudness != null) {
-                              specs.add(
-                                '${primary.loudness!.toStringAsFixed(1)}dB',
-                              );
-                            }
-                            if (specs.isNotEmpty) {
-                              specsText = specs.join('/');
-                            }
-                          }
-                          final qualityColor = _qualityColor(primary, cfg);
+                            final specsText = audioQualityText(primary);
+                            final qualityColor = audioQualityColor(
+                              primary,
+                              cfg.textSub,
+                            );
 
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 6),
-                            child: InkWell(
-                              onTap: () async {
-                                audioProvider.setActiveSong(song);
-                                try {
-                                  await audioProvider.playSong(
-                                    song,
-                                    songs,
-                                    libraryProvider.libraryPath,
-                                    audioServerPort:
-                                        libraryProvider.audioServerPort,
-                                  );
-                                } catch (e) {
-                                  if (!context.mounted) return;
-                                  showDialog(
-                                    context: context,
-                                    builder: (ctx) => AlertDialog(
-                                      title: const Text('播放失败 - 诊断报告'),
-                                      content: SingleChildScrollView(
-                                        child: SelectableText(
-                                          e.toString(),
-                                          style: const TextStyle(
-                                            fontSize: 11,
-                                            fontFamily: 'monospace',
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 6),
+                              child: InkWell(
+                                onTap: () async {
+                                  audioProvider.setActiveSong(song);
+                                  try {
+                                    await audioProvider.playSong(
+                                      song,
+                                      songs,
+                                      libraryProvider.libraryPath,
+                                      audioServerPort:
+                                          libraryProvider.audioServerPort,
+                                    );
+                                  } catch (e) {
+                                    if (!context.mounted) return;
+                                    showDialog(
+                                      context: context,
+                                      builder: (ctx) => AlertDialog(
+                                        title: const Text('播放失败 - 诊断报告'),
+                                        content: SingleChildScrollView(
+                                          child: SelectableText(
+                                            e.toString(),
+                                            style: const TextStyle(
+                                              fontSize: 11,
+                                              fontFamily: 'monospace',
+                                            ),
                                           ),
                                         ),
-                                      ),
-                                      actions: [
-                                        TextButton(
-                                          onPressed: () =>
-                                              Navigator.of(ctx).pop(),
-                                          child: const Text('关闭'),
-                                        ),
-                                      ],
-                                    ),
-                                  );
-                                }
-                              },
-                              onLongPress: () => _showSongContextMenu(
-                                context,
-                                song,
-                                libraryProvider,
-                                audioProvider,
-                              ),
-                              borderRadius: BorderRadius.circular(8),
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  color: isActive ? cfg.bgHover : cfg.bgPanel,
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border(
-                                    left: BorderSide(
-                                      color: isCurrentlyPlaying
-                                          ? cfg.accent
-                                          : Colors.transparent,
-                                      width: 4,
-                                    ),
-                                  ),
-                                ),
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 10,
-                                ),
-                                child: Row(
-                                  children: [
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.stretch,
-                                        children: [
-                                          // Song Title
-                                          Text(
-                                            song.title,
-                                            style: TextStyle(
-                                              fontWeight: FontWeight.bold,
-                                              fontSize: 13.5,
-                                              color: isCurrentlyPlaying
-                                                  ? cfg.accent
-                                                  : cfg.textMain,
-                                            ),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
+                                        actions: [
+                                          TextButton(
+                                            onPressed: () =>
+                                                Navigator.of(ctx).pop(),
+                                            child: const Text('关闭'),
                                           ),
-                                          const SizedBox(height: 4),
-
-                                          // Row 1: Artist name and Tech specs badge
-                                          Row(
-                                            children: [
-                                              Text(
-                                                song.artist ?? '未知歌手',
-                                                style: TextStyle(
-                                                  fontSize: 11,
-                                                  color: cfg.textSub,
-                                                ),
-                                              ),
-                                              const SizedBox(width: 8),
-                                              Container(
-                                                padding:
-                                                    const EdgeInsets.symmetric(
-                                                      horizontal: 4,
-                                                      vertical: 1,
-                                                    ),
-                                                decoration: BoxDecoration(
-                                                  color: qualityColor
-                                                      .withValues(alpha: 0.12),
-                                                  borderRadius:
-                                                      BorderRadius.circular(4),
-                                                ),
-                                                child: Text(
-                                                  specsText,
-                                                  style: TextStyle(
-                                                    fontSize: 9,
-                                                    color: qualityColor,
-                                                    fontWeight: FontWeight.w700,
-                                                  ),
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                          // Row 2: All tags wrapped below it
-                                          if (song.tags.isNotEmpty) ...[
-                                            const SizedBox(height: 4),
-                                            Wrap(
-                                              spacing: 6,
-                                              runSpacing: 4,
-                                              children: song.tags.map((t) {
-                                                final c = t.color != null
-                                                    ? _parseHexColor(
-                                                        t.color!,
-                                                        cfg.textSub,
-                                                      )
-                                                    : cfg.textSub;
-                                                return Text(
-                                                  '#${t.name}',
-                                                  style: TextStyle(
-                                                    fontSize: 10,
-                                                    color: c,
-                                                    fontWeight: FontWeight.w600,
-                                                  ),
-                                                );
-                                              }).toList(),
-                                            ),
-                                          ],
                                         ],
                                       ),
-                                    ),
-                                    IconButton(
-                                      icon: Icon(
-                                        Icons.more_horiz,
-                                        color: cfg.textSub,
-                                        size: 20,
+                                    );
+                                  }
+                                },
+                                onLongPress: () => _showSongContextMenu(
+                                  context,
+                                  song,
+                                  libraryProvider,
+                                  audioProvider,
+                                ),
+                                borderRadius: BorderRadius.circular(8),
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    color: isActive ? cfg.bgHover : cfg.bgPanel,
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border(
+                                      left: BorderSide(
+                                        color: isCurrentlyPlaying
+                                            ? cfg.accent
+                                            : Colors.transparent,
+                                        width: 4,
                                       ),
-                                      onPressed: () => _showSongContextMenu(
-                                        context,
-                                        song,
-                                        libraryProvider,
-                                        audioProvider,
-                                      ),
-                                      padding: EdgeInsets.zero,
-                                      constraints: const BoxConstraints(),
                                     ),
-                                  ],
+                                  ),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 10,
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.stretch,
+                                          children: [
+                                            // Song Title
+                                            Row(
+                                              children: [
+                                                Expanded(
+                                                  child: Text(
+                                                    song.title,
+                                                    style: TextStyle(
+                                                      fontWeight:
+                                                          FontWeight.bold,
+                                                      fontSize: 13.5,
+                                                      color: isCurrentlyPlaying
+                                                          ? cfg.accent
+                                                          : cfg.textMain,
+                                                    ),
+                                                    maxLines: 1,
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                  ),
+                                                ),
+                                                if (libraryProvider
+                                                    .songHasLyrics(song)) ...[
+                                                  const SizedBox(width: 6),
+                                                  _buildMobileLrcBadge(cfg),
+                                                ],
+                                              ],
+                                            ),
+                                            const SizedBox(height: 4),
+
+                                            // Row 1: Artist name and Tech specs badge
+                                            Row(
+                                              children: [
+                                                Flexible(
+                                                  child: Text(
+                                                    song.artist ?? '未知歌手',
+                                                    maxLines: 1,
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                    style: TextStyle(
+                                                      fontSize: 11,
+                                                      color: cfg.textSub,
+                                                    ),
+                                                  ),
+                                                ),
+                                                const SizedBox(width: 8),
+                                                Container(
+                                                  padding:
+                                                      const EdgeInsets.symmetric(
+                                                        horizontal: 4,
+                                                        vertical: 1,
+                                                      ),
+                                                  decoration: BoxDecoration(
+                                                    color: qualityColor
+                                                        .withValues(
+                                                          alpha: 0.12,
+                                                        ),
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          4,
+                                                        ),
+                                                  ),
+                                                  child: Text(
+                                                    specsText,
+                                                    style: TextStyle(
+                                                      fontSize: 9,
+                                                      color: qualityColor,
+                                                      fontWeight:
+                                                          FontWeight.w700,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                            // Row 2: All tags wrapped below it
+                                            if (song.tags.isNotEmpty) ...[
+                                              const SizedBox(height: 4),
+                                              Wrap(
+                                                spacing: 6,
+                                                runSpacing: 4,
+                                                children: song.tags.map((t) {
+                                                  final c = t.color != null
+                                                      ? _parseHexColor(
+                                                          t.color!,
+                                                          cfg.textSub,
+                                                        )
+                                                      : cfg.textSub;
+                                                  return Text(
+                                                    '#${t.name}',
+                                                    style: TextStyle(
+                                                      fontSize: 10,
+                                                      color: c,
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                    ),
+                                                  );
+                                                }).toList(),
+                                              ),
+                                            ],
+                                          ],
+                                        ),
+                                      ),
+                                      IconButton(
+                                        icon: Icon(
+                                          Icons.more_horiz,
+                                          color: cfg.textSub,
+                                          size: 20,
+                                        ),
+                                        onPressed: () => _showSongContextMenu(
+                                          context,
+                                          song,
+                                          libraryProvider,
+                                          audioProvider,
+                                        ),
+                                        padding: EdgeInsets.zero,
+                                        constraints: const BoxConstraints(),
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ),
-                            ),
-                          );
-                        },
+                            );
+                          },
+                        ),
                       ),
               ),
 
@@ -2166,79 +1660,6 @@ class _MobileLayoutState extends State<MobileLayout> {
             ],
           ),
         ),
-        if (_isImporting)
-          Positioned.fill(
-            child: Container(
-              color: Colors.black.withOpacity(0.5),
-              child: Center(
-                child: GlassPanel(
-                  borderRadius: BorderRadius.circular(12),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 24,
-                    vertical: 16,
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        _importProgressTitle,
-                        style: TextStyle(
-                          color: cfg.textMain,
-                          fontSize: 13,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      SizedBox(
-                        width: 260,
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(999),
-                          child: LinearProgressIndicator(
-                            minHeight: 6,
-                            value:
-                                _importProgressIndeterminate ||
-                                    _importProgressTotal <= 0
-                                ? null
-                                : (_importProgressCurrent /
-                                          _importProgressTotal)
-                                      .clamp(0.0, 1.0),
-                            color: cfg.accent,
-                            backgroundColor: cfg.border.withOpacity(0.45),
-                          ),
-                        ),
-                      ),
-                      if (_importProgressTotal > 0) ...[
-                        const SizedBox(height: 10),
-                        Text(
-                          '已完成 $_importProgressCurrent / $_importProgressTotal 首',
-                          style: TextStyle(
-                            color: cfg.textMain,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                      if (_importProgressSubtitle.isNotEmpty) ...[
-                        const SizedBox(height: 4),
-                        SizedBox(
-                          width: 260,
-                          child: Text(
-                            _importProgressSubtitle,
-                            style: TextStyle(
-                              color: cfg.textSub,
-                              fontSize: 11,
-                              height: 1.4,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
       ],
     );
   }

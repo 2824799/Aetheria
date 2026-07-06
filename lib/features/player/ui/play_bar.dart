@@ -135,7 +135,6 @@ class PlayBar extends StatelessWidget {
                                 fontWeight: FontWeight.bold,
                                 fontSize: 13,
                                 color: cfg.textMain,
-                                fontFamily: 'Outfit',
                               ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
@@ -146,7 +145,6 @@ class PlayBar extends StatelessWidget {
                               style: TextStyle(
                                 color: cfg.textSub,
                                 fontSize: 11,
-                                fontFamily: 'Outfit',
                               ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
@@ -236,11 +234,7 @@ class PlayBar extends StatelessWidget {
                     children: [
                       Text(
                         '${_formatDuration(audioProvider.currentPosition)} / ${_formatDuration(audioProvider.totalDuration)}',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: cfg.textSub,
-                          fontFamily: 'Outfit',
-                        ),
+                        style: TextStyle(fontSize: 11, color: cfg.textSub),
                       ),
                       const SizedBox(width: 16),
                       Icon(Icons.volume_up, size: 16, color: cfg.textSub),

@@ -108,7 +108,6 @@ class UIThemeProvider extends ChangeNotifier {
           brightness: Brightness.light,
         );
       case AppThemeType.dark:
-      default:
         return const AppThemeConfig(
           bgApp: RadialGradient(
             center: Alignment.center,
@@ -151,14 +150,10 @@ class UIThemeProvider extends ChangeNotifier {
         onSurface: cfg.textMain,
       ),
       textTheme: TextTheme(
-        bodyLarge: TextStyle(color: cfg.textMain, fontFamily: 'Outfit'),
-        bodyMedium: TextStyle(color: cfg.textMain, fontFamily: 'Outfit'),
-        bodySmall: TextStyle(color: cfg.textSub, fontFamily: 'Outfit'),
-        titleLarge: TextStyle(
-          color: cfg.textMain,
-          fontFamily: 'Outfit',
-          fontWeight: FontWeight.bold,
-        ),
+        bodyLarge: TextStyle(color: cfg.textMain),
+        bodyMedium: TextStyle(color: cfg.textMain),
+        bodySmall: TextStyle(color: cfg.textSub),
+        titleLarge: TextStyle(color: cfg.textMain, fontWeight: FontWeight.bold),
       ),
       dividerColor: cfg.border,
     );
