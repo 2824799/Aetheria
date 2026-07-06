@@ -2,16 +2,18 @@ use crate::database::connection::{
     establish_connection, get_files_dir, get_library_dir, set_library_dir,
 };
 use crate::database::schema::init_db;
-use crate::models::{AudioVersion, Playlist, PreviewInfo, Song, Tag};
+use crate::models::{
+    AudioVersion, LocalLyricCandidate, Playlist, PreviewInfo, SavedLyric, Song, Tag,
+};
 use flutter_rust_bridge::frb;
 use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::probe::Probe;
-use lofty::tag::Accessor;
+use lofty::tag::{Accessor, ItemKey};
 use rusqlite::params;
 use rusqlite::OptionalExtension;
 use std::cmp::Ordering;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use symphonia::core::errors::Error;
 use symphonia::core::formats::FormatOptions;
 use symphonia::core::io::MediaSourceStream;
@@ -57,6 +59,101 @@ fn sort_songs_like_explorer(songs: &mut [Song]) {
             })
             .then_with(|| a.id.cmp(&b.id))
     });
+}
+
+fn saved_lyric_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SavedLyric> {
+    let is_selected: i32 = row.get(11)?;
+    Ok(SavedLyric {
+        id: row.get(0)?,
+        song_id: row.get(1)?,
+        audio_version_id: row.get(2)?,
+        source: row.get(3)?,
+        source_id: row.get(4)?,
+        title: row.get(5)?,
+        artist: row.get(6)?,
+        content: row.get(7)?,
+        translation: row.get(8)?,
+        romanized: row.get(9)?,
+        offset_ms: row.get(10)?,
+        is_selected: is_selected != 0,
+        updated_at: row.get(12)?,
+    })
+}
+
+fn selected_lyric_query() -> &'static str {
+    "SELECT id, song_id, audio_version_id, source, source_id, title, artist, content, translation, romanized, offset_ms, is_selected, updated_at
+     FROM lyrics"
+}
+
+fn ensure_version_belongs_to_song(
+    conn: &rusqlite::Connection,
+    song_id: &str,
+    audio_version_id: &str,
+) -> Result<(), String> {
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM audio_files WHERE id = ?1 AND song_id = ?2",
+            params![audio_version_id, song_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if count == 0 {
+        return Err("歌词绑定的音源版本不属于当前歌曲。".to_string());
+    }
+    Ok(())
+}
+
+fn absolute_audio_path_from_relative(relative_path: &str) -> PathBuf {
+    let filename = relative_path.split('/').last().unwrap_or(relative_path);
+    get_files_dir().join(filename)
+}
+
+fn read_text_file_if_exists(path: &Path) -> Option<String> {
+    if !path.exists() {
+        return None;
+    }
+    let content = fs::read_to_string(path).ok()?;
+    let trimmed = content.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn embedded_lyrics_from_audio(path: &Path) -> Option<String> {
+    let tagged_file = Probe::open(path).ok()?.read().ok()?;
+    let primary = tagged_file
+        .primary_tag()
+        .and_then(|tag| tag.get_string(&ItemKey::Lyrics))
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(ToOwned::to_owned);
+    if primary.is_some() {
+        return primary;
+    }
+    tagged_file
+        .first_tag()
+        .and_then(|tag| tag.get_string(&ItemKey::Lyrics))
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn copy_sidecar_lyrics(src_path: &Path, dest_audio_path: &Path) {
+    let source_lrc = src_path.with_extension("lrc");
+    if !source_lrc.exists() {
+        return;
+    }
+    let dest_lrc = dest_audio_path.with_extension("lrc");
+    let _ = fs::copy(source_lrc, dest_lrc);
+}
+
+fn remove_sidecar_lyrics(audio_path: &Path) {
+    let sidecar = audio_path.with_extension("lrc");
+    if sidecar.exists() {
+        let _ = fs::remove_file(sidecar);
+    }
 }
 
 #[frb(sync)]
@@ -442,6 +539,7 @@ pub fn import_song(filepath: String) -> Result<Song, String> {
     let dest_absolute_path = get_files_dir().join(&dest_filename);
 
     fs::copy(src_path, &dest_absolute_path).map_err(|e| e.to_string())?;
+    copy_sidecar_lyrics(src_path, &dest_absolute_path);
 
     let song_id: String = match artist {
         Some(ref art_name) => conn
@@ -641,6 +739,7 @@ pub fn import_song_with_metadata(
     let dest_absolute_path = get_files_dir().join(&dest_filename);
 
     fs::copy(src_path, &dest_absolute_path).map_err(|e| e.to_string())?;
+    copy_sidecar_lyrics(src_path, &dest_absolute_path);
 
     let artist_opt = if artist.trim().is_empty() || artist == "未知歌手" {
         None
@@ -777,6 +876,7 @@ pub fn import_audio_version_for_song(
     let dest_absolute_path = get_files_dir().join(&dest_filename);
 
     fs::copy(src_path, &dest_absolute_path).map_err(|e| e.to_string())?;
+    copy_sidecar_lyrics(src_path, &dest_absolute_path);
 
     let version_count: i64 = conn
         .query_row(
@@ -881,6 +981,295 @@ pub fn update_song_metadata(song_id: String, title: String, artist: String) -> R
     Ok(())
 }
 
+pub fn get_selected_lyric(
+    song_id: String,
+    audio_version_id: Option<String>,
+) -> Result<Option<SavedLyric>, String> {
+    let conn = establish_connection().map_err(|e| e.to_string())?;
+
+    if let Some(version_id) = audio_version_id {
+        ensure_version_belongs_to_song(&conn, &song_id, &version_id)?;
+        let sql = format!(
+            "{} WHERE song_id = ?1 AND audio_version_id = ?2 AND is_selected = 1 ORDER BY updated_at DESC LIMIT 1",
+            selected_lyric_query()
+        );
+        let version_lyric = conn
+            .query_row(&sql, params![song_id, version_id], saved_lyric_from_row)
+            .optional()
+            .map_err(|e| e.to_string())?;
+        if version_lyric.is_some() {
+            return Ok(version_lyric);
+        }
+    }
+
+    let sql = format!(
+        "{} WHERE song_id = ?1 AND audio_version_id IS NULL AND is_selected = 1 ORDER BY updated_at DESC LIMIT 1",
+        selected_lyric_query()
+    );
+    conn.query_row(&sql, params![song_id], saved_lyric_from_row)
+        .optional()
+        .map_err(|e| e.to_string())
+}
+
+pub fn get_lyrics_for_song(song_id: String) -> Result<Vec<SavedLyric>, String> {
+    let conn = establish_connection().map_err(|e| e.to_string())?;
+    let sql = format!(
+        "{} WHERE song_id = ?1 ORDER BY audio_version_id IS NULL, is_selected DESC, updated_at DESC",
+        selected_lyric_query()
+    );
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![song_id], saved_lyric_from_row)
+        .map_err(|e| e.to_string())?;
+
+    let mut lyrics = Vec::new();
+    for row in rows {
+        lyrics.push(row.map_err(|e| e.to_string())?);
+    }
+    Ok(lyrics)
+}
+
+pub fn get_local_lyric_candidates(
+    song_id: String,
+    audio_version_id: Option<String>,
+) -> Result<Vec<LocalLyricCandidate>, String> {
+    let conn = establish_connection().map_err(|e| e.to_string())?;
+
+    let (title, artist, legacy_lyrics): (String, Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT title, artist, lyrics FROM songs WHERE id = ?1",
+            params![song_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .map_err(|e| e.to_string())?;
+
+    let version = match audio_version_id {
+        Some(version_id) => {
+            ensure_version_belongs_to_song(&conn, &song_id, &version_id)?;
+            conn.query_row(
+                "SELECT id, filepath, original_name FROM audio_files WHERE id = ?1",
+                params![version_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|e| e.to_string())?
+        }
+        None => conn
+            .query_row(
+                "SELECT id, filepath, original_name FROM audio_files WHERE song_id = ?1 ORDER BY is_primary DESC LIMIT 1",
+                params![song_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|e| e.to_string())?,
+    };
+
+    let mut candidates = Vec::<LocalLyricCandidate>::new();
+    let mut seen_contents = Vec::<String>::new();
+    let mut push_candidate = |source: &str,
+                              source_id: Option<String>,
+                              content: String,
+                              candidate_title: String,
+                              candidate_artist: Option<String>| {
+        let normalized = content.trim().replace("\r\n", "\n").replace('\r', "\n");
+        if normalized.is_empty() || seen_contents.iter().any(|item| item == &normalized) {
+            return;
+        }
+        seen_contents.push(normalized.clone());
+        candidates.push(LocalLyricCandidate {
+            source: source.to_string(),
+            source_id,
+            title: candidate_title,
+            artist: candidate_artist,
+            content: normalized,
+        });
+    };
+
+    if let Some((version_id, filepath, original_name)) = version {
+        let abs_path = absolute_audio_path_from_relative(&filepath);
+        if let Some(content) = embedded_lyrics_from_audio(&abs_path) {
+            push_candidate(
+                "local_embedded",
+                Some(version_id.clone()),
+                content,
+                title.clone(),
+                artist.clone(),
+            );
+        }
+
+        let sidecar_path = abs_path.with_extension("lrc");
+        if let Some(content) = read_text_file_if_exists(&sidecar_path) {
+            push_candidate(
+                "local_lrc",
+                Some(sidecar_path.to_string_lossy().to_string()),
+                content,
+                title.clone(),
+                artist.clone(),
+            );
+        }
+
+        let original_stem_lrc = get_files_dir().join(
+            Path::new(&original_name)
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string()
+                + ".lrc",
+        );
+        if let Some(content) = read_text_file_if_exists(&original_stem_lrc) {
+            push_candidate(
+                "local_lrc",
+                Some(original_stem_lrc.to_string_lossy().to_string()),
+                content,
+                title.clone(),
+                artist.clone(),
+            );
+        }
+    }
+
+    if let Some(content) = legacy_lyrics {
+        push_candidate("legacy_song", Some(song_id), content, title, artist);
+    }
+
+    Ok(candidates)
+}
+
+pub fn save_lyric(
+    song_id: String,
+    audio_version_id: Option<String>,
+    source: String,
+    source_id: Option<String>,
+    title: String,
+    artist: Option<String>,
+    content: String,
+    translation: Option<String>,
+    romanized: Option<String>,
+    offset_ms: i32,
+) -> Result<SavedLyric, String> {
+    let conn = establish_connection().map_err(|e| e.to_string())?;
+    let trimmed_content = content.trim().replace("\r\n", "\n").replace('\r', "\n");
+    if trimmed_content.is_empty() {
+        return Err("歌词内容不能为空。".to_string());
+    }
+
+    let song_exists: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM songs WHERE id = ?1",
+            params![song_id],
+            |row| row.get::<_, i64>(0).map(|count| count > 0),
+        )
+        .map_err(|e| e.to_string())?;
+    if !song_exists {
+        return Err("歌曲不存在。".to_string());
+    }
+
+    if let Some(version_id) = audio_version_id.as_deref() {
+        ensure_version_belongs_to_song(&conn, &song_id, version_id)?;
+        conn.execute(
+            "UPDATE lyrics SET is_selected = 0 WHERE song_id = ?1 AND audio_version_id = ?2",
+            params![song_id, version_id],
+        )
+        .map_err(|e| e.to_string())?;
+    } else {
+        conn.execute(
+            "UPDATE lyrics SET is_selected = 0 WHERE song_id = ?1 AND audio_version_id IS NULL",
+            params![song_id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    let id = Uuid::new_v4().to_string();
+    conn.execute(
+        "INSERT INTO lyrics (id, song_id, audio_version_id, source, source_id, title, artist, content, translation, romanized, offset_ms, is_selected, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 1, CURRENT_TIMESTAMP)",
+        params![
+            id,
+            song_id,
+            audio_version_id,
+            source,
+            source_id,
+            title.trim(),
+            artist.map(|value| value.trim().to_string()).filter(|value| !value.is_empty()),
+            trimmed_content,
+            translation.map(|value| value.trim().to_string()).filter(|value| !value.is_empty()),
+            romanized.map(|value| value.trim().to_string()).filter(|value| !value.is_empty()),
+            offset_ms,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+
+    let sql = format!("{} WHERE id = ?1", selected_lyric_query());
+    conn.query_row(&sql, params![id], saved_lyric_from_row)
+        .map_err(|e| e.to_string())
+}
+
+pub fn select_lyric(lyric_id: String) -> Result<SavedLyric, String> {
+    let conn = establish_connection().map_err(|e| e.to_string())?;
+    let (song_id, audio_version_id): (String, Option<String>) = conn
+        .query_row(
+            "SELECT song_id, audio_version_id FROM lyrics WHERE id = ?1",
+            params![lyric_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|e| e.to_string())?;
+
+    if let Some(version_id) = audio_version_id.as_deref() {
+        conn.execute(
+            "UPDATE lyrics SET is_selected = 0 WHERE song_id = ?1 AND audio_version_id = ?2",
+            params![song_id, version_id],
+        )
+        .map_err(|e| e.to_string())?;
+    } else {
+        conn.execute(
+            "UPDATE lyrics SET is_selected = 0 WHERE song_id = ?1 AND audio_version_id IS NULL",
+            params![song_id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    conn.execute(
+        "UPDATE lyrics SET is_selected = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
+        params![lyric_id],
+    )
+    .map_err(|e| e.to_string())?;
+
+    let sql = format!("{} WHERE id = ?1", selected_lyric_query());
+    conn.query_row(&sql, params![lyric_id], saved_lyric_from_row)
+        .map_err(|e| e.to_string())
+}
+
+pub fn update_lyric_offset(lyric_id: String, offset_ms: i32) -> Result<SavedLyric, String> {
+    let conn = establish_connection().map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE lyrics SET offset_ms = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2",
+        params![offset_ms, lyric_id],
+    )
+    .map_err(|e| e.to_string())?;
+
+    let sql = format!("{} WHERE id = ?1", selected_lyric_query());
+    conn.query_row(&sql, params![lyric_id], saved_lyric_from_row)
+        .map_err(|e| e.to_string())
+}
+
+pub fn delete_lyric(lyric_id: String) -> Result<(), String> {
+    let conn = establish_connection().map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM lyrics WHERE id = ?1", params![lyric_id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 pub fn delete_song(song_id: String) -> Result<(), String> {
     let conn = establish_connection().map_err(|e| e.to_string())?;
 
@@ -895,11 +1284,13 @@ pub fn delete_song(song_id: String) -> Result<(), String> {
         if let Ok(filepath) = filepath_res {
             let absolute_path = files_dir.join(filepath);
             if absolute_path.exists() {
+                remove_sidecar_lyrics(&absolute_path);
                 let _ = fs::remove_file(absolute_path);
             }
         }
     }
 
+    let _ = conn.execute("DELETE FROM lyrics WHERE song_id = ?1", params![song_id]);
     conn.execute("DELETE FROM songs WHERE id = ?1", params![song_id])
         .map_err(|e| e.to_string())?;
     Ok(())
@@ -926,9 +1317,14 @@ pub fn delete_audio_version(version_id: String) -> Result<(), String> {
 
     let absolute_path = get_library_dir().join(filepath);
     if absolute_path.exists() {
+        remove_sidecar_lyrics(&absolute_path);
         let _ = fs::remove_file(absolute_path);
     }
 
+    let _ = conn.execute(
+        "DELETE FROM lyrics WHERE audio_version_id = ?1",
+        params![version_id],
+    );
     conn.execute("DELETE FROM audio_files WHERE id = ?1", params![version_id])
         .map_err(|e| e.to_string())?;
 
@@ -1225,6 +1621,7 @@ pub fn reset_library() -> Result<(), String> {
     }
 
     let tables = [
+        "lyrics",
         "songs",
         "audio_files",
         "tags",

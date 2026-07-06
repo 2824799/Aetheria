@@ -8,6 +8,7 @@ import 'package:aetheria/core/widgets/glass_panel.dart';
 import 'package:aetheria/features/library/ui/tag_filter.dart';
 import 'package:aetheria/features/library/ui/tag_manager_modal.dart';
 import 'package:aetheria/features/library/ui/settings_modal.dart';
+import 'package:aetheria/features/player/ui/lyrics_panel.dart';
 import 'package:aetheria/src/rust/models/song.dart';
 import 'package:aetheria/src/rust/models/playlist.dart';
 import 'package:aetheria/src/rust/api/music.dart' as music;
@@ -62,6 +63,51 @@ class _MobileLayoutState extends State<MobileLayout> {
       i++;
     }
     return '${d.toStringAsFixed(1)} ${suffixes[i]}';
+  }
+
+  AudioVersion? _displayVersionForSong(
+    Song song,
+    AudioPlayerProvider audioProvider,
+  ) {
+    final playingVersion = audioProvider.playingVersion;
+    if (audioProvider.playingSong?.id == song.id && playingVersion != null) {
+      return playingVersion;
+    }
+    for (final version in song.versions) {
+      if (version.isPrimary) {
+        return version;
+      }
+    }
+    return song.versions.isNotEmpty ? song.versions.first : null;
+  }
+
+  Color _qualityColor(AudioVersion? version, AppThemeConfig cfg) {
+    if (version == null) {
+      return cfg.textSub;
+    }
+    final format = version.format?.toLowerCase() ?? '';
+    final bitrateKbps = version.bitrate == null
+        ? null
+        : (version.bitrate! / 1000).round();
+    final isLossless =
+        format == 'flac' ||
+        format == 'wav' ||
+        format == 'alac' ||
+        format == 'ape';
+    final isHiRes =
+        (version.bitDepth != null && version.bitDepth! > 16) ||
+        (version.sampleRate != null && version.sampleRate! >= 48000);
+
+    if (isLossless || isHiRes || (bitrateKbps != null && bitrateKbps >= 320)) {
+      return const Color(0xFF10B981);
+    }
+    if (bitrateKbps != null && bitrateKbps < 192) {
+      return Colors.redAccent;
+    }
+    if (bitrateKbps != null && bitrateKbps < 256) {
+      return const Color(0xFFF59E0B);
+    }
+    return const Color(0xFF3B82F6);
   }
 
   Future<bool> _confirmDeleteSong(BuildContext context, Song song) async {
@@ -1045,6 +1091,7 @@ class _MobileLayoutState extends State<MobileLayout> {
     LibraryProvider libraryProvider,
     AudioPlayerProvider audioProvider,
     AppThemeConfig cfg,
+    VoidCallback? openLyricManager,
   ) {
     if (activeTab == 'versions') {
       return Column(
@@ -1364,18 +1411,21 @@ class _MobileLayoutState extends State<MobileLayout> {
     }
 
     if (activeTab == 'lyrics') {
-      return SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-        child: Align(
-          alignment: Alignment.topCenter,
-          child: Text(
-            song.lyrics != null && song.lyrics!.trim().isNotEmpty
-                ? song.lyrics!
-                : '暂无歌词',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: cfg.textMain, height: 1.6, fontSize: 12),
-          ),
-        ),
+      return LyricsDisplayPanel(
+        song: song,
+        audioVersion: _displayVersionForSong(song, audioProvider),
+        cfg: cfg,
+        compact: true,
+        onOpenManager: openLyricManager,
+      );
+    }
+
+    if (activeTab == 'lyric_manager') {
+      return LyricsPanel(
+        song: song,
+        audioVersion: _displayVersionForSong(song, audioProvider),
+        cfg: cfg,
+        compact: true,
       );
     }
 
@@ -1815,6 +1865,7 @@ class _MobileLayoutState extends State<MobileLayout> {
                               specsText = specs.join('/');
                             }
                           }
+                          final qualityColor = _qualityColor(primary, cfg);
 
                           return Padding(
                             padding: const EdgeInsets.only(bottom: 6),
@@ -1919,7 +1970,8 @@ class _MobileLayoutState extends State<MobileLayout> {
                                                       vertical: 1,
                                                     ),
                                                 decoration: BoxDecoration(
-                                                  color: cfg.border,
+                                                  color: qualityColor
+                                                      .withValues(alpha: 0.12),
                                                   borderRadius:
                                                       BorderRadius.circular(4),
                                                 ),
@@ -1927,7 +1979,8 @@ class _MobileLayoutState extends State<MobileLayout> {
                                                   specsText,
                                                   style: TextStyle(
                                                     fontSize: 9,
-                                                    color: cfg.textMain,
+                                                    color: qualityColor,
+                                                    fontWeight: FontWeight.w700,
                                                   ),
                                                 ),
                                               ),
@@ -2202,7 +2255,7 @@ class _SongDetailSheetBody extends StatefulWidget {
 }
 
 class _SongDetailSheetBodyState extends State<_SongDetailSheetBody> {
-  String activeTab = 'versions';
+  String activeTab = 'lyrics';
   bool showVolumeSlider = false;
   late TextEditingController titleController;
   late TextEditingController artistController;
@@ -2424,76 +2477,6 @@ class _SongDetailSheetBodyState extends State<_SongDetailSheetBody> {
                         child: InkWell(
                           onTap: () {
                             setState(() {
-                              activeTab = 'versions';
-                            });
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(vertical: 10),
-                            decoration: BoxDecoration(
-                              border: Border(
-                                bottom: BorderSide(
-                                  color: activeTab == 'versions'
-                                      ? cfg.accent
-                                      : Colors.transparent,
-                                  width: 2,
-                                ),
-                              ),
-                            ),
-                            child: Text(
-                              '音频源 (${song.versions.length})',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: activeTab == 'versions'
-                                    ? FontWeight.bold
-                                    : FontWeight.normal,
-                                color: activeTab == 'versions'
-                                    ? cfg.textMain
-                                    : cfg.textSub,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      Expanded(
-                        child: InkWell(
-                          onTap: () {
-                            setState(() {
-                              activeTab = 'tags';
-                            });
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(vertical: 10),
-                            decoration: BoxDecoration(
-                              border: Border(
-                                bottom: BorderSide(
-                                  color: activeTab == 'tags'
-                                      ? cfg.accent
-                                      : Colors.transparent,
-                                  width: 2,
-                                ),
-                              ),
-                            ),
-                            child: Text(
-                              '关联标签 (${song.tags.length})',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: activeTab == 'tags'
-                                    ? FontWeight.bold
-                                    : FontWeight.normal,
-                                color: activeTab == 'tags'
-                                    ? cfg.textMain
-                                    : cfg.textSub,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      Expanded(
-                        child: InkWell(
-                          onTap: () {
-                            setState(() {
                               activeTab = 'lyrics';
                             });
                           },
@@ -2525,6 +2508,111 @@ class _SongDetailSheetBodyState extends State<_SongDetailSheetBody> {
                           ),
                         ),
                       ),
+                      Expanded(
+                        child: InkWell(
+                          onTap: () {
+                            setState(() {
+                              activeTab = 'lyric_manager';
+                            });
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                            decoration: BoxDecoration(
+                              border: Border(
+                                bottom: BorderSide(
+                                  color: activeTab == 'lyric_manager'
+                                      ? cfg.accent
+                                      : Colors.transparent,
+                                  width: 2,
+                                ),
+                              ),
+                            ),
+                            child: Text(
+                              '歌词管理',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: activeTab == 'lyric_manager'
+                                    ? FontWeight.bold
+                                    : FontWeight.normal,
+                                color: activeTab == 'lyric_manager'
+                                    ? cfg.textMain
+                                    : cfg.textSub,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: InkWell(
+                          onTap: () {
+                            setState(() {
+                              activeTab = 'tags';
+                            });
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                            decoration: BoxDecoration(
+                              border: Border(
+                                bottom: BorderSide(
+                                  color: activeTab == 'tags'
+                                      ? cfg.accent
+                                      : Colors.transparent,
+                                  width: 2,
+                                ),
+                              ),
+                            ),
+                            child: Text(
+                              '关联标签 (${song.tags.length})',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: activeTab == 'tags'
+                                    ? FontWeight.bold
+                                    : FontWeight.normal,
+                                color: activeTab == 'tags'
+                                    ? cfg.textMain
+                                    : cfg.textSub,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: InkWell(
+                          onTap: () {
+                            setState(() {
+                              activeTab = 'versions';
+                            });
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                            decoration: BoxDecoration(
+                              border: Border(
+                                bottom: BorderSide(
+                                  color: activeTab == 'versions'
+                                      ? cfg.accent
+                                      : Colors.transparent,
+                                  width: 2,
+                                ),
+                              ),
+                            ),
+                            child: Text(
+                              '音频源 (${song.versions.length})',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: activeTab == 'versions'
+                                    ? FontWeight.bold
+                                    : FontWeight.normal,
+                                color: activeTab == 'versions'
+                                    ? cfg.textMain
+                                    : cfg.textSub,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                   Divider(height: 1, color: cfg.border),
@@ -2538,6 +2626,11 @@ class _SongDetailSheetBodyState extends State<_SongDetailSheetBody> {
                       libraryProvider,
                       audioProvider,
                       cfg,
+                      () {
+                        setState(() {
+                          activeTab = 'lyric_manager';
+                        });
+                      },
                     ),
                   ),
                 ],

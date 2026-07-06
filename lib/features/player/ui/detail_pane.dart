@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:aetheria/core/providers/audio_player_provider.dart';
 import 'package:aetheria/core/providers/library_provider.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
+import 'package:aetheria/features/player/ui/lyrics_panel.dart';
 import 'package:aetheria/src/rust/models/song.dart';
 import 'package:aetheria/src/rust/api/music.dart' as music;
 import 'package:aetheria/services/native_audio_helper.dart';
@@ -398,12 +399,19 @@ class DetailPane extends StatelessWidget {
               ],
               const SizedBox(height: 16),
 
-              // Tabs (Versions, Tags, Lyrics)
+              // Tabs (Lyrics, Tags, Versions)
               Row(
                 children: [
-                  _buildTab(context, '音源版本', 'versions', audioProvider, cfg),
+                  _buildTab(context, '滚动歌词', 'lyrics', audioProvider, cfg),
+                  _buildTab(
+                    context,
+                    '歌词管理',
+                    'lyric_manager',
+                    audioProvider,
+                    cfg,
+                  ),
                   _buildTab(context, '标签管理', 'tags', audioProvider, cfg),
-                  _buildTab(context, '歌词', 'lyrics', audioProvider, cfg),
+                  _buildTab(context, '音源版本', 'versions', audioProvider, cfg),
                 ],
               ),
               Divider(height: 1, color: cfg.border),
@@ -468,6 +476,22 @@ class DetailPane extends StatelessWidget {
     LibraryProvider libraryProvider,
     AppThemeConfig cfg,
   ) {
+    if (audioProvider.activeTab == 'lyrics') {
+      return LyricsDisplayPanel(
+        song: song,
+        audioVersion: _displayVersionForSong(song, audioProvider),
+        cfg: cfg,
+      );
+    }
+
+    if (audioProvider.activeTab == 'lyric_manager') {
+      return LyricsPanel(
+        song: song,
+        audioVersion: _displayVersionForSong(song, audioProvider),
+        cfg: cfg,
+      );
+    }
+
     if (audioProvider.activeTab == 'versions') {
       return Column(
         children: [
@@ -805,22 +829,6 @@ class DetailPane extends StatelessWidget {
             ),
           );
         },
-      );
-    }
-
-    if (audioProvider.activeTab == 'lyrics') {
-      return SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-        child: Text(
-          song.lyrics ?? '暂无歌词',
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            color: cfg.textMain,
-            height: 1.8,
-            fontSize: 13,
-            fontFamily: 'Outfit',
-          ),
-        ),
       );
     }
 

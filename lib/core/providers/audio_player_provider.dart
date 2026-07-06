@@ -54,7 +54,7 @@ class AudioPlayerProvider extends ChangeNotifier {
   AudioOutputInfo? audioOutputInfo;
 
   bool isDetailOpen = false;
-  String activeTab = 'versions';
+  String activeTab = 'lyrics';
 
   String _cachedLibraryPath = '';
   int? _cachedAudioServerPort;

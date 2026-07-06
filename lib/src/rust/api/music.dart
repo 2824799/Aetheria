@@ -9,7 +9,7 @@ import '../models/playlist.dart';
 import '../models/song.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `estimate_duration_from_bitrate`, `estimate_duration_with_symphonia`, `is_raw_aac_path`, `refresh_audio_file_metadata_impl`, `reliable_duration`, `scan_directory`
+// These functions are ignored because they are not marked as `pub`: `absolute_audio_path_from_relative`, `copy_sidecar_lyrics`, `embedded_lyrics_from_audio`, `ensure_version_belongs_to_song`, `estimate_duration_from_bitrate`, `estimate_duration_with_symphonia`, `explorer_style_compare`, `is_raw_aac_path`, `read_text_file_if_exists`, `refresh_audio_file_metadata_impl`, `reliable_duration`, `remove_sidecar_lyrics`, `saved_lyric_from_row`, `scan_directory`, `selected_lyric_query`, `sort_songs_like_explorer`
 
 bool isLibraryInitialized() =>
     RustLib.instance.api.crateApiMusicIsLibraryInitialized();
@@ -70,6 +70,63 @@ Future<void> updateSongMetadata({
   title: title,
   artist: artist,
 );
+
+Future<SavedLyric?> getSelectedLyric({
+  required String songId,
+  String? audioVersionId,
+}) => RustLib.instance.api.crateApiMusicGetSelectedLyric(
+  songId: songId,
+  audioVersionId: audioVersionId,
+);
+
+Future<List<SavedLyric>> getLyricsForSong({required String songId}) =>
+    RustLib.instance.api.crateApiMusicGetLyricsForSong(songId: songId);
+
+Future<List<LocalLyricCandidate>> getLocalLyricCandidates({
+  required String songId,
+  String? audioVersionId,
+}) => RustLib.instance.api.crateApiMusicGetLocalLyricCandidates(
+  songId: songId,
+  audioVersionId: audioVersionId,
+);
+
+Future<SavedLyric> saveLyric({
+  required String songId,
+  String? audioVersionId,
+  required String source,
+  String? sourceId,
+  required String title,
+  String? artist,
+  required String content,
+  String? translation,
+  String? romanized,
+  required int offsetMs,
+}) => RustLib.instance.api.crateApiMusicSaveLyric(
+  songId: songId,
+  audioVersionId: audioVersionId,
+  source: source,
+  sourceId: sourceId,
+  title: title,
+  artist: artist,
+  content: content,
+  translation: translation,
+  romanized: romanized,
+  offsetMs: offsetMs,
+);
+
+Future<SavedLyric> selectLyric({required String lyricId}) =>
+    RustLib.instance.api.crateApiMusicSelectLyric(lyricId: lyricId);
+
+Future<SavedLyric> updateLyricOffset({
+  required String lyricId,
+  required int offsetMs,
+}) => RustLib.instance.api.crateApiMusicUpdateLyricOffset(
+  lyricId: lyricId,
+  offsetMs: offsetMs,
+);
+
+Future<void> deleteLyric({required String lyricId}) =>
+    RustLib.instance.api.crateApiMusicDeleteLyric(lyricId: lyricId);
 
 Future<void> deleteSong({required String songId}) =>
     RustLib.instance.api.crateApiMusicDeleteSong(songId: songId);

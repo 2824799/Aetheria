@@ -11,4 +11,4 @@ pub mod playlist;
 pub mod song;
 
 pub use playlist::Playlist;
-pub use song::{AudioVersion, PreviewInfo, Song, Tag};
+pub use song::{AudioVersion, LocalLyricCandidate, PreviewInfo, SavedLyric, Song, Tag};

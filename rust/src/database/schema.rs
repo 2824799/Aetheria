@@ -70,7 +70,30 @@ pub fn init_db() -> Result<()> {
         [],
     )?;
 
-    // 5. 传统歌单表
+    // 5. 歌词表（可绑定到歌曲，优先绑定到具体音源版本）
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS lyrics (
+            id TEXT PRIMARY KEY,
+            song_id TEXT NOT NULL,
+            audio_version_id TEXT,
+            source TEXT NOT NULL,
+            source_id TEXT,
+            title TEXT NOT NULL,
+            artist TEXT,
+            content TEXT NOT NULL,
+            translation TEXT,
+            romanized TEXT,
+            offset_ms INTEGER DEFAULT 0,
+            is_selected INTEGER DEFAULT 1,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (song_id) REFERENCES songs(id) ON DELETE CASCADE,
+            FOREIGN KEY (audio_version_id) REFERENCES audio_files(id) ON DELETE CASCADE
+        );",
+        [],
+    )?;
+
+    // 6. 传统歌单表
     conn.execute(
         "CREATE TABLE IF NOT EXISTS playlists (
             id TEXT PRIMARY KEY,
@@ -81,7 +104,7 @@ pub fn init_db() -> Result<()> {
         [],
     )?;
 
-    // 6. 歌单与歌曲关联表
+    // 7. 歌单与歌曲关联表
     conn.execute(
         "CREATE TABLE IF NOT EXISTS playlist_songs (
             playlist_id TEXT NOT NULL,
@@ -105,6 +128,10 @@ pub fn init_db() -> Result<()> {
     )?;
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_song_tags_tag ON song_tags(tag_id);",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_lyrics_song_version ON lyrics(song_id, audio_version_id, is_selected);",
         [],
     )?;
 

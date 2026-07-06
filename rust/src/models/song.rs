@@ -34,6 +34,32 @@ pub struct AudioVersion {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct SavedLyric {
+    pub id: String,
+    pub song_id: String,
+    pub audio_version_id: Option<String>,
+    pub source: String,
+    pub source_id: Option<String>,
+    pub title: String,
+    pub artist: Option<String>,
+    pub content: String,
+    pub translation: Option<String>,
+    pub romanized: Option<String>,
+    pub offset_ms: i32,
+    pub is_selected: bool,
+    pub updated_at: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct LocalLyricCandidate {
+    pub source: String,
+    pub source_id: Option<String>,
+    pub title: String,
+    pub artist: Option<String>,
+    pub content: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Tag {
     pub id: i64,
     pub name: String,

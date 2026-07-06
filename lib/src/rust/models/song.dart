@@ -81,6 +81,41 @@ class AudioVersion {
           metadataScanned == other.metadataScanned;
 }
 
+class LocalLyricCandidate {
+  final String source;
+  final String? sourceId;
+  final String title;
+  final String? artist;
+  final String content;
+
+  const LocalLyricCandidate({
+    required this.source,
+    this.sourceId,
+    required this.title,
+    this.artist,
+    required this.content,
+  });
+
+  @override
+  int get hashCode =>
+      source.hashCode ^
+      sourceId.hashCode ^
+      title.hashCode ^
+      artist.hashCode ^
+      content.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is LocalLyricCandidate &&
+          runtimeType == other.runtimeType &&
+          source == other.source &&
+          sourceId == other.sourceId &&
+          title == other.title &&
+          artist == other.artist &&
+          content == other.content;
+}
+
 class PreviewInfo {
   final String filepath;
   final String filename;
@@ -107,6 +142,73 @@ class PreviewInfo {
           filename == other.filename &&
           title == other.title &&
           artist == other.artist;
+}
+
+class SavedLyric {
+  final String id;
+  final String songId;
+  final String? audioVersionId;
+  final String source;
+  final String? sourceId;
+  final String title;
+  final String? artist;
+  final String content;
+  final String? translation;
+  final String? romanized;
+  final int offsetMs;
+  final bool isSelected;
+  final String updatedAt;
+
+  const SavedLyric({
+    required this.id,
+    required this.songId,
+    this.audioVersionId,
+    required this.source,
+    this.sourceId,
+    required this.title,
+    this.artist,
+    required this.content,
+    this.translation,
+    this.romanized,
+    required this.offsetMs,
+    required this.isSelected,
+    required this.updatedAt,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      songId.hashCode ^
+      audioVersionId.hashCode ^
+      source.hashCode ^
+      sourceId.hashCode ^
+      title.hashCode ^
+      artist.hashCode ^
+      content.hashCode ^
+      translation.hashCode ^
+      romanized.hashCode ^
+      offsetMs.hashCode ^
+      isSelected.hashCode ^
+      updatedAt.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is SavedLyric &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          songId == other.songId &&
+          audioVersionId == other.audioVersionId &&
+          source == other.source &&
+          sourceId == other.sourceId &&
+          title == other.title &&
+          artist == other.artist &&
+          content == other.content &&
+          translation == other.translation &&
+          romanized == other.romanized &&
+          offsetMs == other.offsetMs &&
+          isSelected == other.isSelected &&
+          updatedAt == other.updatedAt;
 }
 
 class Song {
