@@ -262,6 +262,13 @@ pub fn initialize_library_path(path: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Flush committed WAL pages before sync transfers database.db by itself.
+pub fn checkpoint_library_database() -> Result<(), String> {
+    let conn = establish_connection().map_err(|e| e.to_string())?;
+    conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+        .map_err(|e| e.to_string())
+}
+
 pub fn get_songs() -> Result<Vec<Song>, String> {
     let conn = establish_connection().map_err(|e| e.to_string())?;
 

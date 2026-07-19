@@ -17,6 +17,10 @@ bool isLibraryInitialized() =>
 Future<void> initializeLibraryPath({required String path}) =>
     RustLib.instance.api.crateApiMusicInitializeLibraryPath(path: path);
 
+/// Flush committed WAL pages before sync transfers database.db by itself.
+Future<void> checkpointLibraryDatabase() =>
+    RustLib.instance.api.crateApiMusicCheckpointLibraryDatabase();
+
 Future<List<Song>> getSongs() => RustLib.instance.api.crateApiMusicGetSongs();
 
 Future<List<Tag>> getTags() => RustLib.instance.api.crateApiMusicGetTags();

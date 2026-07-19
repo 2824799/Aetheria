@@ -73,17 +73,31 @@ class _RemoteFileInfo {
   }
 }
 
+class _CachedFileHash {
+  const _CachedFileHash({
+    required this.size,
+    required this.modifiedMs,
+    required this.md5,
+  });
+
+  final int size;
+  final int modifiedMs;
+  final String md5;
+}
+
 class SyncProvider extends ChangeNotifier {
   static const int _discoveryPort = 43871;
   static const String _announceType = 'aetheria-sync-announcement';
   static const String _deviceIdKey = 'aetheria-sync-device-id';
   static const Duration _deviceTtl = Duration(seconds: 45);
   static const Duration _requestTimeout = Duration(seconds: 90);
-  static const Duration _sessionTtl = Duration(minutes: 5);
+  static const Duration _downloadTimeout = Duration(minutes: 3);
+  static const Duration _sessionTtl = Duration(minutes: 30);
 
   final Map<String, SyncDevice> _devices = {};
   final Map<String, Completer<bool>> _pendingRequestCompleters = {};
   final Map<String, _SyncSession> _sessions = {};
+  final Map<String, _CachedFileHash> _fileHashCache = {};
   final HttpClient _client = HttpClient();
 
   LibraryProvider? _libraryProvider;
@@ -104,6 +118,8 @@ class SyncProvider extends ChangeNotifier {
 
   SyncProvider() {
     _client.findProxy = (_) => 'DIRECT';
+    _client.connectionTimeout = const Duration(seconds: 15);
+    _client.idleTimeout = const Duration(seconds: 30);
   }
 
   List<SyncDevice> get devices {
@@ -252,6 +268,12 @@ class SyncProvider extends ChangeNotifier {
       final remoteDatabase = manifest['database'] is Map<String, dynamic>
           ? manifest['database'] as Map<String, dynamic>
           : const <String, dynamic>{};
+      final remoteDatabaseSize = (remoteDatabase['size'] as num?)?.toInt();
+      if (remoteDatabaseSize != null &&
+          remoteDatabaseSize > 0 &&
+          await tempDb.length() != remoteDatabaseSize) {
+        throw Exception('数据库大小校验失败');
+      }
       final remoteDatabaseMd5 = remoteDatabase['md5']?.toString();
       if (remoteDatabaseMd5 != null && remoteDatabaseMd5.isNotEmpty) {
         final downloadedDbHash = await _fileMd5(tempDb);
@@ -282,6 +304,9 @@ class SyncProvider extends ChangeNotifier {
           destination,
           token,
         );
+        if (await destination.length() != file.size) {
+          throw Exception('文件大小校验失败: ${file.path}');
+        }
         final remoteMd5 = file.md5;
         if (remoteMd5 != null && remoteMd5.isNotEmpty) {
           final downloadedHash = await _fileMd5(destination);
@@ -294,6 +319,7 @@ class SyncProvider extends ChangeNotifier {
 
       updateProgress('正在暂停播放并准备覆盖本地库...');
       await audioProvider.stopForLibrarySync();
+      await music.checkpointLibraryDatabase();
       backupDir = await _createBackupDir(libraryProvider.libraryPath);
       await _applyMirrorSync(
         libraryProvider.libraryPath,
@@ -387,7 +413,7 @@ class SyncProvider extends ChangeNotifier {
       Uri.http(device.endpoint, '/sync/manifest'),
     );
     request.headers.set('X-Aetheria-Sync-Token', token);
-    final response = await request.close();
+    final response = await request.close().timeout(_requestTimeout);
     final body = await utf8.decoder.bind(response).join();
     if (response.statusCode != HttpStatus.ok) {
       throw Exception('读取远端清单失败: $body');
@@ -398,14 +424,24 @@ class SyncProvider extends ChangeNotifier {
   Future<void> _downloadToFile(Uri uri, File destination, String token) async {
     final request = await _client.getUrl(uri);
     request.headers.set('X-Aetheria-Sync-Token', token);
-    final response = await request.close();
+    final response = await request.close().timeout(_requestTimeout);
     if (response.statusCode != HttpStatus.ok) {
       final body = await utf8.decoder.bind(response).join();
       throw Exception('下载失败: $body');
     }
     await destination.parent.create(recursive: true);
     final sink = destination.openWrite();
-    await response.pipe(sink);
+    try {
+      await sink.addStream(response.timeout(_downloadTimeout));
+      await sink.flush();
+    } catch (_) {
+      if (await destination.exists()) {
+        await destination.delete();
+      }
+      rethrow;
+    } finally {
+      await sink.close();
+    }
   }
 
   Future<_FileSyncPlan> _buildFileSyncPlan(
@@ -479,36 +515,66 @@ class SyncProvider extends ChangeNotifier {
       ...plan.removeOrReplace,
       ...localFiles.where((path) => !sourcePaths.contains(path)),
     };
-
-    for (final relPath in pathsToRemove) {
-      final localPath = _resolveLibraryRelativePath(libraryPath, relPath);
-      final localFile = File(localPath);
-      if (!await localFile.exists()) {
-        continue;
+    final movedToBackup = <String>[];
+    final installedFiles = <String>[];
+    try {
+      for (final relPath in pathsToRemove) {
+        final localPath = _resolveLibraryRelativePath(libraryPath, relPath);
+        final localFile = File(localPath);
+        if (!await localFile.exists()) {
+          continue;
+        }
+        final backupPath = _resolveLibraryRelativePath(backupDir.path, relPath);
+        await File(backupPath).parent.create(recursive: true);
+        await _moveFile(localFile, File(backupPath));
+        movedToBackup.add(relPath);
       }
-      final backupPath = _resolveLibraryRelativePath(backupDir.path, relPath);
-      await File(backupPath).parent.create(recursive: true);
-      await _moveFile(localFile, File(backupPath));
+
+      for (final remote in plan.remoteFiles) {
+        final destination = File(
+          _resolveLibraryRelativePath(libraryPath, remote.path),
+        );
+        if (await destination.exists()) {
+          continue;
+        }
+        final tempFile = File(
+          _resolveLibraryRelativePath(tempDir.path, remote.path),
+        );
+        if (!await tempFile.exists()) {
+          throw Exception('同步临时文件缺失: ${remote.path}');
+        }
+        await destination.parent.create(recursive: true);
+        await tempFile.copy(destination.path);
+        installedFiles.add(remote.path);
+      }
+
+      await _removeDatabaseSidecars(dbFile);
+      await tempDb.copy(dbFile.path);
+    } catch (_) {
+      for (final relPath in installedFiles.reversed) {
+        final file = File(_resolveLibraryRelativePath(libraryPath, relPath));
+        if (await file.exists()) {
+          await file.delete();
+        }
+      }
+      for (final relPath in movedToBackup.reversed) {
+        final backupFile = File(
+          _resolveLibraryRelativePath(backupDir.path, relPath),
+        );
+        if (await backupFile.exists()) {
+          final localFile = File(
+            _resolveLibraryRelativePath(libraryPath, relPath),
+          );
+          await _moveFile(backupFile, localFile);
+        }
+      }
+      final backupDb = File(_joinPath(backupDir.path, ['database.db']));
+      if (await backupDb.exists()) {
+        await _removeDatabaseSidecars(dbFile);
+        await backupDb.copy(dbFile.path);
+      }
+      rethrow;
     }
-
-    for (final remote in plan.remoteFiles) {
-      final destination = File(
-        _resolveLibraryRelativePath(libraryPath, remote.path),
-      );
-      if (await destination.exists()) {
-        continue;
-      }
-      final tempFile = File(
-        _resolveLibraryRelativePath(tempDir.path, remote.path),
-      );
-      if (!await tempFile.exists()) {
-        throw Exception('同步临时文件缺失: ${remote.path}');
-      }
-      await destination.parent.create(recursive: true);
-      await tempFile.copy(destination.path);
-    }
-
-    await tempDb.copy(dbFile.path);
   }
 
   Future<Directory> _createTempDir(String libraryPath) {
@@ -517,11 +583,25 @@ class SyncProvider extends ChangeNotifier {
   }
 
   Future<Directory> _createBackupDir(String libraryPath) async {
+    final root = Directory(_joinPath(libraryPath, ['sync_backups']));
+    await root.create(recursive: true);
+    try {
+      final existing = <Directory>[];
+      await for (final entity in root.list(followLinks: false)) {
+        if (entity is Directory) {
+          existing.add(entity);
+        }
+      }
+      existing.sort((a, b) => b.path.compareTo(a.path));
+      for (final old in existing.skip(4)) {
+        unawaited(old.delete(recursive: true));
+      }
+    } catch (_) {}
     final stamp = DateTime.now()
         .toIso8601String()
         .replaceAll(':', '')
         .replaceAll('.', '-');
-    final dir = Directory(_joinPath(libraryPath, ['sync_backups', stamp]));
+    final dir = Directory(_joinPath(root.path, [stamp]));
     await dir.create(recursive: true);
     return dir;
   }
@@ -628,6 +708,8 @@ class SyncProvider extends ChangeNotifier {
       return;
     }
 
+    await music.checkpointLibraryDatabase();
+
     final dbFile = File(
       _joinPath(libraryProvider.libraryPath, ['database.db']),
     );
@@ -644,7 +726,11 @@ class SyncProvider extends ChangeNotifier {
         _resolveLibraryRelativePath(libraryProvider.libraryPath, relPath),
       );
       final stat = await file.stat();
-      files.add({'path': relPath, 'size': stat.size});
+      files.add({
+        'path': relPath,
+        'size': stat.size,
+        'md5': await _cachedFileMd5(file, stat),
+      });
     }
 
     request.response.headers.contentType = ContentType.json;
@@ -676,6 +762,7 @@ class SyncProvider extends ChangeNotifier {
       await request.response.close();
       return;
     }
+    await music.checkpointLibraryDatabase();
     final dbFile = File(
       _joinPath(libraryProvider.libraryPath, ['database.db']),
     );
@@ -731,6 +818,10 @@ class SyncProvider extends ChangeNotifier {
       _sessions.remove(token);
       return false;
     }
+    _sessions[token] = _SyncSession(
+      token: token,
+      expiresAt: DateTime.now().add(_sessionTtl),
+    );
     return true;
   }
 
@@ -885,6 +976,24 @@ class SyncProvider extends ChangeNotifier {
     return digest.toString();
   }
 
+  Future<String> _cachedFileMd5(File file, FileStat stat) async {
+    final normalized = _normalizePath(file.path);
+    final modifiedMs = stat.modified.millisecondsSinceEpoch;
+    final cached = _fileHashCache[normalized];
+    if (cached != null &&
+        cached.size == stat.size &&
+        cached.modifiedMs == modifiedMs) {
+      return cached.md5;
+    }
+    final hash = await _fileMd5(file);
+    _fileHashCache[normalized] = _CachedFileHash(
+      size: stat.size,
+      modifiedMs: modifiedMs,
+      md5: hash,
+    );
+    return hash;
+  }
+
   Future<void> _moveFile(File source, File destination) async {
     await destination.parent.create(recursive: true);
     try {
@@ -892,6 +1001,15 @@ class SyncProvider extends ChangeNotifier {
     } catch (_) {
       await source.copy(destination.path);
       await source.delete();
+    }
+  }
+
+  Future<void> _removeDatabaseSidecars(File database) async {
+    for (final suffix in const ['-wal', '-shm']) {
+      final sidecar = File('${database.path}$suffix');
+      if (await sidecar.exists()) {
+        await sidecar.delete();
+      }
     }
   }
 
@@ -929,8 +1047,12 @@ class SyncProvider extends ChangeNotifier {
   }
 
   String _newId() {
-    final random = Random.secure().nextInt(1 << 32).toRadixString(16);
-    return '${DateTime.now().microsecondsSinceEpoch.toRadixString(16)}-$random';
+    final random = Random.secure();
+    return List<String>.generate(
+      4,
+      (_) => random.nextInt(1 << 32).toRadixString(16).padLeft(8, '0'),
+      growable: false,
+    ).join();
   }
 
   @override

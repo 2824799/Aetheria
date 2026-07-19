@@ -1,6 +1,7 @@
 use rusqlite::{Connection, Result};
 use std::path::PathBuf;
 use std::sync::RwLock;
+use std::time::Duration;
 
 static LIBRARY_DIR: RwLock<Option<PathBuf>> = RwLock::new(None);
 
@@ -50,21 +51,13 @@ pub fn init_storage() -> std::io::Result<()> {
 // 建立 SQLite 连接
 pub fn establish_connection() -> Result<Connection> {
     let db_path = get_library_dir().join("database.db");
-
-    #[cfg(any(target_os = "android", target_os = "ios"))]
-    let conn = {
-        let db_url = format!("file://{}?nolock=1", db_path.display());
-        Connection::open_with_flags(
-            db_url,
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
-                | rusqlite::OpenFlags::SQLITE_OPEN_CREATE
-                | rusqlite::OpenFlags::SQLITE_OPEN_URI,
-        )?
-    };
-
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     let conn = Connection::open(db_path)?;
 
-    conn.execute("PRAGMA foreign_keys = ON;", [])?;
+    conn.busy_timeout(Duration::from_secs(8))?;
+    conn.execute_batch(
+        "PRAGMA foreign_keys = ON;
+         PRAGMA journal_mode = WAL;
+         PRAGMA synchronous = NORMAL;",
+    )?;
     Ok(conn)
 }
