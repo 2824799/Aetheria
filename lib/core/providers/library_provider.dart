@@ -4,6 +4,120 @@ import 'package:aetheria/src/rust/api/music.dart' as music;
 import 'package:aetheria/src/rust/models/song.dart';
 import 'package:aetheria/src/rust/models/playlist.dart';
 
+bool _isAsciiDigit(int codeUnit) => codeUnit >= 0x30 && codeUnit <= 0x39;
+
+/// Compares text using Windows Explorer-style natural ordering.
+///
+/// Numeric runs are compared by value, so "Track 2" precedes "Track 10".
+/// The implementation lives in Dart so every supported platform presents the
+/// same order instead of relying on platform-specific native comparators.
+int explorerStyleCompare(String left, String right) {
+  var leftIndex = 0;
+  var rightIndex = 0;
+  var numericFormattingOrder = 0;
+
+  while (leftIndex < left.length && rightIndex < right.length) {
+    final leftIsDigit = _isAsciiDigit(left.codeUnitAt(leftIndex));
+    final rightIsDigit = _isAsciiDigit(right.codeUnitAt(rightIndex));
+
+    if (leftIsDigit && rightIsDigit) {
+      final leftStart = leftIndex;
+      final rightStart = rightIndex;
+      while (leftIndex < left.length &&
+          _isAsciiDigit(left.codeUnitAt(leftIndex))) {
+        leftIndex += 1;
+      }
+      while (rightIndex < right.length &&
+          _isAsciiDigit(right.codeUnitAt(rightIndex))) {
+        rightIndex += 1;
+      }
+
+      var leftSignificantStart = leftStart;
+      var rightSignificantStart = rightStart;
+      while (leftSignificantStart < leftIndex - 1 &&
+          left.codeUnitAt(leftSignificantStart) == 0x30) {
+        leftSignificantStart += 1;
+      }
+      while (rightSignificantStart < rightIndex - 1 &&
+          right.codeUnitAt(rightSignificantStart) == 0x30) {
+        rightSignificantStart += 1;
+      }
+
+      final leftSignificantLength = leftIndex - leftSignificantStart;
+      final rightSignificantLength = rightIndex - rightSignificantStart;
+      final lengthOrder = leftSignificantLength.compareTo(
+        rightSignificantLength,
+      );
+      if (lengthOrder != 0) {
+        return lengthOrder;
+      }
+      for (var index = 0; index < leftSignificantLength; index++) {
+        final digitOrder = left
+            .codeUnitAt(leftSignificantStart + index)
+            .compareTo(right.codeUnitAt(rightSignificantStart + index));
+        if (digitOrder != 0) {
+          return digitOrder;
+        }
+      }
+
+      if (numericFormattingOrder == 0) {
+        numericFormattingOrder = (leftIndex - leftStart).compareTo(
+          rightIndex - rightStart,
+        );
+      }
+      continue;
+    }
+
+    if (leftIsDigit != rightIsDigit) {
+      return leftIsDigit ? -1 : 1;
+    }
+
+    final leftStart = leftIndex;
+    final rightStart = rightIndex;
+    while (leftIndex < left.length &&
+        !_isAsciiDigit(left.codeUnitAt(leftIndex))) {
+      leftIndex += 1;
+    }
+    while (rightIndex < right.length &&
+        !_isAsciiDigit(right.codeUnitAt(rightIndex))) {
+      rightIndex += 1;
+    }
+    final textOrder = left
+        .substring(leftStart, leftIndex)
+        .toLowerCase()
+        .compareTo(right.substring(rightStart, rightIndex).toLowerCase());
+    if (textOrder != 0) {
+      return textOrder;
+    }
+  }
+
+  final remainingOrder = (left.length - leftIndex).compareTo(
+    right.length - rightIndex,
+  );
+  if (remainingOrder != 0) {
+    return remainingOrder;
+  }
+  if (numericFormattingOrder != 0) {
+    return numericFormattingOrder;
+  }
+  return left.compareTo(right);
+}
+
+int _compareSongsLikeExplorer(Song left, Song right) {
+  final titleOrder = explorerStyleCompare(left.title, right.title);
+  if (titleOrder != 0) {
+    return titleOrder;
+  }
+  final artistOrder = explorerStyleCompare(
+    left.artist ?? '',
+    right.artist ?? '',
+  );
+  if (artistOrder != 0) {
+    return artistOrder;
+  }
+  return left.id.compareTo(right.id);
+}
+
 class LibraryProvider extends ChangeNotifier {
   List<Song> songs = [];
   List<Tag> tags = [];
@@ -504,7 +618,7 @@ class LibraryProvider extends ChangeNotifier {
   }
 
   List<Song> get displaySongs {
-    List<Song> list = songs;
+    var list = List<Song>.from(songs);
 
     // Filter by playlist
     if (activePlaylistId != null) {
@@ -550,6 +664,12 @@ class LibraryProvider extends ChangeNotifier {
 
         return true;
       }).toList();
+    }
+
+    // Playlist order is user-defined. Every other list uses one shared natural
+    // ordering so desktop and mobile never depend on their native platform.
+    if (activePlaylistId == null) {
+      list.sort(_compareSongsLikeExplorer);
     }
 
     return list;
