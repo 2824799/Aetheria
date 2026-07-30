@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'package:aetheria/core/providers/library_provider.dart';
-import 'package:aetheria/core/providers/ui_theme_provider.dart';
+import 'package:aetheria/core/theme/theme.dart';
 import 'package:aetheria/src/rust/models/song.dart';
 
 class SongCoverArt extends StatefulWidget {
@@ -13,7 +13,7 @@ class SongCoverArt extends StatefulWidget {
     required this.song,
     required this.cfg,
     required this.size,
-    this.borderRadius = 14,
+    this.borderRadius = AetherRadius.lg,
     this.iconSize = 44,
     this.shadow = true,
   });
@@ -98,15 +98,18 @@ class _SongCoverArtState extends State<SongCoverArt> {
       gradient: hasCover
           ? null
           : LinearGradient(
-              colors: [Colors.white.withValues(alpha: 0.06), cfg.border],
+              colors: [
+                cfg.textPrimary.withValues(alpha: 0.06),
+                cfg.borderSubtle,
+              ],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
-      border: Border.all(color: cfg.border),
+      border: Border.all(color: cfg.borderSubtle),
       boxShadow: widget.shadow
           ? [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.2),
+                color: cfg.textPrimary.withValues(alpha: 0.22),
                 blurRadius: 20,
                 offset: const Offset(0, 8),
               ),

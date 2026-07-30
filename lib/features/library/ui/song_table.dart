@@ -9,37 +9,18 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:aetheria/core/providers/audio_player_provider.dart';
 import 'package:aetheria/core/providers/library_provider.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
-import 'package:aetheria/core/utils/audio_quality.dart';
+import 'package:aetheria/core/widgets/aether_dialog.dart';
+import 'package:aetheria/core/widgets/aether_empty_state.dart';
+import 'package:aetheria/core/widgets/aether_icon_button.dart';
+import 'package:aetheria/core/widgets/aether_toast.dart';
+import 'package:aetheria/features/library/ui/song_table/song_columns.dart';
+import 'package:aetheria/features/library/ui/song_table/song_table_cells.dart';
 import 'package:aetheria/src/rust/models/playlist.dart';
 import 'package:aetheria/src/rust/models/song.dart';
 
-enum _SongColumnKey { title, artist, tags, versions, spec }
 
-extension on _SongColumnKey {
-  String get label => switch (this) {
-    _SongColumnKey.title => '歌曲名称',
-    _SongColumnKey.artist => '歌手',
-    _SongColumnKey.tags => '标签',
-    _SongColumnKey.versions => '版本数',
-    _SongColumnKey.spec => '默认音质',
-  };
-
-  double get defaultWidth => switch (this) {
-    _SongColumnKey.title => 280,
-    _SongColumnKey.artist => 200,
-    _SongColumnKey.tags => 240,
-    _SongColumnKey.versions => 92,
-    _SongColumnKey.spec => 170,
-  };
-
-  double get minWidth => switch (this) {
-    _SongColumnKey.title => 180,
-    _SongColumnKey.artist => 140,
-    _SongColumnKey.tags => 160,
-    _SongColumnKey.versions => 92,
-    _SongColumnKey.spec => 140,
-  };
-}
+/// Max interval between two primary taps to count as open/play double-tap.
+const Duration kSongTablePrimaryTapInterval = Duration(milliseconds: 260);
 
 class SongTable extends StatefulWidget {
   const SongTable({super.key});
@@ -59,12 +40,12 @@ class _SongTableState extends State<SongTable> {
 
   final ScrollController _verticalController = ScrollController();
   final Set<String> _selectedSongIds = <String>{};
-  final Map<_SongColumnKey, double> _columnWidths = {
-    for (final column in _SongColumnKey.values) column: column.defaultWidth,
+  final Map<SongColumnKey, double> _columnWidths = {
+    for (final column in SongColumnKey.values) column: column.defaultWidth,
   };
 
-  List<_SongColumnKey> _columnOrder = List<_SongColumnKey>.from(
-    _SongColumnKey.values,
+  List<SongColumnKey> _columnOrder = List<SongColumnKey>.from(
+    SongColumnKey.values,
   );
   int _lastSelectedIndex = -1;
   Offset? _selectionOrigin;
@@ -77,6 +58,14 @@ class _SongTableState extends State<SongTable> {
   String? _lastPrimaryTapSongId;
   DateTime? _ignoreRowTapUntil;
   double _viewportWidth = 0;
+
+  SongTableCellBuilder get _cellBuilder => SongTableCellBuilder(
+        columnWidths: _columnWidths,
+        columnOrder: _columnOrder,
+        onResize: _resizeColumn,
+        onReorder: _reorderColumn,
+        headerHeight: _headerHeight,
+      );
 
   @override
   void initState() {
@@ -94,16 +83,16 @@ class _SongTableState extends State<SongTable> {
     final prefs = await SharedPreferences.getInstance();
     final savedOrder = prefs.getStringList(_columnOrderKey);
     if (savedOrder != null && savedOrder.isNotEmpty) {
-      final resolved = <_SongColumnKey>[];
+      final resolved = <SongColumnKey>[];
       for (final name in savedOrder) {
-        for (final column in _SongColumnKey.values) {
+        for (final column in SongColumnKey.values) {
           if (column.name == name && !resolved.contains(column)) {
             resolved.add(column);
             break;
           }
         }
       }
-      for (final column in _SongColumnKey.values) {
+      for (final column in SongColumnKey.values) {
         if (!resolved.contains(column)) {
           resolved.add(column);
         }
@@ -111,7 +100,7 @@ class _SongTableState extends State<SongTable> {
       _columnOrder = resolved;
     }
 
-    for (final column in _SongColumnKey.values) {
+    for (final column in SongColumnKey.values) {
       final stored = prefs.getDouble('$_columnWidthPrefix${column.name}');
       if (stored != null) {
         _columnWidths[column] = stored.clamp(column.minWidth, 600).toDouble();
@@ -206,7 +195,7 @@ class _SongTableState extends State<SongTable> {
     final isDoubleTap =
         _lastPrimaryTapSongId == song.id &&
         _lastPrimaryTapAt != null &&
-        now.difference(_lastPrimaryTapAt!) < const Duration(milliseconds: 260);
+        now.difference(_lastPrimaryTapAt!) < kSongTablePrimaryTapInterval;
 
     _lastPrimaryTapSongId = song.id;
     _lastPrimaryTapAt = now;
@@ -226,9 +215,11 @@ class _SongTableState extends State<SongTable> {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(
+      showAetherToast(
         context,
-      ).showSnackBar(SnackBar(content: Text(e.toString())));
+        message: e.toString(),
+        kind: AetherToastKind.error,
+      );
     }
   }
 
@@ -262,12 +253,12 @@ class _SongTableState extends State<SongTable> {
         MediaQuery.of(context).size.width - position.dx,
         MediaQuery.of(context).size.height - position.dy,
       ),
-      color: cfg.bgPanel.withOpacity(0.98),
-      surfaceTintColor: Colors.transparent,
-      shadowColor: Colors.black.withOpacity(0.28),
+      color: cfg.bgPanel.withValues(alpha: 0.98),
+      surfaceTintColor: cfg.bgPopover.withValues(alpha: 0),
+      shadowColor: cfg.scrim.withValues(alpha: 0.28),
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: cfg.border.withOpacity(0.9)),
+        borderRadius: BorderRadius.circular(AetherRadius.lg),
+        side: BorderSide(color: cfg.borderSubtle.withValues(alpha: 0.9)),
       ),
       items: _buildContextMenuItems(provider, cfg),
     );
@@ -293,16 +284,20 @@ class _SongTableState extends State<SongTable> {
         if (!context.mounted) {
           return;
         }
-        ScaffoldMessenger.of(
+        showAetherToast(
           context,
-        ).showSnackBar(SnackBar(content: Text('已成功添加至歌单: ${playlist.name}')));
+          message: '已成功添加至歌单: ${playlist.name}',
+          kind: AetherToastKind.success,
+        );
       } catch (e) {
         if (!context.mounted) {
           return;
         }
-        ScaffoldMessenger.of(
+        showAetherToast(
           context,
-        ).showSnackBar(SnackBar(content: Text('添加失败: $e')));
+          message: '添加失败: $e',
+          kind: AetherToastKind.error,
+        );
       }
       return;
     }
@@ -322,7 +317,7 @@ class _SongTableState extends State<SongTable> {
         Icons.delete_forever,
         '彻底删除歌曲',
         cfg,
-        color: Colors.redAccent,
+        color: cfg.danger,
       ),
     ];
 
@@ -333,7 +328,7 @@ class _SongTableState extends State<SongTable> {
           Icons.playlist_remove,
           '从当前歌单移除',
           cfg,
-          color: Colors.orangeAccent,
+          color: cfg.warning,
         ),
       );
     }
@@ -372,13 +367,13 @@ class _SongTableState extends State<SongTable> {
     AppThemeConfig cfg, {
     Color? color,
   }) {
-    final foreground = color ?? cfg.textMain;
+    final foreground = color ?? cfg.textPrimary;
     return PopupMenuItem<String>(
       value: value,
       height: 36,
       child: Row(
         children: [
-          Icon(icon, size: 16, color: foreground.withOpacity(0.95)),
+          Icon(icon, size: 16, color: foreground.withValues(alpha: 0.95)),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
@@ -387,7 +382,7 @@ class _SongTableState extends State<SongTable> {
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: foreground,
-                fontSize: 12.5,
+                fontSize: AetherType.body,
                 fontWeight: FontWeight.w500,
               ),
             ),
@@ -447,55 +442,19 @@ class _SongTableState extends State<SongTable> {
     LibraryProvider provider,
   ) async {
     final summary = _deleteSongSummary(songIds, provider);
-    final firstConfirm = await showDialog<bool>(
+    final confirmed = await showAetherConfirmDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('删除歌曲？'),
-        content: Text('即将从音乐库中删除 $summary，并同时删除本地物理音频文件。'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('取消'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.redAccent,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('继续删除'),
-          ),
-        ],
-      ),
+      title: '删除歌曲？',
+      message: '即将从音乐库中删除 $summary，并同时删除本地物理音频文件。',
+      confirmLabel: '继续删除',
+      cancelLabel: '取消',
+      dangerous: true,
+      doubleConfirm: true,
+      doubleConfirmMessage: '最后确认：$summary 的数据库记录和本地音频文件都会被删除，此操作不可撤销。',
+      doubleConfirmLabel: '彻底删除',
     );
 
-    if (firstConfirm != true || !context.mounted) {
-      return;
-    }
-
-    final finalConfirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('再次确认彻底删除'),
-        content: Text('最后确认：$summary 的数据库记录和本地音频文件都会被删除，此操作不可撤销。'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('取消'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.redAccent,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('彻底删除'),
-          ),
-        ],
-      ),
-    );
-
-    if (finalConfirm != true || !context.mounted) {
+    if (!confirmed || !context.mounted) {
       return;
     }
 
@@ -509,18 +468,24 @@ class _SongTableState extends State<SongTable> {
       setState(() {
         _selectedSongIds.clear();
       });
-      ScaffoldMessenger.of(
+      showAetherToast(
         context,
-      ).showSnackBar(const SnackBar(content: Text('删除歌曲成功')));
+        message: '删除歌曲成功',
+        kind: AetherToastKind.success,
+      );
     } catch (e) {
       if (!context.mounted) {
         return;
       }
-      ScaffoldMessenger.of(
+      showAetherToast(
         context,
-      ).showSnackBar(SnackBar(content: Text('删除失败: $e')));
+        message: '删除失败: $e',
+        kind: AetherToastKind.error,
+      );
     }
   }
+
+
 
   void _handlePointerDown(PointerDownEvent event) {
     if (event.kind != PointerDeviceKind.mouse ||
@@ -602,7 +567,7 @@ class _SongTableState extends State<SongTable> {
     _lastSelectedIndex = lastIndex;
   }
 
-  void _resizeColumn(_SongColumnKey column, double delta) {
+  void _resizeColumn(SongColumnKey column, double delta) {
     final nextWidth = (_columnWidths[column] ?? column.defaultWidth) + delta;
     setState(() {
       _columnWidths[column] = nextWidth.clamp(column.minWidth, 600).toDouble();
@@ -610,11 +575,11 @@ class _SongTableState extends State<SongTable> {
     _saveColumnLayout();
   }
 
-  void _reorderColumn(_SongColumnKey dragged, _SongColumnKey target) {
+  void _reorderColumn(SongColumnKey dragged, SongColumnKey target) {
     if (dragged == target) {
       return;
     }
-    final currentOrder = List<_SongColumnKey>.from(_columnOrder);
+    final currentOrder = List<SongColumnKey>.from(_columnOrder);
     final from = currentOrder.indexOf(dragged);
     final to = currentOrder.indexOf(target);
     if (from == -1 || to == -1) {
@@ -640,13 +605,6 @@ class _SongTableState extends State<SongTable> {
     return math.max(availableWidth, contentWidth);
   }
 
-  Color _parseHexColor(String hex, Color defaultColor) {
-    final clean = hex.replaceAll('#', '');
-    if (clean.length == 6) {
-      return Color(int.parse('FF$clean', radix: 16));
-    }
-    return defaultColor;
-  }
 
   AudioVersion? _primaryVersionFor(Song song) {
     for (final version in song.versions) {
@@ -660,277 +618,6 @@ class _SongTableState extends State<SongTable> {
     return null;
   }
 
-  Widget _buildHeaderCell(_SongColumnKey column, AppThemeConfig cfg) {
-    final width = _columnWidths[column] ?? column.defaultWidth;
-    return SizedBox(
-      width: width,
-      height: _headerHeight,
-      child: DragTarget<_SongColumnKey>(
-        onWillAcceptWithDetails: (details) => details.data != column,
-        onAcceptWithDetails: (details) => _reorderColumn(details.data, column),
-        builder: (context, candidateData, rejectedData) {
-          final isDropTarget = candidateData.isNotEmpty;
-          return Container(
-            decoration: BoxDecoration(
-              color: isDropTarget
-                  ? cfg.bgHover.withOpacity(0.08)
-                  : Colors.transparent,
-              border: Border(
-                right: BorderSide(color: cfg.border.withOpacity(0.45)),
-              ),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Draggable<_SongColumnKey>(
-                    data: column,
-                    feedback: Material(
-                      color: Colors.transparent,
-                      child: Container(
-                        width: width,
-                        height: _headerHeight - 8,
-                        alignment: Alignment.centerLeft,
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        decoration: BoxDecoration(
-                          color: cfg.bgPanel.withOpacity(0.96),
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
-                            color: cfg.accent.withOpacity(0.55),
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.22),
-                              blurRadius: 18,
-                              offset: const Offset(0, 8),
-                            ),
-                          ],
-                        ),
-                        child: Text(
-                          column.label,
-                          style: TextStyle(
-                            color: cfg.textMain,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                    ),
-                    childWhenDragging: Opacity(
-                      opacity: 0.35,
-                      child: _buildHeaderLabel(column, cfg),
-                    ),
-                    child: _buildHeaderLabel(column, cfg),
-                  ),
-                ),
-                MouseRegion(
-                  cursor: SystemMouseCursors.resizeColumn,
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onHorizontalDragUpdate: (details) =>
-                        _resizeColumn(column, details.delta.dx),
-                    child: Container(
-                      width: 12,
-                      alignment: Alignment.center,
-                      child: Container(
-                        width: 2,
-                        height: 18,
-                        decoration: BoxDecoration(
-                          color: cfg.border.withOpacity(0.85),
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _buildHeaderLabel(_SongColumnKey column, AppThemeConfig cfg) {
-    final centered =
-        column == _SongColumnKey.versions || column == _SongColumnKey.spec;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      alignment: centered ? Alignment.center : Alignment.centerLeft,
-      child: Text(
-        column.label,
-        textAlign: centered ? TextAlign.center : TextAlign.left,
-        maxLines: 1,
-        softWrap: false,
-        overflow: TextOverflow.clip,
-        style: TextStyle(
-          color: cfg.textSub,
-          fontWeight: FontWeight.w700,
-          fontSize: 13,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCell(
-    _SongColumnKey column,
-    Song song,
-    AudioVersion? primaryVersion,
-    AppThemeConfig cfg,
-    bool isCurrentlyPlaying,
-    bool hasLyrics,
-  ) {
-    final width = _columnWidths[column] ?? column.defaultWidth;
-
-    switch (column) {
-      case _SongColumnKey.title:
-        return SizedBox(
-          width: width,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    song.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: isCurrentlyPlaying ? cfg.accent : cfg.textMain,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13,
-                    ),
-                  ),
-                ),
-                if (hasLyrics) ...[
-                  const SizedBox(width: 6),
-                  _buildLrcBadge(cfg),
-                ],
-              ],
-            ),
-          ),
-        );
-      case _SongColumnKey.artist:
-        return SizedBox(
-          width: width,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Text(
-              song.artist ?? '未知歌手',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: cfg.textSub, fontSize: 12),
-            ),
-          ),
-        );
-      case _SongColumnKey.tags:
-        return SizedBox(
-          width: width,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: song.tags.isEmpty
-                ? Text(
-                    '无标签',
-                    style: TextStyle(
-                      color: cfg.textSub.withOpacity(0.75),
-                      fontSize: 11,
-                    ),
-                  )
-                : SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      children: song.tags.map((tag) {
-                        final tagColor = tag.color != null
-                            ? _parseHexColor(tag.color!, cfg.accent)
-                            : cfg.accent;
-                        return Container(
-                          margin: const EdgeInsets.only(right: 6),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: tagColor.withOpacity(0.08),
-                            borderRadius: BorderRadius.circular(4),
-                            border: Border(
-                              left: BorderSide(color: tagColor, width: 2),
-                            ),
-                          ),
-                          child: Text(
-                            tag.name,
-                            style: TextStyle(
-                              fontSize: 10,
-                              color: tagColor,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                  ),
-          ),
-        );
-      case _SongColumnKey.versions:
-        return SizedBox(
-          width: width,
-          child: Center(
-            child: Text(
-              song.versions.length.toString(),
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: cfg.textMain,
-                fontWeight: FontWeight.bold,
-                fontSize: 12,
-              ),
-            ),
-          ),
-        );
-      case _SongColumnKey.spec:
-        final specText = audioQualityText(primaryVersion);
-        final badgeColor = audioQualityColor(primaryVersion, cfg.textSub);
-
-        return SizedBox(
-          width: width,
-          child: Center(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(
-                color: badgeColor.withOpacity(0.12),
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: Text(
-                specText,
-                style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
-                  color: badgeColor,
-                ),
-              ),
-            ),
-          ),
-        );
-    }
-  }
-
-  Widget _buildLrcBadge(AppThemeConfig cfg) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-      decoration: BoxDecoration(
-        color: cfg.accent.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: cfg.accent.withOpacity(0.55)),
-      ),
-      child: Text(
-        'LRC',
-        style: TextStyle(
-          color: cfg.accent,
-          fontSize: 8.5,
-          fontWeight: FontWeight.w800,
-          letterSpacing: 0,
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final libraryProvider = context.watch<LibraryProvider>();
@@ -939,13 +626,10 @@ class _SongTableState extends State<SongTable> {
     final songs = libraryProvider.displaySongs;
 
     if (songs.isEmpty) {
-      return Container(
-        alignment: Alignment.center,
-        padding: const EdgeInsets.all(40),
-        child: Text(
-          '没有找到符合条件的歌曲，请导入或调整过滤器',
-          style: TextStyle(color: cfg.textSub, fontSize: 13),
-        ),
+      return const AetherEmptyState(
+        icon: Icons.search_off_rounded,
+        title: '没有符合条件的歌曲',
+        message: '请导入音乐，或调整标签 / 搜索过滤器',
       );
     }
 
@@ -969,7 +653,7 @@ class _SongTableState extends State<SongTable> {
                   Container(
                     height: _headerHeight,
                     decoration: BoxDecoration(
-                      border: Border(bottom: BorderSide(color: cfg.border)),
+                      border: Border(bottom: BorderSide(color: cfg.borderSubtle)),
                     ),
                     child: Row(
                       children: [
@@ -979,12 +663,12 @@ class _SongTableState extends State<SongTable> {
                             child: Icon(
                               Icons.drag_indicator,
                               size: 16,
-                              color: cfg.textSub.withOpacity(0.65),
+                              color: cfg.textSecondary.withValues(alpha: 0.65),
                             ),
                           ),
                         ),
                         for (final column in _columnOrder)
-                          _buildHeaderCell(column, cfg),
+                          _cellBuilder.buildHeaderCell(column, cfg),
                       ],
                     ),
                   ),
@@ -1040,18 +724,18 @@ class _SongTableState extends State<SongTable> {
                                     child: Container(
                                       decoration: BoxDecoration(
                                         color: isSelected
-                                            ? cfg.bgHover.withOpacity(0.12)
+                                            ? cfg.bgHover.withValues(alpha: 0.12)
                                             : isActive
-                                            ? cfg.bgHover.withOpacity(0.08)
-                                            : Colors.transparent,
+                                            ? cfg.bgHover.withValues(alpha: 0.08)
+                                            : cfg.bgHover.withValues(alpha: 0.35),
                                         border: Border(
                                           bottom: BorderSide(
-                                            color: cfg.border.withOpacity(0.45),
+                                            color: cfg.borderSubtle.withValues(alpha: 0.45),
                                           ),
                                           left: BorderSide(
                                             color: isActive
                                                 ? cfg.accent
-                                                : Colors.transparent,
+                                                : cfg.bgHover.withValues(alpha: 0.35),
                                             width: 3,
                                           ),
                                         ),
@@ -1069,20 +753,20 @@ class _SongTableState extends State<SongTable> {
                                                       ),
                                                     );
                                               },
-                                              child: IconButton(
-                                                icon: Icon(
-                                                  isCurrentlyPlaying &&
-                                                          audioProvider
-                                                              .isPlaying
-                                                      ? Icons
-                                                            .pause_circle_filled
-                                                      : Icons
-                                                            .play_circle_filled,
-                                                  size: 18,
-                                                  color: isCurrentlyPlaying
-                                                      ? const Color(0xFF10B981)
-                                                      : cfg.textSub,
-                                                ),
+                                              child: AetherIconButton(
+                                                icon: isCurrentlyPlaying &&
+                                                        audioProvider.isPlaying
+                                                    ? Icons.pause_circle_filled
+                                                    : Icons.play_circle_filled,
+                                                iconSize: AetherIconSize.lg,
+                                                size: 36,
+                                                color: isCurrentlyPlaying
+                                                    ? cfg.success
+                                                    : cfg.textSecondary,
+                                                tooltip: isCurrentlyPlaying &&
+                                                        audioProvider.isPlaying
+                                                    ? '暂停'
+                                                    : '播放',
                                                 onPressed: () async {
                                                   if (isCurrentlyPlaying) {
                                                     await audioProvider
@@ -1103,28 +787,18 @@ class _SongTableState extends State<SongTable> {
                                                     if (!context.mounted) {
                                                       return;
                                                     }
-                                                    ScaffoldMessenger.of(
+                                                    showAetherToast(
                                                       context,
-                                                    ).showSnackBar(
-                                                      SnackBar(
-                                                        content: Text(
-                                                          e.toString(),
-                                                        ),
-                                                      ),
+                                                      message: e.toString(),
+                                                      kind: AetherToastKind.error,
                                                     );
                                                   }
                                                 },
-                                                padding: EdgeInsets.zero,
-                                                constraints:
-                                                    const BoxConstraints.tightFor(
-                                                      width: 36,
-                                                      height: 36,
-                                                    ),
                                               ),
                                             ),
                                           ),
                                           for (final column in _columnOrder)
-                                            _buildCell(
+                                            _cellBuilder.buildCell(
                                               column,
                                               song,
                                               primaryVersion,
@@ -1163,11 +837,11 @@ class _SongTableState extends State<SongTable> {
                               child: IgnorePointer(
                                 child: Container(
                                   decoration: BoxDecoration(
-                                    color: cfg.accent.withOpacity(0.12),
+                                    color: cfg.accent.withValues(alpha: 0.12),
                                     border: Border.all(
-                                      color: cfg.accent.withOpacity(0.55),
+                                      color: cfg.accent.withValues(alpha: 0.55),
                                     ),
-                                    borderRadius: BorderRadius.circular(6),
+                                    borderRadius: BorderRadius.circular(AetherRadius.sm),
                                   ),
                                 ),
                               ),

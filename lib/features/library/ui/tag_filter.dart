@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:aetheria/core/providers/library_provider.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
+import 'package:aetheria/core/widgets/aether_button.dart';
+import 'package:aetheria/core/widgets/aether_pressable.dart';
 import 'package:aetheria/features/library/ui/tag_manager_modal.dart';
 
 class TagFilter extends StatefulWidget {
@@ -32,8 +34,7 @@ class _TagFilterState extends State<TagFilter> {
   @override
   Widget build(BuildContext context) {
     final libraryProvider = context.watch<LibraryProvider>();
-    final themeProvider = context.watch<UIThemeProvider>();
-    final cfg = themeProvider.currentTheme;
+    final cfg = context.watch<UIThemeProvider>().currentTheme;
     final contentHeightFactor = _isExpanded
         ? (1 - widget.scrollCollapseFactor.clamp(0.0, 1.0))
         : 0.0;
@@ -41,22 +42,22 @@ class _TagFilterState extends State<TagFilter> {
     return Container(
       decoration: BoxDecoration(
         color: cfg.bgHover,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: cfg.border),
+        borderRadius: BorderRadius.circular(AetherRadius.lg),
+        border: Border.all(color: cfg.borderSubtle),
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AetherSpace.xl,
+        vertical: AetherSpace.lg,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Header Row
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              // AND / OR toggles
               Container(
                 decoration: BoxDecoration(
-                  color: cfg.border,
-                  borderRadius: BorderRadius.circular(6),
+                  color: cfg.borderSubtle,
+                  borderRadius: BorderRadius.circular(AetherRadius.sm),
                 ),
                 padding: const EdgeInsets.all(2),
                 child: Row(
@@ -65,25 +66,20 @@ class _TagFilterState extends State<TagFilter> {
                     _buildToggleBtn(
                       '全部包含',
                       libraryProvider.filterMode == 'AND',
-                      () {
-                        libraryProvider.setFilterMode('AND');
-                      },
+                      () => libraryProvider.setFilterMode('AND'),
                       cfg,
                     ),
                     _buildToggleBtn(
                       '任意包含',
                       libraryProvider.filterMode == 'OR',
-                      () {
-                        libraryProvider.setFilterMode('OR');
-                      },
+                      () => libraryProvider.setFilterMode('OR'),
                       cfg,
                     ),
                   ],
                 ),
               ),
-
-              // Title Expand/Collapse
-              InkWell(
+              const Spacer(),
+              AetherPressable(
                 onTap: () {
                   setState(() {
                     _isExpanded = !_isExpanded;
@@ -92,46 +88,58 @@ class _TagFilterState extends State<TagFilter> {
                     widget.onExpandRequested?.call();
                   }
                 },
-                borderRadius: BorderRadius.circular(4),
+                borderRadius: BorderRadius.circular(AetherRadius.sm),
+                pressScale: AetherMotion.pressScaleSubtle,
+                hoverColor: cfg.pressed,
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
+                    horizontal: AetherSpace.md,
+                    vertical: AetherSpace.xs,
                   ),
                   child: Row(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.sell, size: 14, color: cfg.textSub),
-                      const SizedBox(width: 8),
+                      Icon(
+                        Icons.sell_rounded,
+                        size: AetherIconSize.sm,
+                        color: cfg.textSecondary,
+                      ),
+                      const SizedBox(width: AetherSpace.md),
                       Text(
                         '标签过滤器',
-                        style: TextStyle(
-                          fontSize: 13,
+                        style: AetherType.bodyStyle(cfg.textSecondary).copyWith(
                           fontWeight: FontWeight.w600,
-                          color: cfg.textSub,
                         ),
                       ),
-                      const SizedBox(width: 4),
-                      Icon(
-                        _isExpanded
-                            ? Icons.keyboard_arrow_down
-                            : Icons.keyboard_arrow_right,
-                        size: 16,
-                        color: cfg.textSub,
+                      const SizedBox(width: AetherSpace.xs),
+                      AnimatedRotation(
+                        turns: _isExpanded ? 0.25 : 0,
+                        duration: AetherMotion.fast,
+                        curve: AetherMotion.out,
+                        child: Icon(
+                          Icons.chevron_right_rounded,
+                          size: AetherIconSize.md,
+                          color: cfg.textSecondary,
+                        ),
                       ),
                     ],
                   ),
                 ),
               ),
-
-              // Tag Manager Button
-              if (MediaQuery.of(context).size.width >= 768)
-                _buildTagManagerButton(context, cfg),
+              if (MediaQuery.sizeOf(context).width >= 768) ...[
+                const SizedBox(width: AetherSpace.md),
+                AetherButton.secondary(
+                  label: '标签管理',
+                  icon: Icons.sell_outlined,
+                  size: AetherButtonSize.sm,
+                  onPressed: () => TagManagerModal.show(context),
+                ),
+              ],
             ],
           ),
-
           AnimatedSize(
-            duration: const Duration(milliseconds: 160),
-            curve: Curves.easeOut,
+            duration: AetherMotion.fast,
+            curve: AetherMotion.out,
             alignment: Alignment.topCenter,
             child: ClipRect(
               child: Align(
@@ -152,22 +160,23 @@ class _TagFilterState extends State<TagFilter> {
     VoidCallback onTap,
     AppThemeConfig cfg,
   ) {
-    return InkWell(
+    return AetherPressable(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(4),
-      child: Container(
+      borderRadius: BorderRadius.circular(AetherRadius.xs),
+      pressScale: AetherMotion.pressScaleSubtle,
+      child: AnimatedContainer(
+        duration: AetherMotion.fast,
+        curve: AetherMotion.out,
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         decoration: BoxDecoration(
           color: isActive ? cfg.accent : Colors.transparent,
-          borderRadius: BorderRadius.circular(4),
+          borderRadius: BorderRadius.circular(AetherRadius.xs),
         ),
         child: Text(
           text,
-          style: TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.bold,
-            color: isActive ? Colors.white : cfg.textSub,
-          ),
+          style: AetherType.captionStyle(
+            isActive ? cfg.onAccent : cfg.textSecondary,
+          ).copyWith(fontWeight: FontWeight.w700),
         ),
       ),
     );
@@ -177,129 +186,95 @@ class _TagFilterState extends State<TagFilter> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const SizedBox(height: 12),
-        libraryProvider.tags.isEmpty
-            ? Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Text(
-                  '暂无预设标签，可点击右侧标签管理新建',
-                  style: TextStyle(color: cfg.textSub, fontSize: 12),
-                ),
-              )
-            : Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: libraryProvider.tags.map((tag) {
-                  final isSelected = libraryProvider.selectedTags.contains(
-                    tag.id,
-                  );
-                  final isExcluded = libraryProvider.excludedTags.contains(
-                    tag.id,
-                  );
+        const SizedBox(height: AetherSpace.lg),
+        if (libraryProvider.tags.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: AetherSpace.md),
+            child: Text(
+              '暂无预设标签，可点击右侧标签管理新建',
+              style: AetherType.bodySmStyle(cfg.textSecondary),
+            ),
+          )
+        else
+          Wrap(
+            spacing: AetherSpace.md,
+            runSpacing: AetherSpace.md,
+            children: libraryProvider.tags.map((tag) {
+              final isSelected =
+                  libraryProvider.selectedTags.contains(tag.id);
+              final isExcluded =
+                  libraryProvider.excludedTags.contains(tag.id);
 
-                  Color tagColor = tag.color != null
-                      ? _parseHexColor(tag.color!, cfg.textSub)
-                      : cfg.textSub;
+              Color tagColor = tag.color != null
+                  ? _parseHexColor(tag.color!, cfg.textSecondary)
+                  : cfg.textSecondary;
+              if (isExcluded) {
+                tagColor = cfg.danger;
+              }
 
-                  if (isExcluded) {
-                    tagColor = Colors.redAccent;
-                  }
+              final active = isSelected || isExcluded;
 
-                  return InkWell(
-                    onTap: () => libraryProvider.toggleTag(tag.id),
-                    borderRadius: BorderRadius.circular(14),
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 150),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 5,
-                      ),
-                      decoration: BoxDecoration(
-                        color: (isSelected || isExcluded)
-                            ? cfg.bgHover
-                            : cfg.bgPanel,
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(
-                          color: (isSelected || isExcluded)
-                              ? tagColor
-                              : cfg.border,
-                          width: 1.0,
-                        ),
-                        boxShadow: (isSelected || isExcluded)
-                            ? [
-                                BoxShadow(
-                                  color: tagColor.withOpacity(0.25),
-                                  blurRadius: 8,
-                                ),
-                              ]
-                            : null,
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Container(
-                            width: 8,
-                            height: 8,
-                            decoration: BoxDecoration(
-                              color: tagColor,
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            tag.name,
-                            style: TextStyle(
-                              color: (isSelected || isExcluded)
-                                  ? cfg.textMain
-                                  : tagColor,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w500,
-                              decoration: isExcluded
-                                  ? TextDecoration.lineThrough
-                                  : null,
-                              decorationColor: Colors.redAccent,
-                              decorationThickness: 2.0,
-                            ),
-                          ),
-                        ],
-                      ),
+              return AetherPressable(
+                onTap: () => libraryProvider.toggleTag(tag.id),
+                borderRadius: BorderRadius.circular(AetherRadius.full),
+                pressScale: AetherMotion.pressScaleSubtle,
+                child: AnimatedContainer(
+                  duration: AetherMotion.fast,
+                  curve: AetherMotion.out,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AetherSpace.lg,
+                    vertical: 5,
+                  ),
+                  decoration: BoxDecoration(
+                    color: active
+                        ? tagColor.withValues(alpha: 0.14)
+                        : cfg.bgPanel,
+                    borderRadius: BorderRadius.circular(AetherRadius.full),
+                    border: Border.all(
+                      color: active ? tagColor : cfg.borderSubtle,
                     ),
-                  );
-                }).toList(),
-              ),
-      ],
-    );
-  }
-
-  Widget _buildTagManagerButton(BuildContext context, AppThemeConfig cfg) {
-    return Material(
-      color: cfg.border,
-      borderRadius: BorderRadius.circular(7),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: () => TagManagerModal.show(context),
-        child: SizedBox(
-          height: 32,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.sell_outlined, size: 13, color: cfg.textMain),
-                const SizedBox(width: 6),
-                Text(
-                  '标签管理',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: cfg.textMain,
-                    fontWeight: FontWeight.bold,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (isExcluded) ...[
+                        Icon(
+                          Icons.remove_rounded,
+                          size: 12,
+                          color: tagColor,
+                        ),
+                        const SizedBox(width: 4),
+                      ] else ...[
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: tagColor,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                      ],
+                      Text(
+                        tag.name,
+                        style: AetherType.bodySmStyle(
+                          active ? cfg.textPrimary : tagColor,
+                        ).copyWith(
+                          fontWeight: FontWeight.w600,
+                          decoration: isExcluded
+                              ? TextDecoration.lineThrough
+                              : null,
+                          decorationColor: cfg.danger,
+                          decorationThickness: 2,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ],
-            ),
+              );
+            }).toList(),
           ),
-        ),
-      ),
+      ],
     );
   }
 }

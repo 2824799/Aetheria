@@ -47,35 +47,8 @@ Future<void> main() async {
   runApp(
     initError != null
         ? MaterialApp(
-            home: Scaffold(
-              backgroundColor: const Color(0xFF1a1a2e),
-              body: SafeArea(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Aetheria 启动失败',
-                        style: TextStyle(
-                          color: Colors.redAccent,
-                          fontSize: 22,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      SelectableText(
-                        initError,
-                        style: const TextStyle(
-                          color: Colors.white70,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
+            theme: buildAetheriaThemeData(AppThemeConfig.dark),
+            home: _BootstrapErrorScreen(error: initError),
           )
         : MultiProvider(
             providers: [
@@ -97,6 +70,55 @@ Future<void> main() async {
     } catch (e) {
       debugPrint('Audio server start failed (non-fatal): $e');
     }
+  }
+}
+
+class _BootstrapErrorScreen extends StatelessWidget {
+  final String error;
+  const _BootstrapErrorScreen({required this.error});
+
+  @override
+  Widget build(BuildContext context) {
+    final cfg = AppThemeConfig.dark;
+    return Scaffold(
+      backgroundColor: cfg.bgSolid,
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(AetherSpace.xxxl),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Aetheria 启动失败',
+                style: AetherType.displayStyle(cfg.danger),
+              ),
+              const SizedBox(height: AetherSpace.xl),
+              Text(
+                '底层初始化没有完成。下面是完整诊断信息，可直接复制给开发者。',
+                style: AetherType.bodyStyle(cfg.textSecondary),
+              ),
+              const SizedBox(height: AetherSpace.xl),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(AetherSpace.xl),
+                decoration: BoxDecoration(
+                  color: cfg.bgElevated,
+                  borderRadius: BorderRadius.circular(AetherRadius.lg),
+                  border: Border.all(color: cfg.borderSubtle),
+                ),
+                child: SelectableText(
+                  error,
+                  style: AetherType.bodySmStyle(cfg.textPrimary).copyWith(
+                    fontFamily: 'monospace',
+                    height: 1.45,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 

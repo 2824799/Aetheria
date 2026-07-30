@@ -1,14 +1,22 @@
-import 'package:flutter/material.dart';
 import 'dart:math' as math;
+
+import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:aetheria/core/providers/library_provider.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
-import 'package:aetheria/core/widgets/glass_panel.dart';
+import 'package:aetheria/core/widgets/aether_button.dart';
+import 'package:aetheria/core/widgets/aether_checkbox.dart';
+import 'package:aetheria/core/widgets/aether_dialog.dart';
+import 'package:aetheria/core/widgets/aether_surface.dart';
+import 'package:aetheria/core/widgets/aether_text_field.dart';
+import 'package:aetheria/core/widgets/aether_toast.dart';
 import 'package:aetheria/features/library/ui/tag_filter.dart';
 import 'package:aetheria/features/library/ui/song_table.dart';
 import 'package:aetheria/src/rust/api/music.dart' as music;
 import 'package:aetheria/src/rust/models/song.dart' show PreviewInfo;
+import 'package:aetheria/core/widgets/aether_progress.dart';
+import 'package:aetheria/core/widgets/aether_pressable.dart';
 
 typedef ProgressDialogUpdate =
     void Function({
@@ -35,9 +43,7 @@ class _MainContentState extends State<MainContent> {
     required String initialSubtitle,
     required Future<T> Function(ProgressDialogUpdate updateProgress) task,
   }) async {
-    if (!mounted) {
-      return null;
-    }
+    if (!mounted) return null;
 
     var progressDialogOpen = false;
     var progressTitle = initialTitle;
@@ -47,85 +53,51 @@ class _MainContentState extends State<MainContent> {
     var progressIndeterminate = true;
     void Function(void Function())? setDialogState;
 
-    showDialog(
+    showAetherDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) => StatefulBuilder(
-        builder: (dialogContext, updateDialogState) {
-          setDialogState = updateDialogState;
-          progressDialogOpen = true;
-          final cfg = dialogContext.read<UIThemeProvider>().currentTheme;
-          final progressValue = progressIndeterminate || progressTotal <= 0
-              ? null
-              : (progressCurrent / progressTotal).clamp(0.0, 1.0);
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (dialogContext, updateDialogState) {
+            setDialogState = updateDialogState;
+            progressDialogOpen = true;
+            final cfg = dialogContext.tokens;
+            final progressValue = progressIndeterminate || progressTotal <= 0
+                ? null
+                : (progressCurrent / progressTotal).clamp(0.0, 1.0);
 
-          return Center(
-            child: Material(
-              color: Colors.transparent,
-              child: Container(
-                width: 360,
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: cfg.bgPanel,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: cfg.border),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.18),
-                      blurRadius: 24,
-                      offset: const Offset(0, 10),
+            return AetherDialog(
+              title: progressTitle,
+              maxWidth: 380,
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    progressSubtitle,
+                    style: AetherType.bodySmStyle(cfg.textSecondary),
+                  ),
+                  const SizedBox(height: AetherSpace.xl),
+                  AetherProgress.linear(
+                    size: 6,
+                    value: progressValue,
+                    trackColor: cfg.sliderTrack,
+                  ),
+                  if (progressTotal > 0) ...[
+                    const SizedBox(height: AetherSpace.md),
+                    Text(
+                      '已完成 $progressCurrent / $progressTotal 项',
+                      style: AetherType.captionStyle(cfg.textPrimary).copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ],
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      progressTitle,
-                      style: TextStyle(
-                        color: cfg.textMain,
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Text(
-                      progressSubtitle,
-                      style: TextStyle(
-                        color: cfg.textSub,
-                        fontSize: 12,
-                        height: 1.5,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(999),
-                      child: LinearProgressIndicator(
-                        minHeight: 6,
-                        value: progressValue,
-                        color: cfg.accent,
-                        backgroundColor: cfg.border.withOpacity(0.45),
-                      ),
-                    ),
-                    if (progressTotal > 0) ...[
-                      const SizedBox(height: 10),
-                      Text(
-                        '已完成 $progressCurrent / $progressTotal 项',
-                        style: TextStyle(
-                          color: cfg.textMain,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
+                ],
               ),
-            ),
-          );
-        },
-      ),
+            );
+          },
+        );
+      },
     );
     await Future<void>.delayed(Duration.zero);
 
@@ -137,21 +109,11 @@ class _MainContentState extends State<MainContent> {
       bool? indeterminate,
     }) {
       setDialogState?.call(() {
-        if (title != null) {
-          progressTitle = title;
-        }
-        if (subtitle != null) {
-          progressSubtitle = subtitle;
-        }
-        if (current != null) {
-          progressCurrent = current;
-        }
-        if (total != null) {
-          progressTotal = total;
-        }
-        if (indeterminate != null) {
-          progressIndeterminate = indeterminate;
-        }
+        if (title != null) progressTitle = title;
+        if (subtitle != null) progressSubtitle = subtitle;
+        if (current != null) progressCurrent = current;
+        if (total != null) progressTotal = total;
+        if (indeterminate != null) progressIndeterminate = indeterminate;
       });
     }
 
@@ -207,19 +169,19 @@ class _MainContentState extends State<MainContent> {
         },
       );
 
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('导入完成: 成功 $successCount 首, 失败 $failCount 首')),
+      if (!mounted) return;
+      showAetherToast(
+        context,
+        message: '导入完成: 成功 $successCount 首, 失败 $failCount 首',
+        kind: failCount > 0 ? AetherToastKind.warning : AetherToastKind.success,
       );
     } catch (e) {
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(
+      if (!mounted) return;
+      showAetherToast(
         context,
-      ).showSnackBar(SnackBar(content: Text('导入文件错误: $e')));
+        message: '导入文件错误: $e',
+        kind: AetherToastKind.error,
+      );
     }
   }
 
@@ -265,385 +227,341 @@ class _MainContentState extends State<MainContent> {
         },
       );
 
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
       if (previews == null || previews.isEmpty) {
-        ScaffoldMessenger.of(
+        showAetherToast(
           context,
-        ).showSnackBar(const SnackBar(content: Text('所选文件夹中未找到支持的音频文件')));
+          message: '所选文件夹中未找到支持的音频文件',
+          kind: AetherToastKind.info,
+        );
         return;
       }
 
-      _showImportPreviewModal(previews, provider);
+      await _showImportPreviewModal(previews, provider);
     } catch (e) {
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(
+      if (!mounted) return;
+      showAetherToast(
         context,
-      ).showSnackBar(SnackBar(content: Text('扫描文件夹错误: $e')));
+        message: '扫描文件夹错误: $e',
+        kind: AetherToastKind.error,
+      );
     }
   }
 
-  void _showImportPreviewModal(
+  Future<void> _showImportPreviewModal(
     List<PreviewInfo> previews,
     LibraryProvider provider,
-  ) {
+  ) async {
     final checkedItems = List<bool>.filled(previews.length, true);
 
-    showDialog(
+    final shouldImport = await showAetherDialog<bool>(
       context: context,
       builder: (ctx) {
-        final cfg = context.read<UIThemeProvider>().currentTheme;
         return StatefulBuilder(
           builder: (context, setModalState) {
-            return Center(
-              child: Material(
-                color: Colors.transparent,
-                child: SizedBox(
-                  width: 580,
-                  height: 480,
-                  child: GlassPanel(
-                    borderRadius: BorderRadius.circular(16),
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
+            final cfg = context.tokens;
+            final selectedCount =
+                checkedItems.where((checked) => checked).length;
+
+            return AetherDialog(
+              title: '导入预览 (共 ${previews.length} 首)',
+              maxWidth: 580,
+              showClose: true,
+              contentPadding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+              content: SizedBox(
+                height: 360,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
                       children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                              '导入预览 (共 ${previews.length} 首)',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                                color: cfg.textMain,
-                              ),
-                            ),
-                            IconButton(
-                              icon: Icon(
-                                Icons.close,
-                                color: cfg.textSub,
-                                size: 20,
-                              ),
-                              onPressed: () => Navigator.of(ctx).pop(),
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(),
-                            ),
-                          ],
+                        AetherButton.ghost(
+                          label: '全选',
+                          size: AetherButtonSize.sm,
+                          onPressed: () {
+                            setModalState(() {
+                              checkedItems.fillRange(
+                                0,
+                                checkedItems.length,
+                                true,
+                              );
+                            });
+                          },
                         ),
-                        const SizedBox(height: 12),
-                        Row(
-                          children: [
-                            TextButton(
-                              onPressed: () {
-                                setModalState(() {
-                                  checkedItems.fillRange(
-                                    0,
-                                    checkedItems.length,
-                                    true,
-                                  );
-                                });
-                              },
-                              child: const Text('全选'),
-                            ),
-                            TextButton(
-                              onPressed: () {
-                                setModalState(() {
-                                  checkedItems.fillRange(
-                                    0,
-                                    checkedItems.length,
-                                    false,
-                                  );
-                                });
-                              },
-                              child: const Text('全不选'),
-                            ),
-                          ],
+                        const SizedBox(width: AetherSpace.sm),
+                        AetherButton.ghost(
+                          label: '全不选',
+                          size: AetherButtonSize.sm,
+                          onPressed: () {
+                            setModalState(() {
+                              checkedItems.fillRange(
+                                0,
+                                checkedItems.length,
+                                false,
+                              );
+                            });
+                          },
                         ),
-                        const SizedBox(height: 8),
-                        Expanded(
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: Colors.black.withOpacity(0.06),
-                              borderRadius: BorderRadius.circular(10),
-                              border: Border.all(color: cfg.border),
-                            ),
-                            child: ListView.separated(
-                              padding: const EdgeInsets.symmetric(vertical: 4),
-                              itemCount: previews.length,
-                              separatorBuilder: (_, _) => Divider(
-                                height: 1,
-                                color: cfg.border.withOpacity(0.5),
-                              ),
-                              itemBuilder: (context, index) {
-                                final item = previews[index];
-                                return CheckboxListTile(
-                                  value: checkedItems[index],
-                                  title: Text(
-                                    item.title,
-                                    style: TextStyle(
-                                      color: cfg.textMain,
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  subtitle: Text(
-                                    '${item.artist} - ${item.filename}',
-                                    style: TextStyle(
-                                      color: cfg.textSub,
-                                      fontSize: 11,
-                                    ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  onChanged: (val) {
-                                    setModalState(() {
-                                      checkedItems[index] = val ?? false;
-                                    });
-                                  },
-                                );
-                              },
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            TextButton(
-                              onPressed: () => Navigator.of(ctx).pop(),
-                              child: const Text('取消'),
-                            ),
-                            const SizedBox(width: 12),
-                            ElevatedButton(
-                              onPressed: () async {
-                                final selectedPreviews = <PreviewInfo>[];
-                                for (
-                                  int index = 0;
-                                  index < previews.length;
-                                  index++
-                                ) {
-                                  if (checkedItems[index]) {
-                                    selectedPreviews.add(previews[index]);
-                                  }
-                                }
-
-                                Navigator.of(ctx).pop();
-
-                                if (selectedPreviews.isEmpty) {
-                                  if (!mounted) {
-                                    return;
-                                  }
-                                  ScaffoldMessenger.of(
-                                    this.context,
-                                  ).showSnackBar(
-                                    const SnackBar(
-                                      content: Text('请至少选择一首歌曲再导入'),
-                                    ),
-                                  );
-                                  return;
-                                }
-
-                                int imported = 0;
-                                await _runProgressDialog<void>(
-                                  initialTitle: '正在导入已选歌曲...',
-                                  initialSubtitle:
-                                      '已完成 0 / ${selectedPreviews.length} 首歌曲',
-                                  task: (updateProgress) async {
-                                    updateProgress(
-                                      current: 0,
-                                      total: selectedPreviews.length,
-                                      indeterminate: false,
-                                    );
-                                    for (
-                                      int index = 0;
-                                      index < selectedPreviews.length;
-                                      index++
-                                    ) {
-                                      final item = selectedPreviews[index];
-                                      updateProgress(
-                                        subtitle:
-                                            '正在导入 ${index + 1} / ${selectedPreviews.length} 首歌曲',
-                                        current: index,
-                                      );
-                                      try {
-                                        await provider.importSongWithMetadata(
-                                          item.filepath,
-                                          item.title,
-                                          item.artist,
-                                        );
-                                        imported++;
-                                      } catch (_) {}
-                                      updateProgress(
-                                        subtitle:
-                                            '已完成 ${index + 1} / ${selectedPreviews.length} 首歌曲',
-                                        current: index + 1,
-                                      );
-                                    }
-                                  },
-                                );
-
-                                if (!mounted) {
-                                  return;
-                                }
-                                ScaffoldMessenger.of(this.context).showSnackBar(
-                                  SnackBar(content: Text('成功导入 $imported 首歌曲')),
-                                );
-                              },
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: cfg.accent,
-                                foregroundColor: Colors.white,
-                              ),
-                              child: const Text('开始导入'),
-                            ),
-                          ],
+                        const Spacer(),
+                        Text(
+                          '已选 $selectedCount 首',
+                          style: AetherType.captionStyle(cfg.textSecondary),
                         ),
                       ],
                     ),
-                  ),
+                    const SizedBox(height: AetherSpace.md),
+                    Expanded(
+                      child: AetherSurface(
+                        level: AetherSurfaceLevel.panel,
+                        borderRadius: BorderRadius.circular(AetherRadius.md),
+                        color: cfg.bgHover,
+                        child: ListView.separated(
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          itemCount: previews.length,
+                          separatorBuilder: (_, _) => Divider(
+                            height: 1,
+                            color: cfg.borderSubtle,
+                          ),
+                          itemBuilder: (context, index) {
+                            final item = previews[index];
+                            return AetherPressable(
+                              onTap: () {
+                                setModalState(() {
+                                  checkedItems[index] = !checkedItems[index];
+                                });
+                              },
+                              pressScale: 1.0,
+                              hoverColor: cfg.bgHover,
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: AetherSpace.md,
+                                  vertical: AetherSpace.sm,
+                                ),
+                                child: Row(
+                                  children: [
+                                    AetherCheckbox(
+                                      value: checkedItems[index],
+                                      onChanged: (val) {
+                                        setModalState(() {
+                                          checkedItems[index] = val ?? false;
+                                        });
+                                      },
+                                    ),
+                                    const SizedBox(width: AetherSpace.md),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            item.title,
+                                            style: AetherType.bodyStyle(
+                                              cfg.textPrimary,
+                                            ).copyWith(
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                          Text(
+                                            '${item.artist} - ${item.filename}',
+                                            style: AetherType.captionStyle(
+                                              cfg.textSecondary,
+                                            ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
+              actions: [
+                AetherButton.ghost(
+                  label: '取消',
+                  onPressed: () => Navigator.of(ctx).pop(false),
+                ),
+                AetherButton.primary(
+                  label: '开始导入',
+                  onPressed: () => Navigator.of(ctx).pop(true),
+                ),
+              ],
             );
           },
         );
       },
+    );
+
+    if (shouldImport != true) return;
+
+    final selectedPreviews = <PreviewInfo>[];
+    for (int index = 0; index < previews.length; index++) {
+      if (checkedItems[index]) {
+        selectedPreviews.add(previews[index]);
+      }
+    }
+
+    if (selectedPreviews.isEmpty) {
+      if (!mounted) return;
+      showAetherToast(
+        context,
+        message: '请至少选择一首歌曲再导入',
+        kind: AetherToastKind.warning,
+      );
+      return;
+    }
+
+    int imported = 0;
+    await _runProgressDialog<void>(
+      initialTitle: '正在导入已选歌曲...',
+      initialSubtitle: '已完成 0 / ${selectedPreviews.length} 首歌曲',
+      task: (updateProgress) async {
+        updateProgress(
+          current: 0,
+          total: selectedPreviews.length,
+          indeterminate: false,
+        );
+        for (int index = 0; index < selectedPreviews.length; index++) {
+          final item = selectedPreviews[index];
+          updateProgress(
+            subtitle:
+                '正在导入 ${index + 1} / ${selectedPreviews.length} 首歌曲',
+            current: index,
+          );
+          try {
+            await provider.importSongWithMetadata(
+              item.filepath,
+              item.title,
+              item.artist,
+            );
+            imported++;
+          } catch (_) {}
+          updateProgress(
+            subtitle:
+                '已完成 ${index + 1} / ${selectedPreviews.length} 首歌曲',
+            current: index + 1,
+          );
+        }
+      },
+    );
+
+    if (!mounted) return;
+    showAetherToast(
+      context,
+      message: '成功导入 $imported 首歌曲',
+      kind: AetherToastKind.success,
     );
   }
 
   @override
   Widget build(BuildContext context) {
     final libraryProvider = context.watch<LibraryProvider>();
-    final themeProvider = context.watch<UIThemeProvider>();
-    final cfg = themeProvider.currentTheme;
+    final cfg = context.watch<UIThemeProvider>().currentTheme;
 
     return Container(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(AetherSpace.xxxl),
       decoration: BoxDecoration(
         color: cfg.bgPanel,
-        border: Border.all(color: cfg.border),
+        border: Border.all(color: cfg.borderSubtle),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Header Search & Import Row
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              // Search Input Box
-              SizedBox(
-                width: 300,
-                height: 38,
-                child: TextField(
-                  controller: _searchController,
-                  onChanged: (val) => libraryProvider.setSearchQuery(val),
-                  style: TextStyle(color: cfg.textMain, fontSize: 13),
-                  decoration: InputDecoration(
-                    prefixIcon: Icon(
-                      Icons.search,
-                      size: 18,
-                      color: cfg.textSub,
-                    ),
-                    hintText: '搜索歌曲、歌手、专辑...',
-                    hintStyle: TextStyle(color: cfg.textSub.withOpacity(0.5)),
-                    filled: true,
-                    fillColor: Colors.white.withOpacity(0.06),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(20),
-                      borderSide: BorderSide(color: cfg.border),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(20),
-                      borderSide: BorderSide(color: cfg.border),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(20),
-                      borderSide: BorderSide(color: cfg.accent, width: 2.0),
-                    ),
+              Expanded(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 420),
+                  child: AetherSearchField(
+                    controller: _searchController,
+                    hintText: '搜索歌曲、歌手、专辑…',
+                    onChanged: libraryProvider.setSearchQuery,
+                    onClear: () => libraryProvider.setSearchQuery(''),
                   ),
                 ),
               ),
-
-              // Import Dropdown Options
-              PopupMenuButton<String>(
-                onSelected: (val) {
-                  if (val == 'files') {
-                    _importFiles(libraryProvider);
-                  } else if (val == 'folder') {
-                    _importFolder(libraryProvider);
-                  }
-                },
-                itemBuilder: (context) => [
-                  const PopupMenuItem(
-                    value: 'files',
-                    child: Row(
-                      children: [
-                        Icon(Icons.audio_file, size: 16),
-                        SizedBox(width: 8),
-                        Text('导入单首/多首音频文件'),
-                      ],
-                    ),
-                  ),
-                  const PopupMenuItem(
-                    value: 'folder',
-                    child: Row(
-                      children: [
-                        Icon(Icons.folder, size: 16),
-                        SizedBox(width: 8),
-                        Text('导入整个文件夹'),
-                      ],
-                    ),
-                  ),
-                ],
-                child: Container(
-                  height: 38,
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  decoration: BoxDecoration(
-                    color: cfg.accent,
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: [
-                      BoxShadow(
-                        color: cfg.accentGlow,
-                        blurRadius: 8,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(
-                        Icons.folder_open,
-                        size: 16,
-                        color: Colors.white,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        '导入歌曲',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 13,
+              const SizedBox(width: AetherSpace.lg),
+              Builder(
+                builder: (buttonContext) {
+                  return AetherButton.primary(
+                    label: '导入歌曲',
+                    icon: Icons.folder_open_rounded,
+                    onPressed: () async {
+                      final box =
+                          buttonContext.findRenderObject() as RenderBox?;
+                      final overlay = Overlay.of(buttonContext)
+                          .context
+                          .findRenderObject() as RenderBox?;
+                      if (box == null || overlay == null) return;
+                      final topLeft =
+                          box.localToGlobal(Offset.zero, ancestor: overlay);
+                      final size = box.size;
+                      final selected = await showMenu<String>(
+                        context: buttonContext,
+                        position: RelativeRect.fromLTRB(
+                          topLeft.dx,
+                          topLeft.dy + size.height + 6,
+                          overlay.size.width - topLeft.dx - size.width,
+                          0,
                         ),
-                      ),
-                      const SizedBox(width: 4),
-                      const Icon(
-                        Icons.arrow_drop_down,
-                        size: 16,
-                        color: Colors.white,
-                      ),
-                    ],
-                  ),
-                ),
+                        items: [
+                          PopupMenuItem(
+                            value: 'files',
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.audio_file_rounded,
+                                  size: AetherIconSize.md,
+                                  color: cfg.textSecondary,
+                                ),
+                                const SizedBox(width: AetherSpace.md),
+                                Text(
+                                  '导入单首/多首音频文件',
+                                  style: AetherType.bodyStyle(cfg.textPrimary),
+                                ),
+                              ],
+                            ),
+                          ),
+                          PopupMenuItem(
+                            value: 'folder',
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.folder_rounded,
+                                  size: AetherIconSize.md,
+                                  color: cfg.textSecondary,
+                                ),
+                                const SizedBox(width: AetherSpace.md),
+                                Text(
+                                  '导入整个文件夹',
+                                  style: AetherType.bodyStyle(cfg.textPrimary),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      );
+                      if (selected == 'files') {
+                        await _importFiles(libraryProvider);
+                      } else if (selected == 'folder') {
+                        await _importFolder(libraryProvider);
+                      }
+                    },
+                  );
+                },
               ),
             ],
           ),
-          const SizedBox(height: 16),
-
-          // Custom Multi-dimensional Tag Filter Panel
+          const SizedBox(height: AetherSpace.xl),
           TagFilter(
             scrollCollapseFactor: _tagCollapseFactor,
             onExpandRequested: () {
@@ -652,16 +570,12 @@ class _MainContentState extends State<MainContent> {
               });
             },
           ),
-          const SizedBox(height: 16),
-
-          // Custom Songs Grid List Table
+          const SizedBox(height: AetherSpace.xl),
           Expanded(
-            child: Container(
-              decoration: BoxDecoration(
-                color: cfg.bgPanel.withOpacity(0.4),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: cfg.border),
-              ),
+            child: AetherSurface(
+              level: AetherSurfaceLevel.panel,
+              borderRadius: BorderRadius.circular(AetherRadius.lg),
+              color: cfg.bgPanel.withValues(alpha: 0.4),
               child: NotificationListener<ScrollUpdateNotification>(
                 onNotification: (notification) {
                   final delta = notification.scrollDelta ?? 0;

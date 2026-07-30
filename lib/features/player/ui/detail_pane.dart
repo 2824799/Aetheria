@@ -6,12 +6,21 @@ import 'package:flutter/services.dart';
 import 'package:aetheria/core/providers/audio_player_provider.dart';
 import 'package:aetheria/core/providers/library_provider.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
+import 'package:aetheria/core/widgets/aether_button.dart';
+import 'package:aetheria/core/widgets/aether_dialog.dart';
+import 'package:aetheria/core/widgets/aether_empty_state.dart';
+import 'package:aetheria/core/widgets/aether_icon_button.dart';
+import 'package:aetheria/core/widgets/aether_text_field.dart';
+import 'package:aetheria/core/widgets/aether_pressable.dart';
+import 'package:aetheria/core/widgets/aether_tabs.dart';
+import 'package:aetheria/core/widgets/aether_toast.dart';
 import 'package:aetheria/features/player/ui/lyrics_panel.dart';
 import 'package:aetheria/features/player/ui/song_cover_art.dart';
 import 'package:aetheria/src/rust/models/song.dart';
 import 'package:aetheria/src/rust/api/music.dart' as music;
 import 'package:aetheria/services/native_audio_helper.dart';
 import 'dart:io';
+import 'package:aetheria/core/widgets/aether_surface.dart';
 
 class DetailPane extends StatelessWidget {
   const DetailPane({super.key});
@@ -47,28 +56,38 @@ class DetailPane extends StatelessWidget {
     BuildContext context,
     AudioVersion version,
   ) async {
-    final confirm = await showDialog<bool>(
+    return showAetherConfirmDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('删除音源版本？'),
-        content: Text('确定要删除音源版本“${version.originalName}”吗？这会同时删除对应的本地音频文件。'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('取消'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.redAccent,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('删除版本'),
-          ),
-        ],
-      ),
+      title: '删除音源版本？',
+      message: '确定要删除音源版本“${version.originalName}”吗？这会同时删除对应的本地音频文件。',
+      confirmLabel: '删除版本',
+      dangerous: true,
     );
-    return confirm == true;
+  }
+
+  Future<T?> _withBlockingLoader<T>(
+    BuildContext context,
+    Future<T> Function() task,
+  ) async {
+    var opened = false;
+    try {
+      showAetherDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => const AetherDialog(
+          content: SizedBox(
+            height: 96,
+            child: AetherLoading(message: '处理中…'),
+          ),
+        ),
+      );
+      opened = true;
+      return await task();
+    } finally {
+      if (opened && context.mounted) {
+        Navigator.of(context).pop();
+      }
+    }
   }
 
   AudioVersion? _displayVersionForSong(
@@ -159,7 +178,6 @@ class DetailPane extends StatelessWidget {
     Song song,
     LibraryProvider provider,
   ) async {
-    var loaderShown = false;
     try {
       FilePickerResult? result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
@@ -172,34 +190,26 @@ class DetailPane extends StatelessWidget {
         return;
       }
 
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (ctx) => const Center(child: CircularProgressIndicator()),
-      );
-      loaderShown = true;
-
-      await provider.importAudioVersionForSong(song.id, path);
+      await _withBlockingLoader<void>(context, () async {
+        await provider.importAudioVersionForSong(song.id, path);
+      });
       if (!context.mounted) {
         return;
       }
-
-      if (loaderShown) {
-        Navigator.of(context).pop(); // pop progress indicator
-      }
-      ScaffoldMessenger.of(
+      showAetherToast(
         context,
-      ).showSnackBar(const SnackBar(content: Text('成功关联新音源版本')));
+        message: '成功关联新音源版本',
+        kind: AetherToastKind.success,
+      );
     } catch (e) {
       if (!context.mounted) {
         return;
       }
-      if (loaderShown) {
-        Navigator.of(context).pop(); // pop loader if failed
-      }
-      ScaffoldMessenger.of(
+      showAetherToast(
         context,
-      ).showSnackBar(SnackBar(content: Text('关联失败: $e')));
+        message: '关联失败: $e',
+        kind: AetherToastKind.error,
+      );
     }
   }
 
@@ -209,53 +219,50 @@ class DetailPane extends StatelessWidget {
   ) async {
     try {
       if (Platform.isAndroid) {
-        showDialog(
-          context: context,
-          barrierDismissible: false,
-          builder: (ctx) => const Center(child: CircularProgressIndicator()),
-        );
         final libraryPath = context.read<LibraryProvider>().libraryPath;
         final srcPath = '$libraryPath/${version.filepath}'.replaceAll(
           '\\',
           '/',
         );
-
-        await NativeAudioHelper.saveToDownloads(srcPath, version.originalName);
-
+        await _withBlockingLoader<void>(context, () async {
+          await NativeAudioHelper.saveToDownloads(
+            srcPath,
+            version.originalName,
+          );
+        });
         if (!context.mounted) return;
-        Navigator.of(context).pop(); // pop progress indicator
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('已成功导出至系统 Downloads/Aetheria 文件夹！')),
+        showAetherToast(
+          context,
+          message: '已成功导出至系统 Downloads/Aetheria 文件夹！',
+          kind: AetherToastKind.success,
         );
       } else {
-        String? destPath = await FilePicker.platform.saveFile(
+        final destPath = await FilePicker.platform.saveFile(
           fileName: version.originalName,
           dialogTitle: '选择保存音频的位置',
         );
-
         if (destPath == null) return;
-
         if (!context.mounted) return;
-        showDialog(
-          context: context,
-          barrierDismissible: false,
-          builder: (ctx) => const Center(child: CircularProgressIndicator()),
-        );
-
-        await music.exportAudioFile(versionId: version.id, destPath: destPath);
-
+        await _withBlockingLoader<void>(context, () async {
+          await music.exportAudioFile(
+            versionId: version.id,
+            destPath: destPath,
+          );
+        });
         if (!context.mounted) return;
-        Navigator.of(context).pop(); // pop progress indicator
-        ScaffoldMessenger.of(
+        showAetherToast(
           context,
-        ).showSnackBar(const SnackBar(content: Text('音频文件导出还原成功！')));
+          message: '音频文件导出还原成功！',
+          kind: AetherToastKind.success,
+        );
       }
     } catch (e) {
       if (!context.mounted) return;
-      Navigator.of(context).pop();
-      ScaffoldMessenger.of(
+      showAetherToast(
         context,
-      ).showSnackBar(SnackBar(content: Text('导出失败: $e')));
+        message: '导出失败: $e',
+        kind: AetherToastKind.error,
+      );
     }
   }
 
@@ -284,18 +291,23 @@ class DetailPane extends StatelessWidget {
       return const SizedBox.shrink();
     }
     return ClipRRect(
-      borderRadius: const BorderRadius.horizontal(left: Radius.circular(22)),
+      borderRadius: const BorderRadius.horizontal(
+        left: Radius.circular(AetherRadius.xxl),
+      ),
       child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 28, sigmaY: 28),
+        filter: ImageFilter.blur(
+          sigmaX: cfg.glassBlurDefault,
+          sigmaY: cfg.glassBlurDefault,
+        ),
         child: Container(
           decoration: BoxDecoration(
-            color: cfg.bgPanel.withOpacity(0.88),
+            color: cfg.bgPanel.withValues(alpha: 0.92),
             border: Border(
-              left: BorderSide(color: cfg.border.withOpacity(0.9)),
+              left: BorderSide(color: cfg.borderSubtle),
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.26),
+                color: cfg.scrim.withValues(alpha: 0.26),
                 blurRadius: 42,
                 offset: const Offset(-14, 0),
               ),
@@ -305,12 +317,19 @@ class DetailPane extends StatelessWidget {
             children: [
               Align(
                 alignment: Alignment.topRight,
-                child: IconButton(
-                  icon: Icon(Icons.close, color: cfg.textSub),
-                  onPressed: () => audioProvider.setDetailOpen(false),
+                child: Padding(
+                  padding: const EdgeInsets.only(
+                    top: AetherSpace.sm,
+                    right: AetherSpace.sm,
+                  ),
+                  child: AetherIconButton(
+                    icon: Icons.close_rounded,
+                    tooltip: '关闭详情',
+                    onPressed: () => audioProvider.setDetailOpen(false),
+                    color: cfg.textSecondary,
+                  ),
                 ),
               ),
-
               Expanded(
                 child: _buildContent(
                   context,
@@ -320,57 +339,18 @@ class DetailPane extends StatelessWidget {
                   cfg,
                 ),
               ),
-              Divider(height: 1, color: cfg.border),
-              Row(
-                children: [
-                  _buildTab(context, '滚动歌词', 'lyrics', audioProvider, cfg),
-                  _buildTab(
-                    context,
-                    '歌词管理',
-                    'lyric_manager',
-                    audioProvider,
-                    cfg,
-                  ),
-                  _buildTab(context, '标签管理', 'tags', audioProvider, cfg),
-                  _buildTab(context, '音源版本', 'versions', audioProvider, cfg),
+              Divider(height: 1, color: cfg.borderSubtle),
+              AetherTabBar(
+                value: audioProvider.activeTab,
+                onChanged: audioProvider.setActiveTab,
+                tabs: const [
+                  AetherTabItem(id: 'lyrics', label: '滚动歌词'),
+                  AetherTabItem(id: 'lyric_manager', label: '歌词管理'),
+                  AetherTabItem(id: 'tags', label: '标签管理'),
+                  AetherTabItem(id: 'versions', label: '音源版本'),
                 ],
               ),
             ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTab(
-    BuildContext context,
-    String title,
-    String tabId,
-    AudioPlayerProvider provider,
-    AppThemeConfig cfg,
-  ) {
-    final isActive = provider.activeTab == tabId;
-    return Expanded(
-      child: InkWell(
-        onTap: () => provider.setActiveTab(tabId),
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          decoration: BoxDecoration(
-            border: Border(
-              top: BorderSide(
-                color: isActive ? cfg.accent : Colors.transparent,
-                width: 2.0,
-              ),
-            ),
-          ),
-          child: Text(
-            title,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
-              color: isActive ? cfg.textMain : cfg.textSub,
-            ),
           ),
         ),
       ),
@@ -383,21 +363,21 @@ class DetailPane extends StatelessWidget {
     AppThemeConfig cfg,
   ) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 2, 18, 8),
+      padding: const EdgeInsets.fromLTRB(AetherSpace.xxl - 2, AetherSpace.xxs, AetherSpace.xxl - 2, AetherSpace.md),
       child: Column(
         children: [
-          SongCoverArt(song: song, cfg: cfg, size: 124, borderRadius: 16),
-          const SizedBox(height: 14),
+          SongCoverArt(song: song, cfg: cfg, size: 124, borderRadius: AetherRadius.xl),
+          const SizedBox(height: AetherSpace.lg + 2),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 6),
+            padding: const EdgeInsets.symmetric(horizontal: AetherSpace.sm),
             child: _EditableMetadataText(
               value: song.title,
               emptyText: '未命名歌曲',
               textAlign: TextAlign.center,
               style: TextStyle(
-                fontSize: 16,
+                fontSize: AetherType.title,
                 fontWeight: FontWeight.bold,
-                color: cfg.textMain,
+                color: cfg.textPrimary,
               ),
               cfg: cfg,
               onSave: (value) => _saveSongMetadata(context, song, title: value),
@@ -410,7 +390,7 @@ class DetailPane extends StatelessWidget {
               value: song.artist ?? '',
               emptyText: '未知歌手',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 12, color: cfg.textSub),
+              style: AetherType.bodySmStyle(cfg.textSecondary),
               cfg: cfg,
               onSave: (value) =>
                   _saveSongMetadata(context, song, artist: value),
@@ -452,7 +432,7 @@ class DetailPane extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
             child: Text(
               '“默认播放版本”是在播放这首歌时优先使用的音源；若正在播放，会按当前进度切到新版本。',
-              style: TextStyle(color: cfg.textSub, fontSize: 10, height: 1.5),
+              style: AetherType.captionStyle(cfg.textSecondary).copyWith(height: 1.5),
             ),
           ),
           Expanded(
@@ -468,26 +448,20 @@ class DetailPane extends StatelessWidget {
                     .toString()
                     .padLeft(2, '0');
 
-                return Card(
-                  margin: const EdgeInsets.only(bottom: 12),
-                  color: Colors.white.withOpacity(0.04),
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    side: BorderSide(color: cfg.border),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Column(
+                return AetherSurface(
+                  margin: const EdgeInsets.only(bottom: AetherSpace.lg),
+                  level: AetherSurfaceLevel.panel,
+                  color: cfg.bgHover,
+                  borderRadius: BorderRadius.circular(AetherRadius.md),
+                  padding: const EdgeInsets.all(AetherSpace.lg),
+                  child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         // Filename
                         Text(
                           v.originalName,
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13,
-                            color: cfg.textMain,
+                          style: AetherType.titleSmStyle(cfg.textPrimary).copyWith(
+                            fontWeight: FontWeight.w700,
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
@@ -497,7 +471,7 @@ class DetailPane extends StatelessWidget {
                         // Technical specs
                         Text(
                           '${v.format?.toUpperCase() ?? "未知"} | ${(v.bitrate ?? 0) ~/ 1000}kbps | ${v.sampleRate != null ? (v.sampleRate! / 1000).toStringAsFixed(1) : "未知"}kHz | $durationMin:$durationSec | ${_formatFileSize(v.fileSize.toInt())} | ${_formatLoudness(v.loudness)}',
-                          style: TextStyle(fontSize: 10, color: cfg.textSub),
+                          style: AetherType.captionStyle(cfg.textSecondary),
                         ),
                         const SizedBox(height: 6),
                         Align(
@@ -510,18 +484,18 @@ class DetailPane extends StatelessWidget {
                             decoration: BoxDecoration(
                               color:
                                   (v.metadataScanned
-                                          ? const Color(0xFF10B981)
-                                          : cfg.textSub)
-                                      .withOpacity(0.12),
-                              borderRadius: BorderRadius.circular(6),
+                                          ? cfg.success
+                                          : cfg.textSecondary)
+                                      .withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(AetherRadius.sm),
                             ),
                             child: Text(
                               v.metadataScanned ? '已完整扫描' : '待完整扫描',
                               style: TextStyle(
                                 color: v.metadataScanned
-                                    ? const Color(0xFF10B981)
-                                    : cfg.textSub,
-                                fontSize: 10,
+                                    ? cfg.success
+                                    : cfg.textSecondary,
+                                fontSize: AetherType.caption,
                                 fontWeight: FontWeight.w700,
                               ),
                             ),
@@ -533,7 +507,7 @@ class DetailPane extends StatelessWidget {
                           alignment: Alignment.centerLeft,
                           child: Tooltip(
                             message: '播放这首歌时优先使用的版本；若正在播放，会按当前进度切到新版本。',
-                            child: InkWell(
+                            child: AetherPressable(
                               onTap: () => _setPrimaryVersion(
                                 context,
                                 song,
@@ -548,18 +522,15 @@ class DetailPane extends StatelessWidget {
                                     v.isPrimary
                                         ? Icons.radio_button_checked
                                         : Icons.radio_button_off,
-                                    size: 16,
+                                    size: AetherIconSize.md,
                                     color: v.isPrimary
                                         ? cfg.accent
-                                        : cfg.textSub,
+                                        : cfg.textSecondary,
                                   ),
-                                  const SizedBox(width: 4),
+                                  const SizedBox(width: AetherSpace.xs),
                                   Text(
                                     '默认播放版本',
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      color: cfg.textMain,
-                                    ),
+                                    style: AetherType.bodySmStyle(cfg.textPrimary),
                                   ),
                                 ],
                               ),
@@ -574,28 +545,17 @@ class DetailPane extends StatelessWidget {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            TextButton.icon(
+                            AetherButton.ghost(
+                              label: '导出物理文件',
+                              icon: Icons.download,
+                              size: AetherButtonSize.sm,
                               onPressed: () => _exportVersion(context, v),
-                              icon: Icon(
-                                Icons.download,
-                                size: 13,
-                                color: cfg.textSub,
-                              ),
-                              label: Text(
-                                '导出物理文件',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: cfg.textSub,
-                                ),
-                              ),
-                              style: TextButton.styleFrom(
-                                padding: EdgeInsets.zero,
-                                minimumSize: Size.zero,
-                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                              ),
                             ),
                             if (song.versions.length > 1)
-                              TextButton.icon(
+                              AetherButton.danger(
+                                label: '删除版本',
+                                icon: Icons.delete_outline_rounded,
+                                size: AetherButtonSize.sm,
                                 onPressed: () async {
                                   final confirmed = await _confirmDeleteVersion(
                                     context,
@@ -607,9 +567,6 @@ class DetailPane extends StatelessWidget {
                                   if (!context.mounted) {
                                     return;
                                   }
-                                  final messenger = ScaffoldMessenger.of(
-                                    context,
-                                  );
                                   try {
                                     await libraryProvider.deleteAudioVersion(
                                       v.id,
@@ -617,67 +574,41 @@ class DetailPane extends StatelessWidget {
                                     if (!context.mounted) {
                                       return;
                                     }
-                                    messenger.showSnackBar(
-                                      const SnackBar(content: Text('音频版本已删除')),
+                                    showAetherToast(
+                                      context,
+                                      message: '音频版本已删除',
+                                      kind: AetherToastKind.success,
                                     );
                                   } catch (e) {
                                     if (!context.mounted) {
                                       return;
                                     }
-                                    messenger.showSnackBar(
-                                      SnackBar(content: Text('删除失败: $e')),
+                                    showAetherToast(
+                                      context,
+                                      message: '删除失败: $e',
+                                      kind: AetherToastKind.error,
                                     );
                                   }
                                 },
-                                icon: const Icon(
-                                  Icons.delete,
-                                  size: 13,
-                                  color: Colors.redAccent,
-                                ),
-                                label: const Text(
-                                  '删除版本',
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    color: Colors.redAccent,
-                                  ),
-                                ),
-                                style: TextButton.styleFrom(
-                                  padding: EdgeInsets.zero,
-                                  minimumSize: Size.zero,
-                                  tapTargetSize:
-                                      MaterialTapTargetSize.shrinkWrap,
-                                ),
                               ),
                           ],
                         ),
                       ],
                     ),
-                  ),
                 );
               },
             ),
           ),
 
           // Link New Version button
-          Container(
-            padding: const EdgeInsets.all(16),
-            child: SizedBox(
-              width: double.infinity,
-              height: 38,
-              child: ElevatedButton.icon(
-                onPressed: () =>
-                    _linkNewVersion(context, song, libraryProvider),
-                icon: const Icon(Icons.add, size: 16),
-                label: const Text('关联新的音源版本', style: TextStyle(fontSize: 12)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: cfg.accent,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  elevation: 0,
-                ),
-              ),
+          Padding(
+            padding: const EdgeInsets.all(AetherSpace.xl),
+            child: AetherButton.primary(
+              label: '关联新的音源版本',
+              icon: Icons.add_rounded,
+              expanded: true,
+              onPressed: () =>
+                  _linkNewVersion(context, song, libraryProvider),
             ),
           ),
         ],
@@ -686,54 +617,52 @@ class DetailPane extends StatelessWidget {
 
     if (audioProvider.activeTab == 'tags') {
       return ListView.builder(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(AetherSpace.xl),
         itemCount: libraryProvider.tags.length,
         itemBuilder: (context, index) {
           final tag = libraryProvider.tags[index];
           final isBound = song.tags.any((t) => t.id == tag.id);
           final tagColor = tag.color != null
-              ? _parseHexColor(tag.color!, cfg.textSub)
-              : cfg.textSub;
+              ? _parseHexColor(tag.color!, cfg.textSecondary)
+              : cfg.textSecondary;
 
           return Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: InkWell(
+            padding: const EdgeInsets.only(bottom: AetherSpace.md),
+            child: AetherPressable(
               onTap: () async {
                 await libraryProvider.tagSong(song.id, tag.id, !isBound);
               },
-              borderRadius: BorderRadius.circular(6),
+              borderRadius: BorderRadius.circular(AetherRadius.sm),
               child: Container(
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
+                  horizontal: AetherSpace.lg,
+                  vertical: AetherSpace.md,
                 ),
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.02),
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: cfg.border.withOpacity(0.5)),
+                  color: cfg.bgHover,
+                  borderRadius: BorderRadius.circular(AetherRadius.sm),
+                  border: Border.all(color: cfg.borderSubtle.withValues(alpha: 0.5)),
                 ),
                 child: Row(
                   children: [
                     Icon(
                       isBound ? Icons.check_box : Icons.check_box_outline_blank,
-                      size: 16,
-                      color: isBound ? cfg.accent : cfg.textSub,
+                      size: AetherIconSize.md,
+                      color: isBound ? cfg.accent : cfg.textSecondary,
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: AetherSpace.md),
                     Container(
-                      width: 8,
-                      height: 8,
+                      width: AetherSpace.md,
+                      height: AetherSpace.md,
                       decoration: BoxDecoration(
                         color: tagColor,
                         shape: BoxShape.circle,
                       ),
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: AetherSpace.md),
                     Text(
                       '[${tag.category ?? "自定义"}] ${tag.name}',
-                      style: TextStyle(
-                        color: tagColor,
-                        fontSize: 13,
+                      style: AetherType.titleSmStyle(tagColor).copyWith(
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -857,9 +786,7 @@ class _EditableMetadataTextState extends State<_EditableMetadataText> {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('保存失败: $e')));
+      showAetherToast(context, message: '保存失败: $e', kind: AetherToastKind.error);
       _controller.text = widget.value;
       setState(() {
         _isEditing = false;
@@ -894,17 +821,17 @@ class _EditableMetadataTextState extends State<_EditableMetadataText> {
         behavior: HitTestBehavior.opaque,
         onTap: _startEditing,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 140),
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          duration: AetherMotion.press,
+          padding: const EdgeInsets.symmetric(horizontal: AetherSpace.md, vertical: AetherSpace.xs),
           decoration: BoxDecoration(
             color: showEditFrame
-                ? cfg.bgHover.withOpacity(0.18)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(7),
+                ? cfg.bgHover.withValues(alpha: 0.18)
+                : cfg.bgHover.withValues(alpha: 0),
+            borderRadius: BorderRadius.circular(AetherRadius.sm),
             border: Border.all(
               color: showEditFrame
-                  ? cfg.accent.withOpacity(0.34)
-                  : Colors.transparent,
+                  ? cfg.accent.withValues(alpha: 0.34)
+                  : cfg.bgHover.withValues(alpha: 0),
             ),
           ),
           child: _isEditing
@@ -919,19 +846,14 @@ class _EditableMetadataTextState extends State<_EditableMetadataText> {
                     }
                     return KeyEventResult.ignored;
                   },
-                  child: TextField(
+                  child: AetherTextField.plain(
                     controller: _controller,
                     focusNode: _focusNode,
                     textAlign: widget.textAlign,
-                    maxLines: 1,
                     enabled: !_isSaving,
                     onSubmitted: (_) => _commit(),
                     style: widget.style,
-                    decoration: const InputDecoration(
-                      isDense: true,
-                      border: InputBorder.none,
-                      contentPadding: EdgeInsets.zero,
-                    ),
+                    contentPadding: EdgeInsets.zero,
                   ),
                 )
               : Row(
@@ -950,11 +872,11 @@ class _EditableMetadataTextState extends State<_EditableMetadataText> {
                       ),
                     ),
                     if (showEditFrame) ...[
-                      const SizedBox(width: 6),
+                      const SizedBox(width: AetherSpace.sm),
                       Icon(
                         Icons.edit,
-                        size: 12,
-                        color: cfg.textSub.withOpacity(0.8),
+                        size: AetherIconSize.xs,
+                        color: cfg.textSecondary.withValues(alpha: 0.8),
                       ),
                     ],
                   ],

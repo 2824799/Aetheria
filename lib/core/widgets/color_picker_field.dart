@@ -1,5 +1,9 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
+import 'package:aetheria/core/widgets/aether_button.dart';
+import 'package:aetheria/core/widgets/aether_dialog.dart';
+import 'package:aetheria/core/widgets/aether_pressable.dart';
+import 'package:aetheria/core/widgets/aether_text_field.dart';
 
 class ColorPickerField extends StatefulWidget {
   final String value;
@@ -46,50 +50,57 @@ class _ColorPickerFieldState extends State<ColorPickerField> {
     return '#3B82F6';
   }
 
-  void _openCustomColorDialog() {
-    showDialog(
+  Future<void> _openCustomColorDialog() async {
+    final result = await showAetherDialog<String>(
       context: context,
       builder: (ctx) => _CustomColorDialog(
         initialColor: widget.value,
         cfg: widget.cfg,
-        onConfirm: (hex) => widget.onChanged(hex),
       ),
     );
+    if (result != null) {
+      widget.onChanged(result);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final cfg = widget.cfg;
     final selected = _normalizeHex(widget.value);
-    final isPreset = _presetColors.any((c) => c.toLowerCase() == selected.toLowerCase());
+    final isPreset = _presetColors.any(
+      (c) => c.toLowerCase() == selected.toLowerCase(),
+    );
 
     return Wrap(
-      spacing: 8,
-      runSpacing: 8,
+      spacing: AetherSpace.md,
+      runSpacing: AetherSpace.md,
       children: [
         ..._presetColors.map((colorHex) {
           final color = _parseHexColor(colorHex);
           final isSelected = selected.toLowerCase() == colorHex.toLowerCase();
-          return InkWell(
+          return AetherPressable(
             onTap: () => widget.onChanged(colorHex),
-            borderRadius: BorderRadius.circular(6),
+            borderRadius: BorderRadius.circular(AetherRadius.sm),
             child: Container(
               width: 26,
               height: 26,
               decoration: BoxDecoration(
                 color: color,
-                borderRadius: BorderRadius.circular(6),
+                borderRadius: BorderRadius.circular(AetherRadius.sm),
                 border: Border.all(
-                  color: isSelected ? cfg.textMain : Colors.white.withOpacity(0.18),
+                  color: isSelected
+                      ? cfg.textPrimary
+                      : cfg.borderSubtle.withValues(alpha: 0.9),
                   width: isSelected ? 2.2 : 1,
                 ),
               ),
             ),
           );
         }),
-        InkWell(
+        AetherPressable(
           onTap: _openCustomColorDialog,
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(AetherRadius.sm),
+          tooltip: '自定义颜色',
           child: Container(
             width: 26,
             height: 26,
@@ -100,14 +111,16 @@ class _ColorPickerFieldState extends State<ColorPickerField> {
                       colors: [Colors.red, Colors.green, Colors.blue],
                     ),
               color: isPreset ? cfg.bgHover : null,
-              borderRadius: BorderRadius.circular(6),
+              borderRadius: BorderRadius.circular(AetherRadius.sm),
               border: Border.all(
-                color: isPreset ? Colors.white.withOpacity(0.18) : cfg.textMain,
+                color: isPreset
+                    ? cfg.borderSubtle.withValues(alpha: 0.9)
+                    : cfg.textPrimary,
                 width: isPreset ? 1 : 2.2,
               ),
             ),
             child: isPreset
-                ? Icon(Icons.color_lens, size: 14, color: cfg.textSub)
+                ? Icon(Icons.color_lens, size: 14, color: cfg.textSecondary)
                 : const Icon(Icons.check, size: 14, color: Colors.white),
           ),
         ),
@@ -119,12 +132,10 @@ class _ColorPickerFieldState extends State<ColorPickerField> {
 class _CustomColorDialog extends StatefulWidget {
   final String initialColor;
   final AppThemeConfig cfg;
-  final ValueChanged<String> onConfirm;
 
   const _CustomColorDialog({
     required this.initialColor,
     required this.cfg,
-    required this.onConfirm,
   });
 
   @override
@@ -141,10 +152,12 @@ class _CustomColorDialogState extends State<_CustomColorDialog> {
   void initState() {
     super.initState();
     final color = _parseHexColor(widget.initialColor);
-    _red = color.red.toDouble();
-    _green = color.green.toDouble();
-    _blue = color.blue.toDouble();
-    _hexController = TextEditingController(text: _normalizeHex(widget.initialColor));
+    _red = (color.r * 255.0);
+    _green = (color.g * 255.0);
+    _blue = (color.b * 255.0);
+    _hexController = TextEditingController(
+      text: _normalizeHex(widget.initialColor),
+    );
   }
 
   @override
@@ -168,10 +181,11 @@ class _CustomColorDialogState extends State<_CustomColorDialog> {
   }
 
   void _emitFromRgb() {
-    final hex = '#${_red.round().toRadixString(16).padLeft(2, '0')}'
+    final hex =
+        '#${_red.round().toRadixString(16).padLeft(2, '0')}'
         '${_green.round().toRadixString(16).padLeft(2, '0')}'
         '${_blue.round().toRadixString(16).padLeft(2, '0')}'
-        .toUpperCase();
+            .toUpperCase();
     _hexController.text = hex;
   }
 
@@ -179,9 +193,9 @@ class _CustomColorDialogState extends State<_CustomColorDialog> {
     final normalized = _normalizeHex(value);
     final color = _parseHexColor(normalized);
     setState(() {
-      _red = color.red.toDouble();
-      _green = color.green.toDouble();
-      _blue = color.blue.toDouble();
+      _red = color.r * 255.0;
+      _green = color.g * 255.0;
+      _blue = color.b * 255.0;
       _hexController.text = normalized;
     });
   }
@@ -189,65 +203,80 @@ class _CustomColorDialogState extends State<_CustomColorDialog> {
   @override
   Widget build(BuildContext context) {
     final cfg = widget.cfg;
-    return AlertDialog(
-      backgroundColor: cfg.bgPanel,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      title: Text('自定义颜色', style: TextStyle(color: cfg.textMain, fontSize: 16, fontWeight: FontWeight.bold)),
-      content: SizedBox(
-        width: 280,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: Color.fromARGB(255, _red.round(), _green.round(), _blue.round()),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: cfg.border),
+    return AetherDialog(
+      title: '自定义颜色',
+      maxWidth: 320,
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: Color.fromARGB(
+                    255,
+                    _red.round(),
+                    _green.round(),
+                    _blue.round(),
                   ),
+                  borderRadius: BorderRadius.circular(AetherRadius.sm),
+                  border: Border.all(color: cfg.borderSubtle),
                 ),
-                const SizedBox(width: 12),
-                SizedBox(
-                  width: 110,
-                  height: 36,
-                  child: TextField(
-                    controller: _hexController,
-                    style: TextStyle(color: cfg.textMain, fontSize: 12, fontFamily: 'monospace'),
-                    decoration: InputDecoration(
-                      filled: true,
-                      fillColor: Colors.black.withOpacity(0.08),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 10),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: cfg.border)),
-                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: cfg.border)),
-                    ),
-                    onSubmitted: _applyHex,
-                  ),
+              ),
+              const SizedBox(width: AetherSpace.lg),
+              Expanded(
+                child: AetherTextField(
+                  controller: _hexController,
+                  hintText: '#RRGGBB',
+                  height: AetherSpace.controlHeight,
+                  onSubmitted: _applyHex,
                 ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            _buildChannelSlider('R', _red, Colors.redAccent, (v) => setState(() { _red = v; _emitFromRgb(); })),
-            _buildChannelSlider('G', _green, Colors.greenAccent, (v) => setState(() { _green = v; _emitFromRgb(); })),
-            _buildChannelSlider('B', _blue, Colors.blueAccent, (v) => setState(() { _blue = v; _emitFromRgb(); })),
-          ],
-        ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AetherSpace.xl),
+          _buildChannelSlider(
+            'R',
+            _red,
+            Colors.redAccent,
+            (v) => setState(() {
+              _red = v;
+              _emitFromRgb();
+            }),
+          ),
+          _buildChannelSlider(
+            'G',
+            _green,
+            Colors.green,
+            (v) => setState(() {
+              _green = v;
+              _emitFromRgb();
+            }),
+          ),
+          _buildChannelSlider(
+            'B',
+            _blue,
+            Colors.blueAccent,
+            (v) => setState(() {
+              _blue = v;
+              _emitFromRgb();
+            }),
+          ),
+        ],
       ),
       actions: [
-        TextButton(
+        AetherButton.ghost(
+          label: '取消',
           onPressed: () => Navigator.of(context).pop(),
-          child: Text('取消', style: TextStyle(color: cfg.textSub)),
         ),
-        ElevatedButton(
+        AetherButton.primary(
+          label: '确定',
           onPressed: () {
-            widget.onConfirm(_normalizeHex(_hexController.text));
-            Navigator.of(context).pop();
+            Navigator.of(context).pop(_normalizeHex(_hexController.text));
           },
-          style: ElevatedButton.styleFrom(backgroundColor: cfg.accent, foregroundColor: Colors.white),
-          child: const Text('确定'),
         ),
       ],
     );
@@ -259,39 +288,45 @@ class _CustomColorDialogState extends State<_CustomColorDialog> {
     Color color,
     ValueChanged<double> onChanged,
   ) {
-    return Row(
-      children: [
-        SizedBox(
-          width: 16,
-          child: Text(
-            label,
-            style: TextStyle(
-              color: widget.cfg.textSub,
-              fontSize: 11,
-              fontWeight: FontWeight.bold,
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AetherSpace.sm),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 16,
+            child: Text(
+              label,
+              style: AetherType.labelStyle(widget.cfg.textSecondary),
             ),
           ),
-        ),
-        Expanded(
-          child: Slider(
-            value: value,
-            min: 0,
-            max: 255,
-            divisions: 255,
-            activeColor: color,
-            inactiveColor: widget.cfg.border,
-            onChanged: onChanged,
+          Expanded(
+            child: SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                activeTrackColor: color,
+                thumbColor: color,
+                inactiveTrackColor: widget.cfg.sliderTrack,
+                overlayShape: SliderComponentShape.noOverlay,
+                trackHeight: 3,
+              ),
+              child: Slider(
+                value: value.clamp(0, 255),
+                min: 0,
+                max: 255,
+                divisions: 255,
+                onChanged: onChanged,
+              ),
+            ),
           ),
-        ),
-        SizedBox(
-          width: 28,
-          child: Text(
-            value.round().toString(),
-            textAlign: TextAlign.right,
-            style: TextStyle(color: widget.cfg.textSub, fontSize: 10),
+          SizedBox(
+            width: 28,
+            child: Text(
+              value.round().toString(),
+              textAlign: TextAlign.right,
+              style: AetherType.captionStyle(widget.cfg.textSecondary),
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
