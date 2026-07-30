@@ -93,8 +93,8 @@ class _AetherToastHostState extends State<_AetherToastHost>
     super.initState();
     _controller = AnimationController(
       vsync: this,
-      duration: AetherMotion.normal,
-      reverseDuration: AetherMotion.exit(AetherMotion.normal),
+      duration: Duration.zero,
+      reverseDuration: Duration.zero,
     );
     _opacity = CurvedAnimation(
       parent: _controller,
@@ -116,8 +116,12 @@ class _AetherToastHostState extends State<_AetherToastHost>
       if (!mounted) return;
       final reduce = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
       if (reduce) {
+        _controller.duration = Duration.zero;
+        _controller.reverseDuration = Duration.zero;
         _controller.value = 1;
       } else {
+        _controller.duration = AetherMotion.normal;
+        _controller.reverseDuration = AetherMotion.exit(AetherMotion.normal);
         _controller.forward();
       }
       _hold = Timer(widget.duration, _dismiss);

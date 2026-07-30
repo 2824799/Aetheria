@@ -149,7 +149,8 @@ class _MobileSongDetailSheetState extends State<MobileSongDetailSheet> {
   Widget build(BuildContext context) {
     final libraryProvider = context.watch<LibraryProvider>();
     final audioProvider = context.watch<AudioPlayerProvider>();
-    final cfg = context.watch<UIThemeProvider>().currentTheme;
+    context.watch<UIThemeProvider>();
+    final cfg = context.tokens;
 
     final currentActiveSong = audioProvider.activeSong ?? widget.initialSong;
 
@@ -218,7 +219,7 @@ class _MobileSongDetailSheetState extends State<MobileSongDetailSheet> {
                       letterSpacing: 1,
                     ),
                   ),
-                  const SizedBox(width: 44),
+                  const SizedBox(width: AetherSpace.giant - 4),
                 ],
               ),
             ),

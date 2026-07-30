@@ -52,7 +52,7 @@ class MobileSongTile extends StatelessWidget {
         pressedColor: cfg.pressed,
         child: Container(
           decoration: BoxDecoration(
-            color: isActive ? cfg.bgHover : cfg.bgPanel,
+            color: isActive ? cfg.bgHover : cfg.bg1,
             borderRadius: BorderRadius.circular(AetherRadius.md),
             border: Border(
               left: BorderSide(

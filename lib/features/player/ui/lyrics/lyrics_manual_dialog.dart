@@ -94,7 +94,7 @@ class ManualLyricDialogState extends State<ManualLyricDialog> {
               ),
             ),
             if (_error != null) ...[
-              const SizedBox(height: 8),
+              const SizedBox(height: AetherSpace.md),
               Text(
                 _error!,
                 style: AetherType.bodySmStyle(widget.cfg.danger),

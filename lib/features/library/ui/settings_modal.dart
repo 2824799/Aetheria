@@ -27,33 +27,9 @@ class SettingsModal extends StatefulWidget {
   const SettingsModal({super.key});
 
   static void show(BuildContext context) {
-    final scrim = context.tokens.scrim;
-    showGeneralDialog<void>(
+    showAetherModalPage<void>(
       context: context,
-      barrierDismissible: true,
-      barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
-      barrierColor: scrim,
-      transitionDuration: AetherMotion.normal,
-      pageBuilder: (context, animation, secondaryAnimation) {
-        return const SettingsModal();
-      },
-      transitionBuilder: (context, animation, secondaryAnimation, child) {
-        final curved = CurvedAnimation(
-          parent: animation,
-          curve: AetherMotion.out,
-          reverseCurve: AetherMotion.out,
-        );
-        return FadeTransition(
-          opacity: curved,
-          child: ScaleTransition(
-            scale: Tween<double>(
-              begin: AetherMotion.modalFromScale,
-              end: 1,
-            ).animate(curved),
-            child: child,
-          ),
-        );
-      },
+      builder: (context) => const SettingsModal(),
     );
   }
 
@@ -74,7 +50,7 @@ class _SettingsModalState extends State<SettingsModal> {
     final audioProvider = context.watch<AudioPlayerProvider>();
     final syncProvider = context.watch<SyncProvider>();
     final floatingLyricsProvider = context.watch<FloatingLyricsProvider>();
-    final cfg = themeProvider.currentTheme;
+    final cfg = context.tokens;
 
     final isDesktop = !Platform.isAndroid && !Platform.isIOS;
 

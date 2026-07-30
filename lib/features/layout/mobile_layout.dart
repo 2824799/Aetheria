@@ -104,8 +104,8 @@ class _MobileLayoutState extends State<MobileLayout>
   Widget build(BuildContext context) {
     final libraryProvider = context.watch<LibraryProvider>();
     final audioProvider = context.watch<AudioPlayerProvider>();
-    final themeProvider = context.watch<UIThemeProvider>();
-    final cfg = themeProvider.currentTheme;
+    context.watch<UIThemeProvider>();
+    final cfg = context.tokens;
 
     final songs = libraryProvider.displaySongs;
     final playlists = libraryProvider.playlists;

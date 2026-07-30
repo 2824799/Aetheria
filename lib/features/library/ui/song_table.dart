@@ -13,6 +13,7 @@ import 'package:aetheria/core/widgets/aether_dialog.dart';
 import 'package:aetheria/core/widgets/aether_empty_state.dart';
 import 'package:aetheria/core/widgets/aether_icon_button.dart';
 import 'package:aetheria/core/widgets/aether_toast.dart';
+import 'package:aetheria/core/widgets/aether_menu.dart';
 import 'package:aetheria/features/library/ui/song_table/song_columns.dart';
 import 'package:aetheria/features/library/ui/song_table/song_table_cells.dart';
 import 'package:aetheria/src/rust/models/playlist.dart';
@@ -244,23 +245,10 @@ class _SongTableState extends State<SongTable> {
     final targetSongIds = isRowAlreadySelected
         ? List<String>.from(_selectedSongIds)
         : <String>[song.id];
-    final cfg = context.read<UIThemeProvider>().currentTheme;
-    final result = await showMenu<String>(
+    final result = await showAetherMenu<String>(
       context: context,
-      position: RelativeRect.fromLTRB(
-        position.dx,
-        position.dy,
-        MediaQuery.of(context).size.width - position.dx,
-        MediaQuery.of(context).size.height - position.dy,
-      ),
-      color: cfg.bgPanel.withValues(alpha: 0.98),
-      surfaceTintColor: cfg.bgPopover.withValues(alpha: 0),
-      shadowColor: cfg.scrim.withValues(alpha: 0.28),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(AetherRadius.lg),
-        side: BorderSide(color: cfg.borderSubtle.withValues(alpha: 0.9)),
-      ),
-      items: _buildContextMenuItems(provider, cfg),
+      globalPosition: position,
+      items: _buildContextMenuItems(provider),
     );
 
     if (!mounted || result == null) {
@@ -305,43 +293,39 @@ class _SongTableState extends State<SongTable> {
     await _handleCommand(result, targetSongIds, provider);
   }
 
-  List<PopupMenuEntry<String>> _buildContextMenuItems(
+  List<AetherMenuItem<String>> _buildContextMenuItems(
     LibraryProvider provider,
-    AppThemeConfig cfg,
   ) {
-    final items = <PopupMenuEntry<String>>[
-      _menuItem('copy', Icons.copy, '复制所选歌曲', cfg),
-      _menuItem('cut', Icons.content_cut, '剪切所选歌曲', cfg),
-      _menuItem(
-        'delete',
-        Icons.delete_forever,
-        '彻底删除歌曲',
-        cfg,
-        color: cfg.danger,
+    final items = <AetherMenuItem<String>>[
+      const AetherMenuItem(value: 'copy', label: '复制所选歌曲', icon: Icons.copy),
+      const AetherMenuItem(value: 'cut', label: '剪切所选歌曲', icon: Icons.content_cut),
+      const AetherMenuItem(
+        value: 'delete',
+        label: '彻底删除歌曲',
+        icon: Icons.delete_forever,
+        destructive: true,
       ),
     ];
 
     if (provider.activePlaylistId != null) {
       items.add(
-        _menuItem(
-          'remove_playlist',
-          Icons.playlist_remove,
-          '从当前歌单移除',
-          cfg,
-          color: cfg.warning,
+        const AetherMenuItem(
+          value: 'remove_playlist',
+          label: '从当前歌单移除',
+          icon: Icons.playlist_remove,
+          warning: true,
         ),
       );
     }
 
     if (provider.playlists.isNotEmpty) {
-      items.add(const PopupMenuDivider(height: 8));
+      items.add(const AetherMenuItem.divider());
       for (final playlist in provider.playlists) {
         items.add(
-          _menuItem(
-            'playlist:${playlist.id}',
-            Icons.playlist_add,
-            '添加到歌单 · ${playlist.name}',
-            cfg,
+          AetherMenuItem(
+            value: 'playlist:${playlist.id}',
+            label: '添加到歌单 · ${playlist.name}',
+            icon: Icons.playlist_add,
           ),
         );
       }
@@ -351,45 +335,17 @@ class _SongTableState extends State<SongTable> {
         ? null
         : (provider.clipboard!['songIds'] as List).length;
     if (provider.activePlaylistId != null && clipboardCount != null) {
-      items.add(const PopupMenuDivider(height: 8));
+      items.add(const AetherMenuItem.divider());
       items.add(
-        _menuItem('paste', Icons.paste, '粘贴歌曲 ($clipboardCount 首)', cfg),
+        AetherMenuItem(
+          value: 'paste',
+          label: '粘贴歌曲 ($clipboardCount 首)',
+          icon: Icons.paste,
+        ),
       );
     }
 
     return items;
-  }
-
-  PopupMenuItem<String> _menuItem(
-    String value,
-    IconData icon,
-    String label,
-    AppThemeConfig cfg, {
-    Color? color,
-  }) {
-    final foreground = color ?? cfg.textPrimary;
-    return PopupMenuItem<String>(
-      value: value,
-      height: 36,
-      child: Row(
-        children: [
-          Icon(icon, size: 16, color: foreground.withValues(alpha: 0.95)),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: foreground,
-                fontSize: AetherType.body,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
   }
 
   Future<void> _handleCommand(
@@ -622,7 +578,8 @@ class _SongTableState extends State<SongTable> {
   Widget build(BuildContext context) {
     final libraryProvider = context.watch<LibraryProvider>();
     final audioProvider = context.watch<AudioPlayerProvider>();
-    final cfg = context.watch<UIThemeProvider>().currentTheme;
+    context.watch<UIThemeProvider>();
+    final cfg = context.tokens;
     final songs = libraryProvider.displaySongs;
 
     if (songs.isEmpty) {

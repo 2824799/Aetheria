@@ -4,6 +4,8 @@ import 'package:provider/provider.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
 import 'package:aetheria/core/providers/library_provider.dart';
 import 'package:aetheria/core/widgets/aether_button.dart';
+import 'package:aetheria/core/widgets/aether_dialog.dart';
+import 'package:aetheria/core/widgets/aether_dropdown.dart';
 import 'package:aetheria/core/widgets/aether_empty_state.dart';
 import 'package:aetheria/core/widgets/aether_icon_button.dart';
 import 'package:aetheria/core/widgets/aether_surface.dart';
@@ -18,33 +20,9 @@ class TagManagerModal extends StatefulWidget {
   static const presets = ['流派', '语言', '情绪', '场景', '自定义'];
 
   static void show(BuildContext context) {
-    final scrim = context.tokens.scrim;
-    showGeneralDialog<void>(
+    showAetherModalPage<void>(
       context: context,
-      barrierDismissible: true,
-      barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
-      barrierColor: scrim,
-      transitionDuration: AetherMotion.normal,
-      pageBuilder: (context, animation, secondaryAnimation) {
-        return const TagManagerModal();
-      },
-      transitionBuilder: (context, animation, secondaryAnimation, child) {
-        final curved = CurvedAnimation(
-          parent: animation,
-          curve: AetherMotion.out,
-          reverseCurve: AetherMotion.out,
-        );
-        return FadeTransition(
-          opacity: curved,
-          child: ScaleTransition(
-            scale: Tween<double>(
-              begin: AetherMotion.modalFromScale,
-              end: 1,
-            ).animate(curved),
-            child: child,
-          ),
-        );
-      },
+      builder: (context) => const TagManagerModal(),
     );
   }
 
@@ -169,49 +147,22 @@ class _TagManagerModalState extends State<TagManagerModal> {
     }
   }
 
-  InputDecoration _dropdownDecoration(AppThemeConfig cfg) {
-    return InputDecoration(
-      filled: true,
-      fillColor: cfg.bgHover,
-      isDense: true,
-      contentPadding: const EdgeInsets.symmetric(horizontal: AetherSpace.lg),
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(AetherRadius.md),
-        borderSide: BorderSide(color: cfg.borderSubtle),
-      ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(AetherRadius.md),
-        borderSide: BorderSide(color: cfg.borderSubtle),
-      ),
-    );
-  }
-
   Widget _categoryDropdown(AppThemeConfig cfg, {double? width}) {
     final dropdownValue = TagManagerModal.presets.contains(_selectedCategory)
         ? _selectedCategory
         : '自定义';
 
-    final field = SizedBox(
-      height: AetherSpace.controlHeight,
+    return AetherDropdown<String>(
+      value: dropdownValue,
       width: width,
-      child: DropdownButtonFormField<String>(
-        key: ValueKey('cat-$dropdownValue-$_editingTagId'),
-        initialValue: dropdownValue,
-        style: AetherType.bodyStyle(cfg.textPrimary),
-        dropdownColor: cfg.bgPopover,
-        decoration: _dropdownDecoration(cfg),
-        items: TagManagerModal.presets
-            .map(
-              (cat) => DropdownMenuItem(
-                value: cat,
-                child: Text(cat, style: AetherType.bodyStyle(cfg.textPrimary)),
-              ),
-            )
-            .toList(),
-        onChanged: _onCategoryChanged,
-      ),
+      items: [
+        for (final cat in TagManagerModal.presets)
+          AetherDropdownItem(value: cat, label: cat),
+      ],
+      onChanged: (value) {
+        if (value != null) _onCategoryChanged(value);
+      },
     );
-    return field;
   }
 
   Widget _buildForm(
@@ -266,7 +217,7 @@ class _TagManagerModalState extends State<TagManagerModal> {
                 _categoryDropdown(cfg, width: 110),
                 if (_isCustomCategory) ...[
                   const SizedBox(width: AetherSpace.md),
-                  SizedBox(width: 110, child: customCategory),
+                  SizedBox(width: AetherSpace.xl * 7, child: customCategory),
                 ],
                 const SizedBox(width: AetherSpace.md),
                 submit,
@@ -367,9 +318,9 @@ class _TagManagerModalState extends State<TagManagerModal> {
 
   @override
   Widget build(BuildContext context) {
-    final themeProvider = context.watch<UIThemeProvider>();
+    context.watch<UIThemeProvider>();
     final libraryProvider = context.watch<LibraryProvider>();
-    final cfg = themeProvider.currentTheme;
+    final cfg = context.tokens;
     final media = MediaQuery.of(context);
     final isCompact = media.size.width < 768;
 

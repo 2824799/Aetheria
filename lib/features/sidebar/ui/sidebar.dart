@@ -5,6 +5,7 @@ import 'package:aetheria/core/providers/ui_theme_provider.dart';
 import 'package:aetheria/core/widgets/aether_button.dart';
 import 'package:aetheria/core/widgets/aether_dialog.dart';
 import 'package:aetheria/core/widgets/aether_icon_button.dart';
+import 'package:aetheria/core/widgets/aether_menu.dart';
 import 'package:aetheria/core/widgets/aether_pressable.dart';
 import 'package:aetheria/core/widgets/aether_text_field.dart';
 import 'package:aetheria/core/widgets/aether_toast.dart';
@@ -18,12 +19,13 @@ class Sidebar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final libraryProvider = context.watch<LibraryProvider>();
-    final cfg = context.watch<UIThemeProvider>().currentTheme;
+    context.watch<UIThemeProvider>();
+    final cfg = context.tokens;
 
     return Container(
       width: width,
       decoration: BoxDecoration(
-        color: cfg.bgPanel,
+        color: cfg.bg1,
         border: Border(right: BorderSide(color: cfg.borderSubtle)),
       ),
       child: Column(
@@ -115,7 +117,7 @@ class Sidebar extends StatelessWidget {
                       vertical: AetherSpace.sm,
                     ),
                     child: Text(
-                      '还没有歌单',
+                      '还没有歌单，点右上角 + 新建',
                       style: AetherType.captionStyle(cfg.textTertiary),
                     ),
                   )
@@ -209,35 +211,16 @@ class Sidebar extends StatelessWidget {
     String currentName,
     LibraryProvider provider,
   ) async {
-    final cfg = context.tokens;
-    final val = await showMenu<String>(
+    final val = await showAetherMenu<String>(
       context: context,
-      position: RelativeRect.fromLTRB(
-        position.dx,
-        position.dy,
-        position.dx,
-        position.dy,
-      ),
-      items: [
-        PopupMenuItem(
-          value: 'rename',
-          child: Row(
-            children: [
-              Icon(Icons.edit_rounded, size: 16, color: cfg.textSecondary),
-              const SizedBox(width: AetherSpace.md),
-              Text('重命名歌单', style: AetherType.bodyStyle(cfg.textPrimary)),
-            ],
-          ),
-        ),
-        PopupMenuItem(
+      globalPosition: position,
+      items: const [
+        AetherMenuItem(value: 'rename', label: '重命名歌单', icon: Icons.edit_rounded),
+        AetherMenuItem(
           value: 'delete',
-          child: Row(
-            children: [
-              Icon(Icons.delete_outline_rounded, size: 16, color: cfg.danger),
-              const SizedBox(width: AetherSpace.md),
-              Text('删除歌单', style: AetherType.bodyStyle(cfg.danger)),
-            ],
-          ),
+          label: '删除歌单',
+          icon: Icons.delete_outline_rounded,
+          destructive: true,
         ),
       ],
     );
@@ -389,7 +372,7 @@ class _SidebarNavItem extends StatelessWidget {
       pressScale: AetherMotion.pressScaleSubtle,
       hoverColor: isActive ? null : cfg.bgHover,
       child: AnimatedContainer(
-        duration: AetherMotion.fast,
+        duration: AetherMotion.duration(context, AetherMotion.fast),
         curve: AetherMotion.out,
         padding: const EdgeInsets.symmetric(
           horizontal: AetherSpace.lg,

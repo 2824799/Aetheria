@@ -268,7 +268,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Padding(
-          padding: EdgeInsets.fromLTRB(16, widget.compact ? 10 : 14, 16, 8),
+          padding: EdgeInsets.fromLTRB(AetherSpace.xl, widget.compact ? AetherSpace.lg - 2 : AetherSpace.lg + 2, AetherSpace.xl, AetherSpace.md),
           child: Row(
             children: [
               Expanded(
@@ -285,12 +285,12 @@ class _LyricsPanelState extends State<LyricsPanel> {
                         fontWeight: FontWeight.w700,
                       ),
                     ),
-                    const SizedBox(height: 2),
+                    const SizedBox(height: AetherSpace.xxs),
                     Text(
                       sourceText,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: cfg.textSecondary, fontSize: AetherType.caption),
+                      style: AetherType.captionStyle(cfg.textSecondary),
                     ),
                   ],
                 ),
@@ -328,7 +328,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
         ),
         if (_error != null)
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+            padding: const EdgeInsets.symmetric(horizontal: AetherSpace.xl),
             child: Text(
               _error!,
               maxLines: 2,
@@ -361,7 +361,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
         .join('\n');
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+      padding: const EdgeInsets.fromLTRB(AetherSpace.xl, AetherSpace.md, AetherSpace.xl, AetherSpace.md),
       child: Container(
         decoration: BoxDecoration(
           color: cfg.bgHover.withValues(alpha: 0.08),
@@ -372,7 +372,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+              padding: const EdgeInsets.fromLTRB(AetherSpace.lg, AetherSpace.lg - 2, AetherSpace.lg, AetherSpace.md),
               child: Row(
                 children: [
                   Expanded(
@@ -397,7 +397,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
                       fontWeight: FontWeight.w700,
                     ),
                   ),
-                  const SizedBox(width: 4),
+                  const SizedBox(width: AetherSpace.xs),
                   Tooltip(
                     message: '复制歌词',
                     child: AetherIconButton(
@@ -424,7 +424,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
             Divider(height: 1, color: cfg.borderSubtle.withValues(alpha: 0.55)),
             Expanded(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.all(AetherSpace.lg),
                 child: SelectableText(
                   previewText.isEmpty ? '暂无可预览内容' : previewText,
                   style: TextStyle(
@@ -466,7 +466,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
                   Container(
                     width: 72,
                     alignment: Alignment.center,
-                    padding: const EdgeInsets.symmetric(vertical: 3),
+                    padding: const EdgeInsets.symmetric(vertical: AetherSpace.xs - 1),
                     decoration: BoxDecoration(
                       color: cfg.accent.withValues(alpha: 0.10),
                       borderRadius: BorderRadius.circular(AetherRadius.xs + 1),
@@ -482,7 +482,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: AetherSpace.md),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -508,7 +508,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
                           ].whereType<String>().join(' · '),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(color: cfg.textSecondary, fontSize: AetherType.caption),
+                          style: AetherType.captionStyle(cfg.textSecondary),
                         ),
                       ],
                     ),
@@ -526,12 +526,12 @@ class _LyricsPanelState extends State<LyricsPanel> {
   Widget _buildEmptyState(AppThemeConfig cfg) {
     return Center(
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 24),
+        padding: const EdgeInsets.symmetric(horizontal: AetherSpace.xxxl),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(Icons.lyrics_outlined, color: cfg.textSecondary, size: 30),
-            const SizedBox(height: 10),
+            const SizedBox(height: AetherSpace.lg - 2),
             Text(
               '暂无歌词',
               style: TextStyle(
@@ -540,7 +540,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
                 fontWeight: FontWeight.w700,
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: AetherSpace.lg),
             AetherButton.primary(
               label: '网络中自动查找',
               icon: Icons.travel_explore,
@@ -556,7 +556,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
   Widget _buildOffsetControls(AppThemeConfig cfg) {
     final enabled = _savedLyric != null;
     return Container(
-      padding: EdgeInsets.fromLTRB(14, 8, 14, widget.compact ? 10 : 14),
+      padding: EdgeInsets.fromLTRB(AetherSpace.lg + 2, AetherSpace.md, AetherSpace.lg + 2, widget.compact ? AetherSpace.lg - 2 : AetherSpace.lg + 2),
       decoration: BoxDecoration(
         border: Border(
           top: BorderSide(color: cfg.borderSubtle.withValues(alpha: 0.7)),

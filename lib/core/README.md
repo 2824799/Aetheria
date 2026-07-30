@@ -72,6 +72,9 @@ Primitives for the UI refactor:
 | `AetherSectionHeader` / `AetherFormRow` / `AetherDivider` | ad-hoc section labels |
 | `AetherProgress` / `AetherInlineLoading` / `AetherLoading` | raw progress indicators |
 | `showAetherDialog` / `AetherDialog` / `showAetherConfirmDialog` | `showDialog` |
+| `showAetherModalPage` | ad-hoc `showGeneralDialog` page modals |
+| `showAetherMenu` / `AetherMenuItem` | raw `showMenu` / `PopupMenuButton` |
+| `AetherDropdown` | raw `DropdownButtonFormField` |
 | `showAetherSheet` / `AetherSheet` | `showModalBottomSheet` (`decorate: false` for custom chrome) |
 | `AetherEmptyState` | hand-rolled empty views |
 | `showAetherProgressDialog` | blocking progress dialogs |

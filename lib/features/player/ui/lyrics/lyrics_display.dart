@@ -114,7 +114,7 @@ class _LyricsDisplayPanelState extends State<LyricsDisplayPanel> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Padding(
-          padding: EdgeInsets.fromLTRB(16, widget.compact ? 8 : 12, 8, 4),
+          padding: EdgeInsets.fromLTRB(AetherSpace.xl, widget.compact ? AetherSpace.md : AetherSpace.lg, AetherSpace.md, AetherSpace.xs),
           child: Row(
             children: [
               Expanded(
@@ -131,12 +131,12 @@ class _LyricsDisplayPanelState extends State<LyricsDisplayPanel> {
                         fontWeight: FontWeight.w700,
                       ),
                     ),
-                    const SizedBox(height: 2),
+                    const SizedBox(height: AetherSpace.xxs),
                     Text(
                       sourceText,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: cfg.textSecondary, fontSize: AetherType.caption),
+                      style: AetherType.captionStyle(cfg.textSecondary),
                     ),
                   ],
                 ),
@@ -156,7 +156,7 @@ class _LyricsDisplayPanelState extends State<LyricsDisplayPanel> {
         ),
         if (_error != null)
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+            padding: const EdgeInsets.symmetric(horizontal: AetherSpace.xl),
             child: Text(
               _error!,
               maxLines: 2,
@@ -186,12 +186,12 @@ class _LyricsDisplayPanelState extends State<LyricsDisplayPanel> {
   Widget _buildDisplayEmptyState(BuildContext context, AppThemeConfig cfg) {
     return Center(
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 24),
+        padding: const EdgeInsets.symmetric(horizontal: AetherSpace.xxxl),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(Icons.lyrics_outlined, color: cfg.textSecondary, size: 30),
-            const SizedBox(height: 10),
+            const SizedBox(height: AetherSpace.lg - 2),
             Text(
               '暂无歌词',
               style: TextStyle(
@@ -200,7 +200,7 @@ class _LyricsDisplayPanelState extends State<LyricsDisplayPanel> {
                 fontWeight: FontWeight.w700,
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: AetherSpace.lg),
             AetherButton.primary(
               onPressed: () => _openManager(context),
               icon: Icons.manage_search,

@@ -89,6 +89,7 @@ class AetherIconButton extends StatelessWidget {
       hoverColor: primary ? null : cfg.bgHover,
       pressedColor: primary ? null : cfg.pressed,
       tooltip: tooltip,
+      semanticLabel: tooltip,
       child: SizedBox(
         width: size,
         height: size,

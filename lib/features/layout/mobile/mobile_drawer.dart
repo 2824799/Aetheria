@@ -3,6 +3,7 @@ import 'package:aetheria/core/providers/library_provider.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
 import 'package:aetheria/core/widgets/aether_icon_button.dart';
 import 'package:aetheria/core/widgets/aether_list_tile.dart';
+import 'package:aetheria/core/widgets/aether_menu.dart';
 import 'package:aetheria/core/widgets/aether_surface.dart';
 import 'package:aetheria/features/layout/mobile/mobile_dialogs.dart';
 import 'package:aetheria/src/rust/models/playlist.dart';
@@ -93,57 +94,59 @@ class MobilePlaylistDrawer extends StatelessWidget {
                             libraryProvider.setActivePlaylist(pl.id);
                             Navigator.of(context).pop();
                           },
-                          trailing: PopupMenuButton<String>(
-                            icon: Icon(
-                              Icons.more_vert,
-                              color: cfg.textSecondary,
-                              size: 18,
-                            ),
-                            color: cfg.bgPopover,
-                            onSelected: (value) {
-                              if (value == 'rename') {
-                                mobileShowRenamePlaylistDialog(
-                                  context,
-                                  id: pl.id,
-                                  currentName: pl.name,
-                                  provider: libraryProvider,
-                                );
-                              } else if (value == 'delete') {
-                                mobileConfirmDeletePlaylist(
-                                  context,
-                                  id: pl.id,
-                                  name: pl.name,
-                                  provider: libraryProvider,
-                                );
-                              }
+                          trailing: Builder(
+                            builder: (btnContext) {
+                              return AetherIconButton(
+                                icon: Icons.more_vert_rounded,
+                                size: 40,
+                                iconSize: AetherIconSize.md,
+                                tooltip: '歌单操作',
+                                onPressed: () async {
+                                  final box =
+                                      btnContext.findRenderObject() as RenderBox?;
+                                  final origin =
+                                      box?.localToGlobal(Offset.zero) ??
+                                          Offset.zero;
+                                  final size = box?.size ?? Size.zero;
+                                  final value = await showAetherMenu<String>(
+                                    context: btnContext,
+                                    globalPosition: Offset(
+                                      origin.dx,
+                                      origin.dy + size.height,
+                                    ),
+                                    items: const [
+                                      AetherMenuItem(
+                                        value: 'rename',
+                                        label: '重命名歌单',
+                                        icon: Icons.edit_rounded,
+                                      ),
+                                      AetherMenuItem(
+                                        value: 'delete',
+                                        label: '删除歌单',
+                                        icon: Icons.delete_forever_rounded,
+                                        destructive: true,
+                                      ),
+                                    ],
+                                  );
+                                  if (!btnContext.mounted) return;
+                                  if (value == 'rename') {
+                                    mobileShowRenamePlaylistDialog(
+                                      btnContext,
+                                      id: pl.id,
+                                      currentName: pl.name,
+                                      provider: libraryProvider,
+                                    );
+                                  } else if (value == 'delete') {
+                                    mobileConfirmDeletePlaylist(
+                                      btnContext,
+                                      id: pl.id,
+                                      name: pl.name,
+                                      provider: libraryProvider,
+                                    );
+                                  }
+                                },
+                              );
                             },
-                            itemBuilder: (context) => [
-                              PopupMenuItem(
-                                value: 'rename',
-                                child: Text(
-                                  '重命名歌单',
-                                  style: AetherType.bodySmStyle(cfg.textPrimary),
-                                ),
-                              ),
-                              PopupMenuItem(
-                                value: 'delete',
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      Icons.delete,
-                                      color: cfg.danger,
-                                      size: 16,
-                                    ),
-                                    const SizedBox(width: AetherSpace.md),
-                                    Text(
-                                      '删除歌单',
-                                      style: AetherType.bodySmStyle(cfg.danger)
-                                          .copyWith(fontWeight: FontWeight.w600),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
                           ),
                         ),
                       );

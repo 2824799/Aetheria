@@ -36,7 +36,7 @@ class _MainLayoutState extends State<MainLayout>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _drawerController = AnimationController(
-      duration: AetherMotion.panel,
+      duration: AetherMotion.duration(context, AetherMotion.panel),
       reverseDuration: AetherMotion.exit(AetherMotion.panel),
       vsync: this,
     );
@@ -103,9 +103,9 @@ class _MainLayoutState extends State<MainLayout>
     final isMobile = media.size.width < 768;
     final libraryProvider = context.watch<LibraryProvider>();
     final audioProvider = context.watch<AudioPlayerProvider>();
-    final themeProvider = context.watch<UIThemeProvider>();
+    context.watch<UIThemeProvider>();
     final syncProvider = context.watch<SyncProvider>();
-    final cfg = themeProvider.currentTheme;
+    final cfg = context.tokens;
 
     final incomingRequest = syncProvider.incomingRequest;
     if (incomingRequest != null &&

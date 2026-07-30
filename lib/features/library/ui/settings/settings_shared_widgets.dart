@@ -114,7 +114,7 @@ class SettingsInfoPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      padding: const EdgeInsets.symmetric(horizontal: AetherSpace.lg - 2, vertical: AetherSpace.sm + 1),
       decoration: BoxDecoration(
         color: cfg.bgHover,
         borderRadius: BorderRadius.circular(AetherRadius.sm + 2),

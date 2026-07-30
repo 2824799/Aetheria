@@ -50,9 +50,9 @@ class SongTableCellBuilder {
                         width: width,
                         height: headerHeight - 8,
                         alignment: Alignment.centerLeft,
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        padding: const EdgeInsets.symmetric(horizontal: AetherSpace.lg),
                         decoration: BoxDecoration(
-                          color: cfg.bgPanel.withValues(alpha: 0.96),
+                          color: cfg.bg1.withValues(alpha: 0.96),
                           borderRadius: BorderRadius.circular(AetherRadius.md),
                           border: Border.all(
                             color: cfg.accent.withValues(alpha: 0.55),
@@ -114,7 +114,7 @@ class SongTableCellBuilder {
     final centered =
         column == SongColumnKey.versions || column == SongColumnKey.spec;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12),
+      padding: const EdgeInsets.symmetric(horizontal: AetherSpace.lg),
       alignment: centered ? Alignment.center : Alignment.centerLeft,
       child: Text(
         column.label,
@@ -147,7 +147,7 @@ class SongTableCellBuilder {
         return SizedBox(
           width: width,
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
+            padding: const EdgeInsets.symmetric(horizontal: AetherSpace.lg),
             child: Row(
               children: [
                 Expanded(
@@ -163,7 +163,7 @@ class SongTableCellBuilder {
                   ),
                 ),
                 if (hasLyrics) ...[
-                  const SizedBox(width: 6),
+                  const SizedBox(width: AetherSpace.sm),
                   SongTableLrcBadge(cfg: cfg),
                 ],
               ],
@@ -174,7 +174,7 @@ class SongTableCellBuilder {
         return SizedBox(
           width: width,
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
+            padding: const EdgeInsets.symmetric(horizontal: AetherSpace.lg),
             child: Text(
               song.artist ?? '未知歌手',
               maxLines: 1,
@@ -187,7 +187,7 @@ class SongTableCellBuilder {
         return SizedBox(
           width: width,
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
+            padding: const EdgeInsets.symmetric(horizontal: AetherSpace.lg),
             child: song.tags.isEmpty
                 ? Text(
                     '无标签',
@@ -204,7 +204,7 @@ class SongTableCellBuilder {
                             ? songTableParseHexColor(tag.color!, cfg.accent)
                             : cfg.accent;
                         return Container(
-                          margin: const EdgeInsets.only(right: 6),
+                          margin: const EdgeInsets.only(right: AetherSpace.sm),
                           padding: const EdgeInsets.symmetric(
                             horizontal: 6,
                             vertical: 2,
@@ -253,7 +253,7 @@ class SongTableCellBuilder {
           width: width,
           child: Center(
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              padding: const EdgeInsets.symmetric(horizontal: AetherSpace.md, vertical: 3),
               decoration: BoxDecoration(
                 color: badgeColor.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(AetherRadius.xs),

@@ -6,6 +6,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:aetheria/core/providers/library_provider.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
 import 'package:aetheria/core/widgets/aether_button.dart';
+import 'package:aetheria/core/widgets/aether_menu.dart';
 import 'package:aetheria/core/widgets/aether_checkbox.dart';
 import 'package:aetheria/core/widgets/aether_dialog.dart';
 import 'package:aetheria/core/widgets/aether_surface.dart';
@@ -267,7 +268,7 @@ class _MainContentState extends State<MainContent> {
               title: '导入预览 (共 ${previews.length} 首)',
               maxWidth: 580,
               showClose: true,
-              contentPadding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+              contentPadding: const EdgeInsets.fromLTRB(AetherSpace.xxl, AetherSpace.xs, AetherSpace.xxl, AetherSpace.lg),
               content: SizedBox(
                 height: 360,
                 child: Column(
@@ -316,7 +317,7 @@ class _MainContentState extends State<MainContent> {
                         borderRadius: BorderRadius.circular(AetherRadius.md),
                         color: cfg.bgHover,
                         child: ListView.separated(
-                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          padding: const EdgeInsets.symmetric(vertical: AetherSpace.xs),
                           itemCount: previews.length,
                           separatorBuilder: (_, _) => Divider(
                             height: 1,
@@ -465,12 +466,13 @@ class _MainContentState extends State<MainContent> {
   @override
   Widget build(BuildContext context) {
     final libraryProvider = context.watch<LibraryProvider>();
-    final cfg = context.watch<UIThemeProvider>().currentTheme;
+    context.watch<UIThemeProvider>();
+    final cfg = context.tokens;
 
     return Container(
       padding: const EdgeInsets.all(AetherSpace.xxxl),
       decoration: BoxDecoration(
-        color: cfg.bgPanel,
+        color: cfg.bg1,
         border: Border.all(color: cfg.borderSubtle),
       ),
       child: Column(
@@ -505,48 +507,19 @@ class _MainContentState extends State<MainContent> {
                       final topLeft =
                           box.localToGlobal(Offset.zero, ancestor: overlay);
                       final size = box.size;
-                      final selected = await showMenu<String>(
+                      final selected = await showAetherMenu<String>(
                         context: buttonContext,
-                        position: RelativeRect.fromLTRB(
-                          topLeft.dx,
-                          topLeft.dy + size.height + 6,
-                          overlay.size.width - topLeft.dx - size.width,
-                          0,
-                        ),
-                        items: [
-                          PopupMenuItem(
+                        globalPosition: Offset(topLeft.dx, topLeft.dy + size.height + 6),
+                        items: const [
+                          AetherMenuItem(
                             value: 'files',
-                            child: Row(
-                              children: [
-                                Icon(
-                                  Icons.audio_file_rounded,
-                                  size: AetherIconSize.md,
-                                  color: cfg.textSecondary,
-                                ),
-                                const SizedBox(width: AetherSpace.md),
-                                Text(
-                                  '导入单首/多首音频文件',
-                                  style: AetherType.bodyStyle(cfg.textPrimary),
-                                ),
-                              ],
-                            ),
+                            label: '导入单首/多首音频文件',
+                            icon: Icons.audio_file_rounded,
                           ),
-                          PopupMenuItem(
+                          AetherMenuItem(
                             value: 'folder',
-                            child: Row(
-                              children: [
-                                Icon(
-                                  Icons.folder_rounded,
-                                  size: AetherIconSize.md,
-                                  color: cfg.textSecondary,
-                                ),
-                                const SizedBox(width: AetherSpace.md),
-                                Text(
-                                  '导入整个文件夹',
-                                  style: AetherType.bodyStyle(cfg.textPrimary),
-                                ),
-                              ],
-                            ),
+                            label: '导入整个文件夹',
+                            icon: Icons.folder_rounded,
                           ),
                         ],
                       );
@@ -575,7 +548,7 @@ class _MainContentState extends State<MainContent> {
             child: AetherSurface(
               level: AetherSurfaceLevel.panel,
               borderRadius: BorderRadius.circular(AetherRadius.lg),
-              color: cfg.bgPanel.withValues(alpha: 0.4),
+              color: cfg.bg1.withValues(alpha: 0.4),
               child: NotificationListener<ScrollUpdateNotification>(
                 onNotification: (notification) {
                   final delta = notification.scrollDelta ?? 0;

@@ -184,6 +184,7 @@ class AetherButton extends StatelessWidget {
       pressScale: AetherMotion.pressScaleSubtle,
       hoverColor: variant == AetherButtonVariant.ghost ? cfg.bgHover : null,
       tooltip: tooltip,
+      semanticLabel: tooltip,
       child: child,
     );
   }

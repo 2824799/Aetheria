@@ -34,7 +34,8 @@ class _TagFilterState extends State<TagFilter> {
   @override
   Widget build(BuildContext context) {
     final libraryProvider = context.watch<LibraryProvider>();
-    final cfg = context.watch<UIThemeProvider>().currentTheme;
+    context.watch<UIThemeProvider>();
+    final cfg = context.tokens;
     final contentHeightFactor = _isExpanded
         ? (1 - widget.scrollCollapseFactor.clamp(0.0, 1.0))
         : 0.0;
@@ -59,7 +60,7 @@ class _TagFilterState extends State<TagFilter> {
                   color: cfg.borderSubtle,
                   borderRadius: BorderRadius.circular(AetherRadius.sm),
                 ),
-                padding: const EdgeInsets.all(2),
+                padding: const EdgeInsets.all(AetherSpace.xxs),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -114,7 +115,7 @@ class _TagFilterState extends State<TagFilter> {
                       const SizedBox(width: AetherSpace.xs),
                       AnimatedRotation(
                         turns: _isExpanded ? 0.25 : 0,
-                        duration: AetherMotion.fast,
+                        duration: AetherMotion.duration(context, AetherMotion.fast),
                         curve: AetherMotion.out,
                         child: Icon(
                           Icons.chevron_right_rounded,
@@ -138,7 +139,7 @@ class _TagFilterState extends State<TagFilter> {
             ],
           ),
           AnimatedSize(
-            duration: AetherMotion.fast,
+            duration: AetherMotion.duration(context, AetherMotion.fast),
             curve: AetherMotion.out,
             alignment: Alignment.topCenter,
             child: ClipRect(
@@ -165,9 +166,9 @@ class _TagFilterState extends State<TagFilter> {
       borderRadius: BorderRadius.circular(AetherRadius.xs),
       pressScale: AetherMotion.pressScaleSubtle,
       child: AnimatedContainer(
-        duration: AetherMotion.fast,
+        duration: AetherMotion.duration(context, AetherMotion.fast),
         curve: AetherMotion.out,
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: AetherSpace.md, vertical: AetherSpace.xs),
         decoration: BoxDecoration(
           color: isActive ? cfg.accent : Colors.transparent,
           borderRadius: BorderRadius.circular(AetherRadius.xs),
@@ -219,7 +220,7 @@ class _TagFilterState extends State<TagFilter> {
                 borderRadius: BorderRadius.circular(AetherRadius.full),
                 pressScale: AetherMotion.pressScaleSubtle,
                 child: AnimatedContainer(
-                  duration: AetherMotion.fast,
+                  duration: AetherMotion.duration(context, AetherMotion.fast),
                   curve: AetherMotion.out,
                   padding: const EdgeInsets.symmetric(
                     horizontal: AetherSpace.lg,
@@ -228,7 +229,7 @@ class _TagFilterState extends State<TagFilter> {
                   decoration: BoxDecoration(
                     color: active
                         ? tagColor.withValues(alpha: 0.14)
-                        : cfg.bgPanel,
+                        : cfg.bg1,
                     borderRadius: BorderRadius.circular(AetherRadius.full),
                     border: Border.all(
                       color: active ? tagColor : cfg.borderSubtle,
@@ -243,7 +244,7 @@ class _TagFilterState extends State<TagFilter> {
                           size: 12,
                           color: tagColor,
                         ),
-                        const SizedBox(width: 4),
+                        const SizedBox(width: AetherSpace.xs),
                       ] else ...[
                         Container(
                           width: 8,
@@ -253,7 +254,7 @@ class _TagFilterState extends State<TagFilter> {
                             shape: BoxShape.circle,
                           ),
                         ),
-                        const SizedBox(width: 6),
+                        const SizedBox(width: AetherSpace.sm),
                       ],
                       Text(
                         tag.name,

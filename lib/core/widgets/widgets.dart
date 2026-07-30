@@ -20,5 +20,7 @@ export 'package:aetheria/core/widgets/aether_empty_state.dart';
 export 'package:aetheria/core/widgets/aether_progress_dialog.dart';
 export 'package:aetheria/core/widgets/aether_toast.dart';
 export 'package:aetheria/core/widgets/aether_tabs.dart';
+export 'package:aetheria/core/widgets/aether_menu.dart';
+export 'package:aetheria/core/widgets/aether_dropdown.dart';
 export 'package:aetheria/core/widgets/glass_panel.dart';
 export 'package:aetheria/core/widgets/color_picker_field.dart';

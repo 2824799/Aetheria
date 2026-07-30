@@ -35,6 +35,32 @@ Future<T?> showAetherDialog<T>({
   );
 }
 
+
+/// Large page-style modal (Settings / Tag Manager). Same motion contract as dialogs.
+Future<T?> showAetherModalPage<T>({
+  required BuildContext context,
+  required WidgetBuilder builder,
+  bool barrierDismissible = true,
+  bool useRootNavigator = true,
+}) {
+  final cfg = context.tokens;
+  final enter = AetherMotion.duration(context, AetherMotion.panel);
+  final leave = AetherMotion.exitOf(context, AetherMotion.panel);
+  final fromScale = AetherMotion.fromScale(context);
+
+  return Navigator.of(context, rootNavigator: useRootNavigator).push<T>(
+    _AetherDialogRoute<T>(
+      barrierDismissible: barrierDismissible,
+      barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
+      barrierColor: cfg.scrim,
+      enterDuration: enter,
+      exitDuration: leave,
+      fromScale: fromScale,
+      builder: builder,
+    ),
+  );
+}
+
 class _AetherDialogRoute<T> extends PopupRoute<T> {
   _AetherDialogRoute({
     required this.builder,

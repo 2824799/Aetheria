@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import 'package:aetheria/core/providers/audio_player_provider.dart';
 import 'package:aetheria/core/providers/library_provider.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
@@ -19,8 +18,7 @@ void showMobileSongContextMenu(
   LibraryProvider libraryProvider,
   AudioPlayerProvider audioProvider,
 ) {
-  final themeProvider = context.read<UIThemeProvider>();
-  final cfg = themeProvider.currentTheme;
+  final cfg = context.tokens;
 
   showAetherSheet(
     context: context,

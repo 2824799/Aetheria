@@ -42,7 +42,8 @@ class PlayBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final audioProvider = context.watch<AudioPlayerProvider>();
-    final cfg = context.watch<UIThemeProvider>().currentTheme;
+    context.watch<UIThemeProvider>();
+    final cfg = context.tokens;
     final playingSong = audioProvider.playingSong;
 
     final curMs = audioProvider.currentPosition.inMilliseconds.toDouble();
@@ -54,7 +55,7 @@ class PlayBar extends StatelessWidget {
       child: Container(
         height: height,
         decoration: BoxDecoration(
-          color: cfg.bgPanel,
+          color: cfg.bg1,
           border: Border(top: BorderSide(color: cfg.borderSubtle)),
         ),
         child: Stack(
@@ -106,7 +107,7 @@ class PlayBar extends StatelessWidget {
                                     !audioProvider.isDetailOpen,
                                   ),
                           child: AnimatedContainer(
-                            duration: AetherMotion.fast,
+                            duration: AetherMotion.duration(context, AetherMotion.fast),
                             curve: AetherMotion.out,
                             width: 44,
                             height: 44,
@@ -144,7 +145,7 @@ class PlayBar extends StatelessWidget {
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                               ),
-                              const SizedBox(height: 2),
+                              const SizedBox(height: AetherSpace.xxs),
                               Text(
                                 playingSong?.artist ?? '…',
                                 style:
@@ -209,7 +210,7 @@ class PlayBar extends StatelessWidget {
                             alignment: Alignment.center,
                             // Short crossfade only — state indication, not decoration.
                             child: AnimatedSwitcher(
-                              duration: AetherMotion.press,
+                              duration: AetherMotion.duration(context, AetherMotion.press),
                               switchInCurve: AetherMotion.out,
                               switchOutCurve: AetherMotion.out,
                               transitionBuilder: (child, anim) =>

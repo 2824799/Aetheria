@@ -71,4 +71,20 @@ class AetherType {
         letterSpacing: -0.3,
         color: color,
       );
+
+  /// Variable size for lyric previews / floating lyrics (color still from theme).
+  static TextStyle dynamicStyle(
+    double size,
+    Color color, {
+    FontWeight fontWeight = FontWeight.w400,
+    double height = 1.35,
+    double letterSpacing = 0,
+  }) =>
+      TextStyle(
+        fontSize: size,
+        height: height,
+        fontWeight: fontWeight,
+        letterSpacing: letterSpacing,
+        color: color,
+      );
 }

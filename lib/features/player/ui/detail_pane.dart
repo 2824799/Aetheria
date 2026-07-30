@@ -270,8 +270,8 @@ class DetailPane extends StatelessWidget {
   Widget build(BuildContext context) {
     final audioProvider = context.watch<AudioPlayerProvider>();
     final libraryProvider = context.watch<LibraryProvider>();
-    final themeProvider = context.watch<UIThemeProvider>();
-    final cfg = themeProvider.currentTheme;
+    context.watch<UIThemeProvider>();
+    final cfg = context.tokens;
 
     final song = libraryProvider.songs.firstWhere(
       (s) => s.id == audioProvider.activeSong?.id,
@@ -301,7 +301,7 @@ class DetailPane extends StatelessWidget {
         ),
         child: Container(
           decoration: BoxDecoration(
-            color: cfg.bgPanel.withValues(alpha: 0.92),
+            color: cfg.bg1.withValues(alpha: 0.92),
             border: Border(
               left: BorderSide(color: cfg.borderSubtle),
             ),
@@ -383,9 +383,9 @@ class DetailPane extends StatelessWidget {
               onSave: (value) => _saveSongMetadata(context, song, title: value),
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: AetherSpace.xs),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14),
+            padding: const EdgeInsets.symmetric(horizontal: AetherSpace.lg + 2),
             child: _EditableMetadataText(
               value: song.artist ?? '',
               emptyText: '未知歌手',
@@ -429,7 +429,7 @@ class DetailPane extends StatelessWidget {
         children: [
           _buildVersionHeader(context, song, cfg),
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            padding: const EdgeInsets.fromLTRB(AetherSpace.xl, AetherSpace.lg, AetherSpace.xl, 0),
             child: Text(
               '“默认播放版本”是在播放这首歌时优先使用的音源；若正在播放，会按当前进度切到新版本。',
               style: AetherType.captionStyle(cfg.textSecondary).copyWith(height: 1.5),
@@ -437,7 +437,7 @@ class DetailPane extends StatelessWidget {
           ),
           Expanded(
             child: ListView.builder(
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+              padding: const EdgeInsets.fromLTRB(AetherSpace.xl, AetherSpace.lg - 2, AetherSpace.xl, AetherSpace.xl),
               itemCount: song.versions.length,
               itemBuilder: (context, index) {
                 final v = song.versions[index];
@@ -466,14 +466,14 @@ class DetailPane extends StatelessWidget {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
-                        const SizedBox(height: 6),
+                        const SizedBox(height: AetherSpace.sm),
 
                         // Technical specs
                         Text(
                           '${v.format?.toUpperCase() ?? "未知"} | ${(v.bitrate ?? 0) ~/ 1000}kbps | ${v.sampleRate != null ? (v.sampleRate! / 1000).toStringAsFixed(1) : "未知"}kHz | $durationMin:$durationSec | ${_formatFileSize(v.fileSize.toInt())} | ${_formatLoudness(v.loudness)}',
                           style: AetherType.captionStyle(cfg.textSecondary),
                         ),
-                        const SizedBox(height: 6),
+                        const SizedBox(height: AetherSpace.sm),
                         Align(
                           alignment: Alignment.centerLeft,
                           child: Container(
@@ -501,7 +501,7 @@ class DetailPane extends StatelessWidget {
                             ),
                           ),
                         ),
-                        const SizedBox(height: 10),
+                        const SizedBox(height: AetherSpace.lg - 2),
 
                         Align(
                           alignment: Alignment.centerLeft,
@@ -537,9 +537,9 @@ class DetailPane extends StatelessWidget {
                             ),
                           ),
                         ),
-                        const SizedBox(height: 8),
+                        const SizedBox(height: AetherSpace.md),
                         const Divider(height: 1),
-                        const SizedBox(height: 6),
+                        const SizedBox(height: AetherSpace.sm),
 
                         // Export and Delete buttons
                         Row(
@@ -821,7 +821,7 @@ class _EditableMetadataTextState extends State<_EditableMetadataText> {
         behavior: HitTestBehavior.opaque,
         onTap: _startEditing,
         child: AnimatedContainer(
-          duration: AetherMotion.press,
+          duration: AetherMotion.duration(context, AetherMotion.press),
           padding: const EdgeInsets.symmetric(horizontal: AetherSpace.md, vertical: AetherSpace.xs),
           decoration: BoxDecoration(
             color: showEditFrame

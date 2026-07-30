@@ -33,6 +33,11 @@ Rules for all Flutter UI in this repo. Prefer fixing at the primitive layer over
 - Honor `AetherMotion.reduce` / `MediaQuery.disableAnimationsOf`.
 - Animate `transform` / `opacity` only — not layout width/height for polish.
 
+## Menus & overlays
+- Context / desktop menus: `showAetherMenu` / `AetherMenuItem` (never raw `showMenu` / `PopupMenuButton`).
+- Large page modals (Settings, Tag Manager): `showAetherModalPage`.
+- Dropdowns: `AetherDropdown` (never raw `DropdownButtonFormField`).
+
 ## Forms & controls
 - Text: `AetherTextField` (`outlined` default, `plain` for inline title/artist edits).
 - Sliders / seek: `AetherSlider` / `AetherSeekBar`.
@@ -42,3 +47,9 @@ Rules for all Flutter UI in this repo. Prefer fixing at the primitive layer over
 ## Platform
 - Desktop: deep workflows, hover, focus ring via `borderFocus`.
 - Mobile: hit targets ≥ ~44 logical px on primary controls; sheets for menus.
+
+## Do not animate
+- Table row select / multi-select / marquee
+- Search filter result updates
+- Seek and volume scrubbing
+- Keyboard-triggered instant state flips (unless opacity crossfade under 120ms)

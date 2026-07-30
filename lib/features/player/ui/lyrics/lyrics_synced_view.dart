@@ -57,7 +57,7 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
       return Center(
         child: Text(
           '暂无歌词',
-          style: TextStyle(color: widget.cfg.textSecondary, fontSize: AetherType.body),
+          style: AetherType.bodyStyle(widget.cfg.textSecondary),
         ),
       );
     }
@@ -145,7 +145,7 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
     _controller
         .animateTo(
           clamped,
-          duration: AetherMotion.panel,
+          duration: AetherMotion.duration(context, AetherMotion.panel),
           curve: AetherMotion.out,
         )
         .whenComplete(() {
@@ -224,14 +224,14 @@ class LyricLineTile extends StatelessWidget {
     );
     return AnimatedScale(
       scale: active ? 1.04 : 1.0,
-      duration: AetherMotion.fast,
+      duration: AetherMotion.duration(context, AetherMotion.fast),
       curve: AetherMotion.out,
       child: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             AnimatedDefaultTextStyle(
-              duration: AetherMotion.fast,
+              duration: AetherMotion.duration(context, AetherMotion.fast),
               style: baseStyle,
               child: Text(
                 line.text.isEmpty ? ' ' : line.text,
@@ -243,7 +243,7 @@ class LyricLineTile extends StatelessWidget {
             ),
             if (translation != null && translation!.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.only(top: 2),
+                padding: const EdgeInsets.only(top: AetherSpace.xxs),
                 child: Text(
                   translation!,
                   textAlign: TextAlign.center,
@@ -282,7 +282,7 @@ class LyricSeekGuideOverlay extends StatelessWidget {
         child: Center(
           child: Row(
             children: [
-              const SizedBox(width: 18),
+              const SizedBox(width: AetherSpace.xl + 2),
               Expanded(
                 child: CustomPaint(
                   painter: LyricDashedLinePainter(
@@ -291,7 +291,7 @@ class LyricSeekGuideOverlay extends StatelessWidget {
                   child: const SizedBox(height: 1),
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: AetherSpace.md),
               Material(
                 color: cfg.accent.withValues(alpha: 0.14),
                 shape: const CircleBorder(),
@@ -304,7 +304,7 @@ class LyricSeekGuideOverlay extends StatelessWidget {
                   onPressed: onSeek,
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: AetherSpace.lg),
             ],
           ),
         ),
