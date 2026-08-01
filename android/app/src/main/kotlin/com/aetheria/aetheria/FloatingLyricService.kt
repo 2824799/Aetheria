@@ -195,7 +195,10 @@ class FloatingLyricService : Service() {
             ?.coerceIn(dp(28), dp(260))
             ?: dp(112)
         params.flags = buildWindowFlags(style.locked)
-        if (style.windowX >= 0 && style.windowY >= 0) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            params.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+        }
+        if (style.windowX > -9000f && style.windowY > -9000f && !(style.windowX == -1f && style.windowY == -1f)) {
             params.x = style.windowX.toInt()
             params.y = style.windowY.toInt()
         }
@@ -221,8 +224,11 @@ class FloatingLyricService : Service() {
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = if (style.windowX >= 0) style.windowX.toInt() else dp(16)
-            y = if (style.windowY >= 0) style.windowY.toInt() else dp(120)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
+            x = if (style.windowX > -9000f && style.windowX != -1f) style.windowX.toInt() else dp(16)
+            y = if (style.windowY > -9000f && style.windowY != -1f) style.windowY.toInt() else dp(120)
         }
     }
 
@@ -298,8 +304,8 @@ private data class FloatingLyricStyle(
     val unplayedColor: Int = Color.WHITE,
     val playedColor: Int = Color.rgb(34, 197, 94),
     val shadowColor: Int = 0x99000000.toInt(),
-    val windowX: Float = -1f,
-    val windowY: Float = -1f,
+    val windowX: Float = -99999f,
+    val windowY: Float = -99999f,
     val windowWidth: Float = 760f,
     val windowHeight: Float = 150f,
 ) {

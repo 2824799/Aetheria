@@ -9,5 +9,6 @@
 
 pub mod dsp;
 pub mod player;
+pub mod profiler;
 pub mod rubberband;
 pub mod server;

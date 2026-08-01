@@ -5,19 +5,29 @@ class NativeAudioHelper {
     'com.aetheria.app/notification',
   );
   static Future<void> Function(String)? _notificationActionHandler;
-  static Future<void> Function(Map<String, dynamic>)? _floatingLyricEventHandler;
+  static Future<void> Function(Map<String, dynamic>)?
+  _floatingLyricEventHandler;
+  static Future<void> Function()? _audioRouteChangedHandler;
   static bool _isMethodHandlerBound = false;
 
   static void setNotificationActionHandler(
     Future<void> Function(String) handler,
   ) {
     _notificationActionHandler = handler;
+    _ensureMethodCallHandlerBound();
+  }
+
+  static void _ensureMethodCallHandlerBound() {
     if (_isMethodHandlerBound) {
       return;
     }
     _isMethodHandlerBound = true;
     _channel.setMethodCallHandler((MethodCall call) async {
       final dynamic arguments = call.arguments;
+      if (call.method == 'audioRouteChanged') {
+        await _audioRouteChangedHandler?.call();
+        return;
+      }
       if (call.method == 'floatingLyricsEvent') {
         final handler = _floatingLyricEventHandler;
         if (handler != null && arguments is Map) {
@@ -45,6 +55,12 @@ class NativeAudioHelper {
     Future<void> Function(Map<String, dynamic>) handler,
   ) {
     _floatingLyricEventHandler = handler;
+    _ensureMethodCallHandlerBound();
+  }
+
+  static void setAudioRouteChangedHandler(Future<void> Function() handler) {
+    _audioRouteChangedHandler = handler;
+    _ensureMethodCallHandlerBound();
   }
 
   static Future<void> showNotification(Map<String, dynamic> payload) async {

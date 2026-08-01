@@ -19,7 +19,6 @@ import 'package:aetheria/features/library/ui/song_table/song_table_cells.dart';
 import 'package:aetheria/src/rust/models/playlist.dart';
 import 'package:aetheria/src/rust/models/song.dart';
 
-
 /// Max interval between two primary taps to count as open/play double-tap.
 const Duration kSongTablePrimaryTapInterval = Duration(milliseconds: 260);
 
@@ -61,12 +60,12 @@ class _SongTableState extends State<SongTable> {
   double _viewportWidth = 0;
 
   SongTableCellBuilder get _cellBuilder => SongTableCellBuilder(
-        columnWidths: _columnWidths,
-        columnOrder: _columnOrder,
-        onResize: _resizeColumn,
-        onReorder: _reorderColumn,
-        headerHeight: _headerHeight,
-      );
+    columnWidths: _columnWidths,
+    columnOrder: _columnOrder,
+    onResize: _resizeColumn,
+    onReorder: _reorderColumn,
+    headerHeight: _headerHeight,
+  );
 
   @override
   void initState() {
@@ -298,7 +297,11 @@ class _SongTableState extends State<SongTable> {
   ) {
     final items = <AetherMenuItem<String>>[
       const AetherMenuItem(value: 'copy', label: '复制所选歌曲', icon: Icons.copy),
-      const AetherMenuItem(value: 'cut', label: '剪切所选歌曲', icon: Icons.content_cut),
+      const AetherMenuItem(
+        value: 'cut',
+        label: '剪切所选歌曲',
+        icon: Icons.content_cut,
+      ),
       const AetherMenuItem(
         value: 'delete',
         label: '彻底删除歌曲',
@@ -441,8 +444,6 @@ class _SongTableState extends State<SongTable> {
     }
   }
 
-
-
   void _handlePointerDown(PointerDownEvent event) {
     if (event.kind != PointerDeviceKind.mouse ||
         event.buttons != kPrimaryMouseButton) {
@@ -561,7 +562,6 @@ class _SongTableState extends State<SongTable> {
     return math.max(availableWidth, contentWidth);
   }
 
-
   AudioVersion? _primaryVersionFor(Song song) {
     for (final version in song.versions) {
       if (version.isPrimary) {
@@ -610,7 +610,9 @@ class _SongTableState extends State<SongTable> {
                   Container(
                     height: _headerHeight,
                     decoration: BoxDecoration(
-                      border: Border(bottom: BorderSide(color: cfg.borderSubtle)),
+                      border: Border(
+                        bottom: BorderSide(color: cfg.borderSubtle),
+                      ),
                     ),
                     child: Row(
                       children: [
@@ -681,18 +683,20 @@ class _SongTableState extends State<SongTable> {
                                     child: Container(
                                       decoration: BoxDecoration(
                                         color: isSelected
-                                            ? cfg.bgHover.withValues(alpha: 0.12)
+                                            ? cfg.selection
                                             : isActive
-                                            ? cfg.bgHover.withValues(alpha: 0.08)
-                                            : cfg.bgHover.withValues(alpha: 0.35),
+                                            ? cfg.accentMuted
+                                            : Colors.transparent,
                                         border: Border(
                                           bottom: BorderSide(
-                                            color: cfg.borderSubtle.withValues(alpha: 0.45),
+                                            color: cfg.borderSubtle.withValues(
+                                              alpha: 0.45,
+                                            ),
                                           ),
                                           left: BorderSide(
                                             color: isActive
                                                 ? cfg.accent
-                                                : cfg.bgHover.withValues(alpha: 0.35),
+                                                : Colors.transparent,
                                             width: 3,
                                           ),
                                         ),
@@ -711,7 +715,8 @@ class _SongTableState extends State<SongTable> {
                                                     );
                                               },
                                               child: AetherIconButton(
-                                                icon: isCurrentlyPlaying &&
+                                                icon:
+                                                    isCurrentlyPlaying &&
                                                         audioProvider.isPlaying
                                                     ? Icons.pause_circle_filled
                                                     : Icons.play_circle_filled,
@@ -720,7 +725,8 @@ class _SongTableState extends State<SongTable> {
                                                 color: isCurrentlyPlaying
                                                     ? cfg.success
                                                     : cfg.textSecondary,
-                                                tooltip: isCurrentlyPlaying &&
+                                                tooltip:
+                                                    isCurrentlyPlaying &&
                                                         audioProvider.isPlaying
                                                     ? '暂停'
                                                     : '播放',
@@ -747,7 +753,8 @@ class _SongTableState extends State<SongTable> {
                                                     showAetherToast(
                                                       context,
                                                       message: e.toString(),
-                                                      kind: AetherToastKind.error,
+                                                      kind:
+                                                          AetherToastKind.error,
                                                     );
                                                   }
                                                 },
@@ -798,7 +805,9 @@ class _SongTableState extends State<SongTable> {
                                     border: Border.all(
                                       color: cfg.accent.withValues(alpha: 0.55),
                                     ),
-                                    borderRadius: BorderRadius.circular(AetherRadius.sm),
+                                    borderRadius: BorderRadius.circular(
+                                      AetherRadius.sm,
+                                    ),
                                   ),
                                 ),
                               ),

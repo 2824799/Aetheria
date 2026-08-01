@@ -32,11 +32,11 @@ class SongTableCellBuilder {
           final isDropTarget = candidateData.isNotEmpty;
           return Container(
             decoration: BoxDecoration(
-              color: isDropTarget
-                  ? cfg.bgHover.withValues(alpha: 0.08)
-                  : cfg.bgHover.withValues(alpha: 0.35),
+              color: isDropTarget ? cfg.selection : cfg.bgHover,
               border: Border(
-                right: BorderSide(color: cfg.borderSubtle.withValues(alpha: 0.45)),
+                right: BorderSide(
+                  color: cfg.borderSubtle.withValues(alpha: 0.45),
+                ),
               ),
             ),
             child: Row(
@@ -45,12 +45,14 @@ class SongTableCellBuilder {
                   child: Draggable<SongColumnKey>(
                     data: column,
                     feedback: Material(
-                      color: cfg.bgHover.withValues(alpha: 0.35),
+                      color: cfg.bgPopover,
                       child: Container(
                         width: width,
                         height: headerHeight - 8,
                         alignment: Alignment.centerLeft,
-                        padding: const EdgeInsets.symmetric(horizontal: AetherSpace.lg),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: AetherSpace.lg,
+                        ),
                         decoration: BoxDecoration(
                           color: cfg.bg1.withValues(alpha: 0.96),
                           borderRadius: BorderRadius.circular(AetherRadius.md),
@@ -96,7 +98,9 @@ class SongTableCellBuilder {
                         height: 18,
                         decoration: BoxDecoration(
                           color: cfg.borderSubtle.withValues(alpha: 0.85),
-                          borderRadius: BorderRadius.circular(AetherRadius.full),
+                          borderRadius: BorderRadius.circular(
+                            AetherRadius.full,
+                          ),
                         ),
                       ),
                     ),
@@ -130,7 +134,6 @@ class SongTableCellBuilder {
       ),
     );
   }
-
 
   Widget buildCell(
     SongColumnKey column,
@@ -179,7 +182,10 @@ class SongTableCellBuilder {
               song.artist ?? '未知歌手',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: cfg.textSecondary, fontSize: AetherType.body),
+              style: TextStyle(
+                color: cfg.textSecondary,
+                fontSize: AetherType.body,
+              ),
             ),
           ),
         );
@@ -211,7 +217,9 @@ class SongTableCellBuilder {
                           ),
                           decoration: BoxDecoration(
                             color: tagColor.withValues(alpha: 0.08),
-                            borderRadius: BorderRadius.circular(AetherRadius.xs),
+                            borderRadius: BorderRadius.circular(
+                              AetherRadius.xs,
+                            ),
                             border: Border(
                               left: BorderSide(color: tagColor, width: 2),
                             ),
@@ -253,7 +261,10 @@ class SongTableCellBuilder {
           width: width,
           child: Center(
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: AetherSpace.md, vertical: 3),
+              padding: const EdgeInsets.symmetric(
+                horizontal: AetherSpace.md,
+                vertical: 3,
+              ),
               decoration: BoxDecoration(
                 color: badgeColor.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(AetherRadius.xs),
@@ -271,6 +282,4 @@ class SongTableCellBuilder {
         );
     }
   }
-
-
 }

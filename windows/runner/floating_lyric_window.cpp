@@ -551,7 +551,7 @@ RECT FloatingLyricWindow::DefaultBounds() const {
       std::clamp(static_cast<int>(std::round(style_.window_height)), 36, 420);
   int x = static_cast<int>(std::round(style_.window_x));
   int y = static_cast<int>(std::round(style_.window_y));
-  if (style_.window_x < 0 || style_.window_y < 0) {
+  if (style_.window_x <= -9000.0 || style_.window_y <= -9000.0 || (style_.window_x == -1.0 && style_.window_y == -1.0)) {
     x = work_area.left + ((work_area.right - work_area.left) - width) / 2;
     y = work_area.bottom - height - 120;
   }

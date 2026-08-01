@@ -36,7 +36,7 @@ class _MainLayoutState extends State<MainLayout>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _drawerController = AnimationController(
-      duration: AetherMotion.duration(context, AetherMotion.panel),
+      duration: AetherMotion.panel,
       reverseDuration: AetherMotion.exit(AetherMotion.panel),
       vsync: this,
     );
@@ -119,10 +119,14 @@ class _MainLayoutState extends State<MainLayout>
     }
 
     // Keep drawer motion in sync with reduced-motion preference.
-    _drawerController.duration =
-        AetherMotion.duration(context, AetherMotion.panel);
-    _drawerController.reverseDuration =
-        AetherMotion.exitOf(context, AetherMotion.panel);
+    _drawerController.duration = AetherMotion.duration(
+      context,
+      AetherMotion.panel,
+    );
+    _drawerController.reverseDuration = AetherMotion.exitOf(
+      context,
+      AetherMotion.panel,
+    );
 
     if (audioProvider.isDetailOpen) {
       if (_drawerController.status != AnimationStatus.forward &&
@@ -184,10 +188,7 @@ class _MainLayoutState extends State<MainLayout>
         Positioned(
           top: size.height * 0.1,
           left: size.width * 0.2,
-          child: AmbientGlow(
-            color: cfg.accent,
-            opacity: cfg.ambientOpacity,
-          ),
+          child: AmbientGlow(color: cfg.accent, opacity: cfg.ambientOpacity),
         ),
         Positioned(
           bottom: size.height * 0.2,
@@ -225,8 +226,9 @@ class _MainLayoutState extends State<MainLayout>
                                         child: FadeTransition(
                                           opacity: _scrimFade,
                                           child: ColoredBox(
-                                            color: cfg.scrim
-                                                .withValues(alpha: 0.28),
+                                            color: cfg.scrim.withValues(
+                                              alpha: 0.28,
+                                            ),
                                           ),
                                         ),
                                       ),
@@ -295,11 +297,8 @@ class _MainLayoutState extends State<MainLayout>
                     ),
                   ),
                   child: Builder(
-                    builder: (scaledContext) => _buildDesktopShell(
-                      scaledContext,
-                      audioProvider,
-                      cfg,
-                    ),
+                    builder: (scaledContext) =>
+                        _buildDesktopShell(scaledContext, audioProvider, cfg),
                   ),
                 ),
               ),
@@ -352,11 +351,7 @@ class _MainLayoutState extends State<MainLayout>
 class AmbientGlow extends StatelessWidget {
   final Color color;
   final double opacity;
-  const AmbientGlow({
-    super.key,
-    required this.color,
-    this.opacity = 0.12,
-  });
+  const AmbientGlow({super.key, required this.color, this.opacity = 0.12});
 
   @override
   Widget build(BuildContext context) {
@@ -369,11 +364,7 @@ class AmbientGlow extends StatelessWidget {
           shape: BoxShape.circle,
           color: glow,
           boxShadow: [
-            BoxShadow(
-              color: glow,
-              blurRadius: 120,
-              spreadRadius: 60,
-            ),
+            BoxShadow(color: glow, blurRadius: 120, spreadRadius: 60),
           ],
         ),
       ),

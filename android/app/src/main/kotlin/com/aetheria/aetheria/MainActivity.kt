@@ -11,6 +11,10 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import android.media.MediaMetadataRetriever
 import android.net.wifi.WifiManager
 import android.net.Uri
@@ -41,7 +45,10 @@ class MainActivity : FlutterActivity() {
     private var mediaSession: MediaSessionCompat? = null
     private var cachedArtworkPath: String? = null
     private var cachedArtworkBitmap: Bitmap? = null
+    private var defaultArtworkBitmap: Bitmap? = null
     private var multicastLock: WifiManager.MulticastLock? = null
+    private var audioManager: AudioManager? = null
+    private var audioDeviceCallback: AudioDeviceCallback? = null
 
     private external fun initAudioContext(context: Context)
 
@@ -85,15 +92,24 @@ class MainActivity : FlutterActivity() {
                 )
             }
         }
+
+        fun dispatchAudioRouteChanged() {
+            val bridge = notificationChannelBridge ?: return
+            Handler(Looper.getMainLooper()).post {
+                bridge.invokeMethod("audioRouteChanged", null)
+            }
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setHighRefreshRate()
         initAudioContext(applicationContext)
+        registerAudioRouteCallback()
     }
 
     override fun onDestroy() {
+        unregisterAudioRouteCallback()
         releaseMulticastLock()
         mediaSession?.release()
         mediaSession = null
@@ -112,8 +128,8 @@ class MainActivity : FlutterActivity() {
                     val title = call.argument<String>("title") ?: "Aetheria"
                     val artist = call.argument<String>("artist") ?: "未知歌手"
                     val isPlaying = call.argument<Boolean>("isPlaying") ?: false
-                    val positionMs = call.argument<Int>("positionMs") ?: 0
-                    val durationMs = call.argument<Int>("durationMs") ?: 0
+                    val positionMs = call.argument<Number>("positionMs")?.toInt() ?: 0
+                    val durationMs = call.argument<Number>("durationMs")?.toInt() ?: 0
                     val hasPrevious = call.argument<Boolean>("hasPrevious") ?: false
                     val hasNext = call.argument<Boolean>("hasNext") ?: false
                     val audioPath = call.argument<String>("audioPath")
@@ -341,6 +357,7 @@ class MainActivity : FlutterActivity() {
         }
         val session = ensureMediaSession()
         val artwork = loadEmbeddedArtwork(audioPath)
+        val effectiveArtwork = artwork ?: loadDefaultArtwork()
         updateMediaSession(
             session,
             title,
@@ -350,13 +367,11 @@ class MainActivity : FlutterActivity() {
             safeDurationMs,
             hasPrevious,
             hasNext,
-            artwork,
+            effectiveArtwork,
         )
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(
-                if (isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
-            )
+            .setSmallIcon(R.drawable.ic_notification_music)
             .setContentTitle(title)
             .setContentText(artist)
             .setOngoing(isPlaying)
@@ -365,7 +380,7 @@ class MainActivity : FlutterActivity() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setLargeIcon(artwork)
+            .setLargeIcon(effectiveArtwork)
             .addAction(
                 android.R.drawable.ic_media_previous,
                 if (hasPrevious) "上一首" else "上一首（队列头部）",
@@ -398,6 +413,43 @@ class MainActivity : FlutterActivity() {
         }
 
         notificationManager.notify(NOTIFICATION_ID, builder.build())
+    }
+
+    private fun registerAudioRouteCallback() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            return
+        }
+        val manager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val callback = object : AudioDeviceCallback() {
+            override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>?) {
+                if (!addedDevices.isNullOrEmpty()) {
+                    dispatchAudioRouteChanged()
+                }
+            }
+
+            override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>?) {
+                if (!removedDevices.isNullOrEmpty()) {
+                    dispatchAudioRouteChanged()
+                }
+            }
+        }
+        audioManager = manager
+        audioDeviceCallback = callback
+        manager.registerAudioDeviceCallback(callback, Handler(Looper.getMainLooper()))
+    }
+
+    private fun unregisterAudioRouteCallback() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            return
+        }
+        val callback = audioDeviceCallback ?: return
+        try {
+            audioManager?.unregisterAudioDeviceCallback(callback)
+        } catch (_: Exception) {
+        } finally {
+            audioDeviceCallback = null
+            audioManager = null
+        }
     }
 
     private fun loadEmbeddedArtwork(audioPath: String?): Bitmap? {
@@ -450,6 +502,18 @@ class MainActivity : FlutterActivity() {
             inSampleSize = sampleSize
         }
         return BitmapFactory.decodeByteArray(data, 0, data.size, options)
+    }
+
+    private fun loadDefaultArtwork(): Bitmap? {
+        defaultArtworkBitmap?.let { return it }
+        val drawable = ContextCompat.getDrawable(this, R.drawable.ic_default_album_art)
+            ?: return BitmapFactory.decodeResource(resources, R.mipmap.ic_launcher)
+        val size = 512
+        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        drawable.setBounds(0, 0, size, size)
+        drawable.draw(Canvas(bitmap))
+        defaultArtworkBitmap = bitmap
+        return bitmap
     }
 
     private fun ensureMediaSession(): MediaSessionCompat {
@@ -592,6 +656,8 @@ class MainActivity : FlutterActivity() {
                 "wav" -> "audio/wav"
                 "m4a" -> "audio/mp4"
                 "ogg" -> "audio/ogg"
+                "md", "txt" -> "text/plain"
+                "json" -> "application/json"
                 else -> "audio/*"
             }
             put(MediaStore.MediaColumns.MIME_TYPE, mime)

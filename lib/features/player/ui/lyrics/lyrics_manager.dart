@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
+import 'package:aetheria/core/providers/floating_lyrics_provider.dart';
 import 'package:aetheria/core/providers/library_provider.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
 import 'package:aetheria/core/widgets/aether_button.dart';
@@ -36,7 +37,6 @@ class LyricsPanel extends StatefulWidget {
   @override
   State<LyricsPanel> createState() => _LyricsPanelState();
 }
-
 
 class _LyricsPanelState extends State<LyricsPanel> {
   SavedLyric? _savedLyric;
@@ -152,6 +152,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
       _error = null;
     });
     context.read<LibraryProvider>().markSongHasLyrics(widget.song.id);
+    context.read<FloatingLyricsProvider>().notifyLyricUpdated();
   }
 
   Future<void> _openManualEditor() async {
@@ -172,6 +173,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
       _error = null;
     });
     context.read<LibraryProvider>().markSongHasLyrics(widget.song.id);
+    context.read<FloatingLyricsProvider>().notifyLyricUpdated();
   }
 
   Future<void> _setOffset(int offsetMs) async {
@@ -190,6 +192,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
       setState(() {
         _savedLyric = updated;
       });
+      context.read<FloatingLyricsProvider>().notifyLyricUpdated();
     } catch (e) {
       if (!mounted) {
         return;
@@ -219,8 +222,9 @@ class _LyricsPanelState extends State<LyricsPanel> {
             keyboardType: const TextInputType.numberWithOptions(signed: true),
             hintText: '偏移毫秒，可为负',
             onSubmitted: (_) {
-              Navigator.of(dialogContext)
-                  .pop(int.tryParse(controller.text.trim()));
+              Navigator.of(
+                dialogContext,
+              ).pop(int.tryParse(controller.text.trim()));
             },
           ),
           actions: [
@@ -231,8 +235,9 @@ class _LyricsPanelState extends State<LyricsPanel> {
             AetherButton.primary(
               label: '保存',
               onPressed: () {
-                Navigator.of(dialogContext)
-                    .pop(int.tryParse(controller.text.trim()));
+                Navigator.of(
+                  dialogContext,
+                ).pop(int.tryParse(controller.text.trim()));
               },
             ),
           ],
@@ -268,7 +273,12 @@ class _LyricsPanelState extends State<LyricsPanel> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Padding(
-          padding: EdgeInsets.fromLTRB(AetherSpace.xl, widget.compact ? AetherSpace.lg - 2 : AetherSpace.lg + 2, AetherSpace.xl, AetherSpace.md),
+          padding: EdgeInsets.fromLTRB(
+            AetherSpace.xl,
+            widget.compact ? AetherSpace.lg - 2 : AetherSpace.lg + 2,
+            AetherSpace.xl,
+            AetherSpace.md,
+          ),
           child: Row(
             children: [
               Expanded(
@@ -281,7 +291,9 @@ class _LyricsPanelState extends State<LyricsPanel> {
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         color: cfg.textPrimary,
-                        fontSize: widget.compact ? AetherType.bodySm : AetherType.body,
+                        fontSize: widget.compact
+                            ? AetherType.bodySm
+                            : AetherType.body,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
@@ -298,20 +310,23 @@ class _LyricsPanelState extends State<LyricsPanel> {
               Tooltip(
                 message: '自动查找歌词',
                 child: _searching
-                  ? const SizedBox(
-                      width: 36,
-                      height: 36,
-                      child: Center(
-                        child: AetherProgress.circular(size: 16, strokeWidth: 2),
+                    ? const SizedBox(
+                        width: 36,
+                        height: 36,
+                        child: Center(
+                          child: AetherProgress.circular(
+                            size: 16,
+                            strokeWidth: 2,
+                          ),
+                        ),
+                      )
+                    : AetherIconButton(
+                        icon: Icons.travel_explore,
+                        iconSize: AetherIconSize.lg,
+                        color: cfg.accent,
+                        tooltip: '搜索歌词',
+                        onPressed: _searchLyrics,
                       ),
-                    )
-                  : AetherIconButton(
-                      icon: Icons.travel_explore,
-                      iconSize: AetherIconSize.lg,
-                      color: cfg.accent,
-                      tooltip: '搜索歌词',
-                      onPressed: _searchLyrics,
-                    ),
               ),
               Tooltip(
                 message: '手动粘贴歌词',
@@ -339,9 +354,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
         if (_candidates.isNotEmpty) _buildCandidateStrip(cfg),
         Expanded(
           child: _loadingSaved
-              ? Center(
-                  child: AetherProgress.circular(size: 16, strokeWidth: 2),
-                )
+              ? Center(child: AetherProgress.circular(size: 16, strokeWidth: 2))
               : content == null
               ? _buildEmptyState(cfg)
               : _buildCurrentLyricPreview(cfg, content),
@@ -361,7 +374,12 @@ class _LyricsPanelState extends State<LyricsPanel> {
         .join('\n');
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(AetherSpace.xl, AetherSpace.md, AetherSpace.xl, AetherSpace.md),
+      padding: const EdgeInsets.fromLTRB(
+        AetherSpace.xl,
+        AetherSpace.md,
+        AetherSpace.xl,
+        AetherSpace.md,
+      ),
       child: Container(
         decoration: BoxDecoration(
           color: cfg.bgHover.withValues(alpha: 0.08),
@@ -372,7 +390,12 @@ class _LyricsPanelState extends State<LyricsPanel> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(AetherSpace.lg, AetherSpace.lg - 2, AetherSpace.lg, AetherSpace.md),
+              padding: const EdgeInsets.fromLTRB(
+                AetherSpace.lg,
+                AetherSpace.lg - 2,
+                AetherSpace.lg,
+                AetherSpace.md,
+              ),
               child: Row(
                 children: [
                   Expanded(
@@ -416,7 +439,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
                           kind: AetherToastKind.success,
                         );
                       },
-                    )
+                    ),
                   ),
                 ],
               ),
@@ -429,7 +452,9 @@ class _LyricsPanelState extends State<LyricsPanel> {
                   previewText.isEmpty ? '暂无可预览内容' : previewText,
                   style: TextStyle(
                     color: cfg.textSecondary,
-                    fontSize: widget.compact ? AetherType.bodySm : AetherType.body,
+                    fontSize: widget.compact
+                        ? AetherType.bodySm
+                        : AetherType.body,
                     height: 1.65,
                   ),
                 ),
@@ -444,7 +469,12 @@ class _LyricsPanelState extends State<LyricsPanel> {
   Widget _buildCandidateStrip(AppThemeConfig cfg) {
     return Container(
       height: widget.compact ? 174 : 220,
-      margin: const EdgeInsets.fromLTRB(AetherSpace.xl, AetherSpace.sm, AetherSpace.xl, AetherSpace.md),
+      margin: const EdgeInsets.fromLTRB(
+        AetherSpace.xl,
+        AetherSpace.sm,
+        AetherSpace.xl,
+        AetherSpace.md,
+      ),
       decoration: BoxDecoration(
         color: cfg.bgHover.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(AetherRadius.sm + 2),
@@ -460,13 +490,18 @@ class _LyricsPanelState extends State<LyricsPanel> {
           return AetherPressable(
             onTap: () => _openCandidatePreview(candidate),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AetherSpace.lg - 2, vertical: AetherSpace.sm + 1),
+              padding: const EdgeInsets.symmetric(
+                horizontal: AetherSpace.lg - 2,
+                vertical: AetherSpace.sm + 1,
+              ),
               child: Row(
                 children: [
                   Container(
                     width: 72,
                     alignment: Alignment.center,
-                    padding: const EdgeInsets.symmetric(vertical: AetherSpace.xs - 1),
+                    padding: const EdgeInsets.symmetric(
+                      vertical: AetherSpace.xs - 1,
+                    ),
                     decoration: BoxDecoration(
                       color: cfg.accent.withValues(alpha: 0.10),
                       borderRadius: BorderRadius.circular(AetherRadius.xs + 1),
@@ -556,7 +591,12 @@ class _LyricsPanelState extends State<LyricsPanel> {
   Widget _buildOffsetControls(AppThemeConfig cfg) {
     final enabled = _savedLyric != null;
     return Container(
-      padding: EdgeInsets.fromLTRB(AetherSpace.lg + 2, AetherSpace.md, AetherSpace.lg + 2, widget.compact ? AetherSpace.lg - 2 : AetherSpace.lg + 2),
+      padding: EdgeInsets.fromLTRB(
+        AetherSpace.lg + 2,
+        AetherSpace.md,
+        AetherSpace.lg + 2,
+        widget.compact ? AetherSpace.lg - 2 : AetherSpace.lg + 2,
+      ),
       decoration: BoxDecoration(
         border: Border(
           top: BorderSide(color: cfg.borderSubtle.withValues(alpha: 0.7)),
@@ -580,7 +620,9 @@ class _LyricsPanelState extends State<LyricsPanel> {
               size: 30,
               iconSize: AetherIconSize.sm,
               tooltip: '-500ms',
-              onPressed: enabled ? () => _setOffset(_displayOffset - 500) : null,
+              onPressed: enabled
+                  ? () => _setOffset(_displayOffset - 500)
+                  : null,
             ),
           ),
           AetherPressable(
@@ -593,7 +635,9 @@ class _LyricsPanelState extends State<LyricsPanel> {
               decoration: BoxDecoration(
                 color: cfg.bgHover.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(AetherRadius.sm),
-                border: Border.all(color: cfg.borderSubtle.withValues(alpha: 0.7)),
+                border: Border.all(
+                  color: cfg.borderSubtle.withValues(alpha: 0.7),
+                ),
               ),
               child: Text(
                 '${_displayOffset}ms',
@@ -612,7 +656,9 @@ class _LyricsPanelState extends State<LyricsPanel> {
               size: 30,
               iconSize: AetherIconSize.sm,
               tooltip: '+500ms',
-              onPressed: enabled ? () => _setOffset(_displayOffset + 500) : null,
+              onPressed: enabled
+                  ? () => _setOffset(_displayOffset + 500)
+                  : null,
             ),
           ),
           const Spacer(),
@@ -632,5 +678,3 @@ class _LyricsPanelState extends State<LyricsPanel> {
     return '$min:$sec';
   }
 }
-
-

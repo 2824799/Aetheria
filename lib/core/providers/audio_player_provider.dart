@@ -24,6 +24,7 @@ class AudioPlayerProvider extends ChangeNotifier {
   static const String _rubberbandFormantKey = 'rubberband-formant-preserved';
   static const String _resamplerQualityKey = 'resampler-quality';
   static const String _outputLatencyModeKey = 'output-latency-mode';
+  static const String _developerModeKey = 'developer-mode-enabled';
 
   Song? activeSong;
   Song? playingSong;
@@ -52,6 +53,7 @@ class AudioPlayerProvider extends ChangeNotifier {
   String resamplerQuality = 'standard';
   String outputLatencyMode = 'shared-default';
   AudioOutputInfo? audioOutputInfo;
+  bool developerModeEnabled = false;
 
   bool isDetailOpen = false;
   String activeTab = 'lyrics';
@@ -60,6 +62,7 @@ class AudioPlayerProvider extends ChangeNotifier {
   int? _cachedAudioServerPort;
   Timer? _positionTimer;
   Timer? _outputInfoTimer;
+  Timer? _audioRouteChangeDebounce;
   int _lastPositionMs = -1;
   int _lastPersistedSecond = -1;
   int _stallTicks = 0;
@@ -71,6 +74,7 @@ class AudioPlayerProvider extends ChangeNotifier {
 
   AudioPlayerProvider() {
     NativeAudioHelper.setNotificationActionHandler(_handleNotificationAction);
+    NativeAudioHelper.setAudioRouteChangedHandler(_handleAudioRouteChanged);
     loadSettings();
   }
 
@@ -152,7 +156,7 @@ class AudioPlayerProvider extends ChangeNotifier {
   void _startOutputInfoTimer() {
     _outputInfoTimer?.cancel();
     unawaited(_refreshOutputInfoAndDeviceChange());
-    _outputInfoTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+    _outputInfoTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
       unawaited(_refreshOutputInfoAndDeviceChange());
     });
   }
@@ -195,6 +199,8 @@ class AudioPlayerProvider extends ChangeNotifier {
       outputLatencyMode = _normalizeOutputLatencyMode(
         prefs.getString(_outputLatencyModeKey),
       );
+      developerModeEnabled = prefs.getBool(_developerModeKey) ?? false;
+      music.setAudioPerformanceProfilingEnabled(enabled: developerModeEnabled);
       await music.setRustOutputBufferMs(ms: pitchBufferMs);
       await music.setRustOutputLatencyMode(mode: outputLatencyMode);
       await music.setRustVolume(vol: volume);
@@ -393,6 +399,43 @@ class AudioPlayerProvider extends ChangeNotifier {
       await _restartPlaybackOnDefaultOutputDevice();
     } catch (_) {
       // Device probing can fail transiently while Windows is switching endpoints.
+    } finally {
+      _isCheckingOutputDeviceChange = false;
+    }
+  }
+
+  Future<void> setDeveloperModeEnabled(bool value) async {
+    if (developerModeEnabled == value) {
+      return;
+    }
+    developerModeEnabled = value;
+    music.setAudioPerformanceProfilingEnabled(enabled: value);
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_developerModeKey, value);
+  }
+
+  Future<void> _handleAudioRouteChanged() async {
+    if (!Platform.isAndroid) {
+      return;
+    }
+    _audioRouteChangeDebounce?.cancel();
+    _audioRouteChangeDebounce = Timer(
+      const Duration(milliseconds: 450),
+      () => unawaited(_restartAfterAudioRouteChange()),
+    );
+  }
+
+  Future<void> _restartAfterAudioRouteChange() async {
+    if (_isCheckingOutputDeviceChange) {
+      return;
+    }
+    _isCheckingOutputDeviceChange = true;
+    try {
+      await _restartPlaybackOnDefaultOutputDevice();
+      await refreshAudioOutputInfo();
+    } catch (_) {
+      // Android can emit several transient route events while switching.
     } finally {
       _isCheckingOutputDeviceChange = false;
     }
@@ -1024,6 +1067,7 @@ class AudioPlayerProvider extends ChangeNotifier {
   void dispose() {
     _positionTimer?.cancel();
     _outputInfoTimer?.cancel();
+    _audioRouteChangeDebounce?.cancel();
     unawaited(_persistPlaybackState());
     if (Platform.isAndroid) {
       NativeAudioHelper.hideNotification();

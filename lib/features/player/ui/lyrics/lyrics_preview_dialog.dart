@@ -3,6 +3,8 @@ import 'package:aetheria/core/widgets/aether_empty_state.dart';
 import 'package:aetheria/src/rust/api/music.dart' as music;
 import 'dart:async';
 
+import 'package:provider/provider.dart';
+import 'package:aetheria/core/providers/floating_lyrics_provider.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
 import 'package:aetheria/core/widgets/aether_button.dart';
 import 'package:aetheria/core/widgets/aether_dialog.dart';
@@ -11,7 +13,8 @@ import 'package:aetheria/services/lyric_search_service.dart';
 import 'package:aetheria/src/rust/models/song.dart';
 
 class LyricPreviewDialog extends StatefulWidget {
-  const LyricPreviewDialog({super.key, 
+  const LyricPreviewDialog({
+    super.key,
     required this.candidate,
     required this.song,
     required this.audioVersion,
@@ -84,6 +87,7 @@ class LyricPreviewDialogState extends State<LyricPreviewDialog> {
       if (!mounted) {
         return;
       }
+      context.read<FloatingLyricsProvider>().notifyLyricUpdated();
       Navigator.of(context).pop(saved);
     } catch (e) {
       if (!mounted) {
@@ -108,10 +112,7 @@ class LyricPreviewDialogState extends State<LyricPreviewDialog> {
         child: _loading
             ? const AetherLoading(message: '加载歌词预览…')
             : _error != null
-            ? SelectableText(
-                _error!,
-                style: AetherType.bodyStyle(cfg.danger),
-              )
+            ? SelectableText(_error!, style: AetherType.bodyStyle(cfg.danger))
             : SyncedLyricsView(
                 content: loaded!.content,
                 translation: loaded.translation,
@@ -135,5 +136,3 @@ class LyricPreviewDialogState extends State<LyricPreviewDialog> {
     );
   }
 }
-
-

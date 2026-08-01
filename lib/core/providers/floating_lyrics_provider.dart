@@ -5,6 +5,7 @@ enum FloatingLyricAlign { left, center, right }
 
 class FloatingLyricsProvider extends ChangeNotifier {
   static const _prefix = 'aetheria-floating-lyrics';
+  static const double unsetWindowPos = -99999.0;
 
   bool enabled = false;
   bool locked = false;
@@ -24,16 +25,23 @@ class FloatingLyricsProvider extends ChangeNotifier {
   Color unplayedColor = const Color(0xFFFFFFFF);
   Color playedColor = const Color(0xFF22C55E);
   Color shadowColor = const Color(0x99000000);
-  double windowX = -1;
-  double windowY = -1;
+  double windowX = unsetWindowPos;
+  double windowY = unsetWindowPos;
   double windowWidth = 760;
   double windowHeight = 150;
+  int lyricRevision = 0;
 
   FloatingLyricsProvider() {
     load();
   }
 
-  bool get hasSavedWindowPosition => windowX >= 0 && windowY >= 0;
+  bool get hasSavedWindowPosition =>
+      windowX > -9000 && windowY > -9000 && !(windowX == -1 && windowY == -1);
+
+  void notifyLyricUpdated() {
+    lyricRevision++;
+    notifyListeners();
+  }
 
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
@@ -245,8 +253,8 @@ class FloatingLyricsProvider extends ChangeNotifier {
   }
 
   Future<void> resetWindowBounds() async {
-    windowX = -1;
-    windowY = -1;
+    windowX = unsetWindowPos;
+    windowY = unsetWindowPos;
     windowWidth = 760;
     windowHeight = 150;
     notifyListeners();

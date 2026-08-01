@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-enum AppThemeType { dark, light, pink }
+enum AppThemeType { dark, light, pink, pinkDark }
 
 /// Full visual config for one theme.
 ///
@@ -95,6 +95,8 @@ class AppThemeConfig {
         return light;
       case AppThemeType.pink:
         return pink;
+      case AppThemeType.pinkDark:
+        return pinkDark;
       case AppThemeType.dark:
         return dark;
     }
@@ -213,10 +215,51 @@ class AppThemeConfig {
     warning: Color(0xFFEA580C),
     success: Color(0xFF059669),
     info: Color(0xFFDB2777),
-    scrim: Color(0x66881337),
+    scrim: Color(0x660F0A0C),
     selection: Color(0x29F43F5E),
     pressed: Color(0x1AF43F5E),
     overlayStroke: Color(0x1AF43F5E),
     glassBlurDefault: 16.0,
+  );
+
+  /// A dark, warm-neutral surface palette with soft blush accents.
+  static const AppThemeConfig pinkDark = AppThemeConfig(
+    bgApp: RadialGradient(
+      center: Alignment.topLeft,
+      radius: 1.15,
+      colors: [Color(0xFF2A1821), Color(0xFF100C10)],
+    ),
+    bgPanel: Color(0xD91B1318),
+    bgHover: Color(0x14F6B6CA),
+    border: Color(0x24F6B6CA),
+    sliderTrack: Color(0x33F6B6CA),
+    textMain: Color(0xFFFFF7FA),
+    textSub: Color(0xFFD8B8C3),
+    accent: Color(0xFFF3A6BE),
+    accentHover: Color(0xFFEC88AA),
+    accentGlow: Color(0x40F3A6BE),
+    glassBlur: 24.0,
+    ambientOpacity: 0.1,
+    brightness: Brightness.dark,
+    bgSolid: Color(0xFF100C10),
+    bgElevated: Color(0xF2261A20),
+    bgPopover: Color(0xFA2B1D24),
+    textTertiary: Color(0xFFA98591),
+    textInverse: Color(0xFF2A111B),
+    borderStrong: Color(0x3DF6B6CA),
+    borderFocus: Color(0xB3F3A6BE),
+    accentMuted: Color(0x2EF3A6BE),
+    onAccent: Color(0xFF35121F),
+    danger: Color(0xFFFF8FA3),
+    dangerHover: Color(0xFFFF6F91),
+    dangerMuted: Color(0x33FF8FA3),
+    warning: Color(0xFFF6C177),
+    success: Color(0xFF8BD5CA),
+    info: Color(0xFFC6A0F6),
+    scrim: Color(0xB3000000),
+    selection: Color(0x38F3A6BE),
+    pressed: Color(0x1FF6B6CA),
+    overlayStroke: Color(0x2EF6B6CA),
+    glassBlurDefault: 18.0,
   );
 }

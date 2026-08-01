@@ -1866,6 +1866,31 @@ pub fn get_rust_audio_output_info() -> crate::audio::player::AudioOutputInfo {
     crate::audio::player::get_output_info()
 }
 
+#[frb(sync)]
+pub fn set_audio_performance_profiling_enabled(enabled: bool) {
+    crate::audio::profiler::set_enabled(enabled);
+}
+
+#[frb(sync)]
+pub fn is_audio_performance_profiling_enabled() -> bool {
+    crate::audio::profiler::is_enabled()
+}
+
+#[frb(sync)]
+pub fn reset_audio_performance_stats() {
+    crate::audio::profiler::reset();
+}
+
+#[frb(sync)]
+pub fn get_audio_performance_report_json() -> String {
+    crate::audio::profiler::report_json()
+}
+
+#[frb(sync)]
+pub fn export_audio_performance_report_markdown() -> String {
+    crate::audio::profiler::report_markdown()
+}
+
 pub fn get_rust_default_output_device_name() -> Result<String, String> {
     crate::audio::player::default_output_device_name()
 }

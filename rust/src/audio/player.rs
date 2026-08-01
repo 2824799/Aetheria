@@ -4,12 +4,13 @@ use std::sync::{
     Arc, Mutex,
 };
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{BufferSize, SampleFormat, StreamConfig, SupportedBufferSize};
 
 use crate::audio::dsp::{self, StreamDecoder};
+use crate::audio::profiler::{self, AUDIO_PROFILER};
 use crate::audio::rubberband::RubberBandPitchShifter;
 
 // Thread-safe ring buffer / FIFO used to bridge the decode thread and the cpal
@@ -165,6 +166,7 @@ impl DecodePipeline {
 
         let current_pitch = *self.params.pitch.lock().unwrap_or_else(|e| e.into_inner());
         let mut processed = if current_pitch.abs() > 0.01 && self.channels == 2 {
+            let _pitch_scope = profiler::scope(&AUDIO_PROFILER.pitch_shift);
             let current_algo = self
                 .params
                 .algo
@@ -209,12 +211,15 @@ impl DecodePipeline {
             return Ok(Some(processed));
         }
 
-        apply_post_dsp_protection(
-            &mut processed,
-            current_quality.peak_protection_enabled,
-            &self.params.clipped_sample_count,
-            &self.params.peak_bits,
-        );
+        {
+            let _protection_scope = profiler::scope(&AUDIO_PROFILER.post_dsp_protection);
+            apply_post_dsp_protection(
+                &mut processed,
+                current_quality.peak_protection_enabled,
+                &self.params.clipped_sample_count,
+                &self.params.peak_bits,
+            );
+        }
         Ok(Some(processed))
     }
 }
@@ -309,6 +314,7 @@ struct PlayerState {
     underrun_count: Arc<AtomicU64>,
     clipped_sample_count: Arc<AtomicU64>,
     peak_bits: Arc<AtomicU64>,
+    queue_headroom_history: VecDeque<(Instant, u32)>,
 }
 
 lazy_static::lazy_static! {
@@ -333,6 +339,7 @@ lazy_static::lazy_static! {
         underrun_count: Arc::new(AtomicU64::new(0)),
         clipped_sample_count: Arc::new(AtomicU64::new(0)),
         peak_bits: Arc::new(AtomicU64::new(0.0f64.to_bits())),
+        queue_headroom_history: VecDeque::new(),
     });
 }
 
@@ -568,6 +575,8 @@ fn build_output(
                         .build_output_stream(
                             $stream_config,
                             move |data: &mut [f32], _| {
+                                let _profile_scope =
+                                    profiler::scope(&AUDIO_PROFILER.output_callback);
                                 let n = buf.pop(data);
                                 if n < data.len() {
                                     uc.fetch_add(1, Ordering::Relaxed);
@@ -602,6 +611,8 @@ fn build_output(
                         .build_output_stream(
                             $stream_config,
                             move |data: &mut [i16], _| {
+                                let _profile_scope =
+                                    profiler::scope(&AUDIO_PROFILER.output_callback);
                                 tmp.resize(data.len(), 0.0);
                                 let n = buf.pop(&mut tmp);
                                 if n < data.len() {
@@ -643,6 +654,8 @@ fn build_output(
                         .build_output_stream(
                             $stream_config,
                             move |data: &mut [u16], _| {
+                                let _profile_scope =
+                                    profiler::scope(&AUDIO_PROFILER.output_callback);
                                 tmp.resize(data.len(), 0.0);
                                 let n = buf.pop(&mut tmp);
                                 if n < data.len() {
@@ -684,6 +697,8 @@ fn build_output(
                         .build_output_stream(
                             $stream_config,
                             move |data: &mut [i32], _| {
+                                let _profile_scope =
+                                    profiler::scope(&AUDIO_PROFILER.output_callback);
                                 tmp.resize(data.len(), 0.0);
                                 let n = buf.pop(&mut tmp);
                                 if n < data.len() {
@@ -725,6 +740,8 @@ fn build_output(
                         .build_output_stream(
                             $stream_config,
                             move |data: &mut [u8], _| {
+                                let _profile_scope =
+                                    profiler::scope(&AUDIO_PROFILER.output_callback);
                                 tmp.resize(data.len(), 0.0);
                                 let n = buf.pop(&mut tmp);
                                 if n < data.len() {
@@ -764,6 +781,8 @@ fn build_output(
                         .build_output_stream(
                             $stream_config,
                             move |data: &mut [f64], _| {
+                                let _profile_scope =
+                                    profiler::scope(&AUDIO_PROFILER.output_callback);
                                 tmp.resize(data.len(), 0.0);
                                 let n = buf.pop(&mut tmp);
                                 if n < data.len() {
@@ -849,6 +868,7 @@ pub fn start_playback(
     state.stream = None;
     state.buffer = None;
     state.stream_finished.store(false, Ordering::SeqCst);
+    state.queue_headroom_history.clear();
 
     let stop_flag = Arc::new(AtomicBool::new(false));
     let seek_request = Arc::new(Mutex::new(None));
@@ -933,6 +953,7 @@ pub fn start_playback(
                         shifter.reset();
                     }
                     buffer.clear();
+                    // A seek starts a fresh five-second headroom window.
                     stream_finished.store(false, Ordering::SeqCst);
                     if let Err(e) = prefill_audio_buffer(
                         &mut pipeline,
@@ -968,7 +989,10 @@ pub fn start_playback(
             if block.is_empty() {
                 continue;
             }
-            buffer.push(&block, &stop_flag);
+            {
+                let _push_scope = profiler::scope(&AUDIO_PROFILER.buffer_push_wait);
+                buffer.push(&block, &stop_flag);
+            }
         }
     });
 
@@ -993,7 +1017,7 @@ pub fn resume_playback() -> Result<(), String> {
 }
 
 pub fn seek_playback(secs: f64) -> Result<(), String> {
-    let state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
+    let mut state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
     // Clear buffered audio immediately so resume/seek is responsive and stale samples
     // are never played. The decode thread will refill from the requested position.
     if let Some(b) = &state.buffer {
@@ -1005,6 +1029,7 @@ pub fn seek_playback(secs: f64) -> Result<(), String> {
         Ordering::SeqCst,
     );
     state.stream_finished.store(false, Ordering::SeqCst);
+    state.queue_headroom_history.clear();
     Ok(())
 }
 
@@ -1017,6 +1042,7 @@ pub fn stop_playback() -> Result<(), String> {
     state.stream = None;
     state.buffer = None;
     state.stream_finished.store(false, Ordering::SeqCst);
+    state.queue_headroom_history.clear();
     Ok(())
 }
 
@@ -1073,7 +1099,7 @@ pub fn set_quality_settings(
 }
 
 pub fn get_output_info() -> AudioOutputInfo {
-    let state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
+    let mut state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
     let info = state
         .output_info
         .lock()
@@ -1085,7 +1111,7 @@ pub fn get_output_info() -> AudioOutputInfo {
     } else {
         f64::NEG_INFINITY
     };
-    let queued_ms = if state.sample_rate > 0 && state.channels > 0 {
+    let current_queued_ms = if state.sample_rate > 0 && state.channels > 0 {
         state
             .buffer
             .as_ref()
@@ -1097,6 +1123,23 @@ pub fn get_output_info() -> AudioOutputInfo {
     } else {
         0
     };
+    let now = Instant::now();
+    state
+        .queue_headroom_history
+        .push_back((now, current_queued_ms));
+    while state
+        .queue_headroom_history
+        .front()
+        .is_some_and(|(captured_at, _)| now.duration_since(*captured_at) > Duration::from_secs(5))
+    {
+        state.queue_headroom_history.pop_front();
+    }
+    let queued_ms = state
+        .queue_headroom_history
+        .iter()
+        .map(|(_, value)| *value)
+        .min()
+        .unwrap_or(current_queued_ms);
 
     AudioOutputInfo {
         device_name: info.device_name,

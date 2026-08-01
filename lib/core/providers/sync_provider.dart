@@ -83,12 +83,32 @@ class _CachedFileHash {
   final int size;
   final int modifiedMs;
   final String md5;
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'size': size,
+    'modifiedMs': modifiedMs,
+    'md5': md5,
+  };
+
+  static _CachedFileHash? fromJson(Object? value) {
+    if (value is! Map) {
+      return null;
+    }
+    final size = (value['size'] as num?)?.toInt();
+    final modifiedMs = (value['modifiedMs'] as num?)?.toInt();
+    final md5 = value['md5']?.toString();
+    if (size == null || modifiedMs == null || md5 == null || md5.isEmpty) {
+      return null;
+    }
+    return _CachedFileHash(size: size, modifiedMs: modifiedMs, md5: md5);
+  }
 }
 
 class SyncProvider extends ChangeNotifier {
   static const int _discoveryPort = 43871;
   static const String _announceType = 'aetheria-sync-announcement';
   static const String _deviceIdKey = 'aetheria-sync-device-id';
+  static const String _fileHashCacheKey = 'aetheria-sync-file-hash-cache-v1';
   static const Duration _deviceTtl = Duration(seconds: 45);
   static const Duration _requestTimeout = Duration(seconds: 90);
   static const Duration _downloadTimeout = Duration(minutes: 3);
@@ -105,6 +125,9 @@ class SyncProvider extends ChangeNotifier {
   RawDatagramSocket? _udpSocket;
   Timer? _announceTimer;
   Timer? _cleanupTimer;
+  Timer? _fileHashCachePersistTimer;
+  Future<void>? _fileHashCacheLoadFuture;
+  bool _fileHashCacheLoaded = false;
   String? _deviceId;
   String? _deviceName;
 
@@ -282,16 +305,28 @@ class SyncProvider extends ChangeNotifier {
         }
       }
 
+      progress = 0;
+      statusMessage = '正在比对本地与远端音乐文件...';
+      notifyListeners();
       final plan = await _buildFileSyncPlan(
         libraryProvider.libraryPath,
         remoteFiles,
+        onProgress: (completed, total) {
+          statusMessage = total <= 0
+              ? '正在比对本地与远端音乐文件...'
+              : '正在比对本地与远端音乐文件 ($completed / $total)...';
+          progress = total <= 0 ? null : (completed / total) * 0.15;
+          notifyListeners();
+        },
       );
 
       var completed = 0;
       final totalSteps = plan.downloads.length + 2;
       void updateProgress(String message) {
         statusMessage = message;
-        progress = totalSteps <= 0 ? null : completed / totalSteps;
+        progress = totalSteps <= 0
+            ? null
+            : 0.15 + (completed / totalSteps) * 0.85;
         notifyListeners();
       }
 
@@ -446,45 +481,59 @@ class SyncProvider extends ChangeNotifier {
 
   Future<_FileSyncPlan> _buildFileSyncPlan(
     String libraryPath,
-    List<_RemoteFileInfo> remoteFiles,
-  ) async {
+    List<_RemoteFileInfo> remoteFiles, {
+    void Function(int completed, int total)? onProgress,
+  }) async {
     final filesDir = Directory(_joinPath(libraryPath, ['files']));
     await filesDir.create(recursive: true);
     final localFiles = await _listLibraryFiles(filesDir, libraryPath);
+    final localFileSet = localFiles.toSet();
     final remoteByPath = {for (final file in remoteFiles) file.path: file};
     final downloads = <_RemoteFileInfo>[];
     final removeOrReplace = <String>{};
+    var compared = 0;
+    final comparisonTotal = localFiles.length + remoteFiles.length;
+    onProgress?.call(compared, comparisonTotal);
 
     for (final local in localFiles) {
-      final remote = remoteByPath[local];
-      if (remote == null) {
-        removeOrReplace.add(local);
-        continue;
-      }
+      try {
+        final remote = remoteByPath[local];
+        if (remote == null) {
+          removeOrReplace.add(local);
+          continue;
+        }
 
-      final localFile = File(_resolveLibraryRelativePath(libraryPath, local));
-      final stat = await localFile.stat();
-      if (stat.size != remote.size) {
-        removeOrReplace.add(local);
-        downloads.add(remote);
-        continue;
-      }
-
-      final remoteMd5 = remote.md5;
-      if (remoteMd5 != null && remoteMd5.isNotEmpty) {
-        final hash = await _fileMd5(localFile);
-        if (hash != remoteMd5) {
+        final localFile = File(_resolveLibraryRelativePath(libraryPath, local));
+        final stat = await localFile.stat();
+        if (stat.size != remote.size) {
           removeOrReplace.add(local);
           downloads.add(remote);
+          continue;
         }
+
+        final remoteMd5 = remote.md5;
+        if (remoteMd5 != null && remoteMd5.isNotEmpty) {
+          final hash = await _cachedFileMd5(localFile, stat);
+          if (hash != remoteMd5) {
+            removeOrReplace.add(local);
+            downloads.add(remote);
+          }
+        }
+      } finally {
+        compared++;
+        onProgress?.call(compared, comparisonTotal);
       }
     }
 
     for (final remote in remoteFiles) {
-      if (!localFiles.contains(remote.path)) {
+      if (!localFileSet.contains(remote.path)) {
         downloads.add(remote);
       }
+      compared++;
+      onProgress?.call(compared, comparisonTotal);
     }
+
+    await _persistFileHashCache();
 
     return _FileSyncPlan(
       remoteFiles: remoteFiles,
@@ -977,6 +1026,7 @@ class SyncProvider extends ChangeNotifier {
   }
 
   Future<String> _cachedFileMd5(File file, FileStat stat) async {
+    await _ensureFileHashCacheLoaded();
     final normalized = _normalizePath(file.path);
     final modifiedMs = stat.modified.millisecondsSinceEpoch;
     final cached = _fileHashCache[normalized];
@@ -991,7 +1041,61 @@ class SyncProvider extends ChangeNotifier {
       modifiedMs: modifiedMs,
       md5: hash,
     );
+    _scheduleFileHashCachePersist();
     return hash;
+  }
+
+  Future<void> _ensureFileHashCacheLoaded() {
+    if (_fileHashCacheLoaded) {
+      return Future<void>.value();
+    }
+    return _fileHashCacheLoadFuture ??= _loadFileHashCache();
+  }
+
+  Future<void> _loadFileHashCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_fileHashCacheKey);
+      if (raw == null || raw.isEmpty) {
+        return;
+      }
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) {
+        return;
+      }
+      for (final entry in decoded.entries) {
+        final hash = _CachedFileHash.fromJson(entry.value);
+        if (hash != null) {
+          _fileHashCache[entry.key.toString()] = hash;
+        }
+      }
+    } catch (_) {
+      _fileHashCache.clear();
+    } finally {
+      _fileHashCacheLoaded = true;
+    }
+  }
+
+  void _scheduleFileHashCachePersist() {
+    _fileHashCachePersistTimer?.cancel();
+    _fileHashCachePersistTimer = Timer(
+      const Duration(milliseconds: 750),
+      () => unawaited(_persistFileHashCache()),
+    );
+  }
+
+  Future<void> _persistFileHashCache() async {
+    await _ensureFileHashCacheLoaded();
+    _fileHashCachePersistTimer?.cancel();
+    _fileHashCachePersistTimer = null;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final serialized = <String, dynamic>{
+        for (final entry in _fileHashCache.entries)
+          entry.key: entry.value.toJson(),
+      };
+      await prefs.setString(_fileHashCacheKey, jsonEncode(serialized));
+    } catch (_) {}
   }
 
   Future<void> _moveFile(File source, File destination) async {
@@ -1059,6 +1163,8 @@ class SyncProvider extends ChangeNotifier {
   void dispose() {
     _announceTimer?.cancel();
     _cleanupTimer?.cancel();
+    _fileHashCachePersistTimer?.cancel();
+    unawaited(_persistFileHashCache());
     _udpSocket?.close();
     _server?.close(force: true);
     _client.close(force: true);

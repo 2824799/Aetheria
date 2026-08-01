@@ -286,6 +286,23 @@ Future<void> setRustAudioQualitySettings({
 Future<AudioOutputInfo> getRustAudioOutputInfo() =>
     RustLib.instance.api.crateApiMusicGetRustAudioOutputInfo();
 
+void setAudioPerformanceProfilingEnabled({required bool enabled}) => RustLib
+    .instance
+    .api
+    .crateApiMusicSetAudioPerformanceProfilingEnabled(enabled: enabled);
+
+bool isAudioPerformanceProfilingEnabled() =>
+    RustLib.instance.api.crateApiMusicIsAudioPerformanceProfilingEnabled();
+
+void resetAudioPerformanceStats() =>
+    RustLib.instance.api.crateApiMusicResetAudioPerformanceStats();
+
+String getAudioPerformanceReportJson() =>
+    RustLib.instance.api.crateApiMusicGetAudioPerformanceReportJson();
+
+String exportAudioPerformanceReportMarkdown() =>
+    RustLib.instance.api.crateApiMusicExportAudioPerformanceReportMarkdown();
+
 Future<String> getRustDefaultOutputDeviceName() =>
     RustLib.instance.api.crateApiMusicGetRustDefaultOutputDeviceName();
 

@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:aetheria/core/providers/floating_lyrics_provider.dart';
 import 'package:aetheria/src/rust/api/music.dart' as music;
 
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
@@ -8,7 +10,8 @@ import 'package:aetheria/core/widgets/aether_text_field.dart';
 import 'package:aetheria/src/rust/models/song.dart';
 
 class ManualLyricDialog extends StatefulWidget {
-  const ManualLyricDialog({super.key, 
+  const ManualLyricDialog({
+    super.key,
     required this.song,
     required this.audioVersion,
     required this.cfg,
@@ -64,6 +67,7 @@ class ManualLyricDialogState extends State<ManualLyricDialog> {
       if (!mounted) {
         return;
       }
+      context.read<FloatingLyricsProvider>().notifyLyricUpdated();
       Navigator.of(context).pop(saved);
     } catch (e) {
       if (!mounted) {
@@ -95,10 +99,7 @@ class ManualLyricDialogState extends State<ManualLyricDialog> {
             ),
             if (_error != null) ...[
               const SizedBox(height: AetherSpace.md),
-              Text(
-                _error!,
-                style: AetherType.bodySmStyle(widget.cfg.danger),
-              ),
+              Text(_error!, style: AetherType.bodySmStyle(widget.cfg.danger)),
             ],
           ],
         ),
@@ -117,5 +118,3 @@ class ManualLyricDialogState extends State<ManualLyricDialog> {
     );
   }
 }
-
-

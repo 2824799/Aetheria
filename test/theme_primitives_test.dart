@@ -12,6 +12,9 @@ void main() {
     expect(dark.danger, isNot(dark.accent));
     expect(dark.success, isNot(dark.warning));
     expect(dark.scrim.a, greaterThan(0));
+    expect(AppThemeConfig.pink.scrim.r, lessThan(0.2));
+    expect(AppThemeConfig.pinkDark.brightness, Brightness.dark);
+    expect(AppThemeConfig.pinkDark.accent, isNot(AppThemeConfig.pink.accent));
   });
 
   test('motion exit is faster than enter', () {
@@ -51,10 +54,7 @@ void main() {
       MaterialApp(
         theme: buildAetheriaThemeData(AppThemeConfig.pink),
         home: Scaffold(
-          body: AetherButton.primary(
-            label: '导入歌曲',
-            onPressed: () {},
-          ),
+          body: AetherButton.primary(label: '导入歌曲', onPressed: () {}),
         ),
       ),
     );
@@ -98,7 +98,9 @@ void main() {
     expect(find.text('取消'), findsOneWidget);
   });
 
-  testWidgets('showAetherConfirmDialog returns false on cancel', (tester) async {
+  testWidgets('showAetherConfirmDialog returns false on cancel', (
+    tester,
+  ) async {
     bool? result;
     await tester.pumpWidget(
       MaterialApp(
@@ -163,9 +165,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: buildAetheriaThemeData(AppThemeConfig.light),
-        home: const Scaffold(
-          body: AetherTextField.plain(hintText: '标题'),
-        ),
+        home: const Scaffold(body: AetherTextField.plain(hintText: '标题')),
       ),
     );
     expect(find.byType(TextField), findsOneWidget);
@@ -223,4 +223,3 @@ void main() {
     expect(value, isTrue);
   });
 }
-

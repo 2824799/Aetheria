@@ -1,3 +1,4 @@
+use crate::audio::profiler::{self, AUDIO_PROFILER};
 use std::fs::File;
 use symphonia::core::audio::{AudioBufferRef, Signal};
 use symphonia::core::codecs::{Decoder, DecoderOptions};
@@ -326,10 +327,13 @@ impl StreamDecoder {
             if packet.track_id() != self.track_id {
                 continue;
             }
-            let decoded = match self.decoder.decode(&packet) {
-                Ok(b) => b,
-                Err(Error::DecodeError(_)) => continue,
-                Err(e) => return Err(e.to_string()),
+            let decoded = {
+                let _scope = profiler::scope(&AUDIO_PROFILER.decode_packet);
+                match self.decoder.decode(&packet) {
+                    Ok(b) => b,
+                    Err(Error::DecodeError(_)) => continue,
+                    Err(e) => return Err(e.to_string()),
+                }
             };
             let (inter, chans) = packet_to_interleaved_f32(&decoded);
             let frames = if chans > 0 { inter.len() / chans } else { 0 };
@@ -360,6 +364,7 @@ impl StreamDecoder {
     /// Read up to `out_frames` resampled frames (interleaved at target_channels).
     /// Returns fewer frames near end of stream; an empty result signals EOF.
     pub fn read_block(&mut self, out_frames: usize) -> Result<Vec<f32>, String> {
+        let _block_scope = profiler::scope(&AUDIO_PROFILER.decode_resample_block);
         let tc = self.target_channels;
         let mut out: Vec<f32> = Vec::with_capacity(out_frames * tc);
 
@@ -374,6 +379,7 @@ impl StreamDecoder {
             return Ok(out);
         }
 
+        let _sinc_scope = profiler::scope(&AUDIO_PROFILER.sinc_resampler);
         let mut frame = vec![0.0f64; tc];
         while out.len() / tc < out_frames {
             // Keep enough history for the windowed-sinc kernel. Linear interpolation is cheaper,

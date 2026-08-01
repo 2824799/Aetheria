@@ -36,6 +36,7 @@ class _FloatingLyricsBridgeState extends State<FloatingLyricsBridge> {
   int _anchorPositionMs = 0;
   int _anchorReadAtMs = 0;
   bool _anchorWasPlaying = false;
+  int _lastLyricRevision = 0;
 
   @override
   void initState() {
@@ -85,6 +86,12 @@ class _FloatingLyricsBridgeState extends State<FloatingLyricsBridge> {
 
     final settings = context.read<FloatingLyricsProvider>();
     final audio = context.read<AudioPlayerProvider>();
+
+    if (settings.lyricRevision != _lastLyricRevision) {
+      _lastLyricRevision = settings.lyricRevision;
+      _loadedSongId = null;
+      _loadedVersionId = null;
+    }
 
     if (!settings.enabled) {
       if (_visible) {

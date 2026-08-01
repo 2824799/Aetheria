@@ -38,8 +38,8 @@ class FloatingLyricWindow {
     unsigned int unplayed_color = 0xFFFFFFFF;
     unsigned int played_color = 0xFF22C55E;
     unsigned int shadow_color = 0x99000000;
-    double window_x = -1.0;
-    double window_y = -1.0;
+    double window_x = -99999.0;
+    double window_y = -99999.0;
     double window_width = 760.0;
     double window_height = 150.0;
   };

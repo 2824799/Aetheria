@@ -17,6 +17,7 @@ import 'package:aetheria/core/widgets/aether_surface.dart';
 import 'package:aetheria/core/widgets/aether_text_field.dart';
 import 'package:aetheria/core/widgets/aether_toast.dart';
 import 'package:aetheria/features/library/ui/settings/settings_floating_lyrics_tab.dart';
+import 'package:aetheria/features/library/ui/settings/settings_developer_tab.dart';
 import 'package:aetheria/features/library/ui/settings/settings_sync_tab.dart';
 import 'package:aetheria/features/library/ui/settings/settings_playback_tab.dart';
 import 'package:aetheria/features/library/ui/settings/settings_library_tab.dart';
@@ -62,7 +63,10 @@ class _SettingsModalState extends State<SettingsModal> {
           child: Container(
             width: MediaQuery.of(context).size.width.clamp(720.0, 920.0),
             height: MediaQuery.of(context).size.height.clamp(520.0, 680.0),
-            margin: const EdgeInsets.symmetric(horizontal: AetherSpace.xxxl, vertical: AetherSpace.massive),
+            margin: const EdgeInsets.symmetric(
+              horizontal: AetherSpace.xxxl,
+              vertical: AetherSpace.massive,
+            ),
             child: AetherSurface(
               level: AetherSurfaceLevel.glass,
               blur: 18,
@@ -83,13 +87,17 @@ class _SettingsModalState extends State<SettingsModal> {
                       children: [
                         Row(
                           children: [
-                            Icon(Icons.settings, color: cfg.textPrimary, size: AetherIconSize.xl),
+                            Icon(
+                              Icons.settings,
+                              color: cfg.textPrimary,
+                              size: AetherIconSize.xl,
+                            ),
                             const SizedBox(width: AetherSpace.md),
                             Text(
                               '系统设置',
-                              style: AetherType.titleSmStyle(cfg.textPrimary).copyWith(
-                                fontWeight: FontWeight.w700,
-                              ),
+                              style: AetherType.titleSmStyle(
+                                cfg.textPrimary,
+                              ).copyWith(fontWeight: FontWeight.w700),
                             ),
                           ],
                         ),
@@ -118,10 +126,12 @@ class _SettingsModalState extends State<SettingsModal> {
                             border: Border(
                               right: BorderSide(color: cfg.borderSubtle),
                             ),
-                            color: cfg.bgHover.withValues(alpha: 0.35),
+                            color: cfg.bgHover,
                           ),
                           child: ListView(
-                            padding: const EdgeInsets.symmetric(vertical: AetherSpace.md),
+                            padding: const EdgeInsets.symmetric(
+                              vertical: AetherSpace.md,
+                            ),
                             children: [
                               _buildSidebarItem(
                                 'theme',
@@ -133,6 +143,12 @@ class _SettingsModalState extends State<SettingsModal> {
                                 'playback',
                                 Icons.play_circle_outline,
                                 '播放设置',
+                                cfg,
+                              ),
+                              _buildSidebarItem(
+                                'developer',
+                                Icons.developer_mode_rounded,
+                                '开发者模式',
                                 cfg,
                               ),
                               _buildSidebarItem(
@@ -189,6 +205,8 @@ class _SettingsModalState extends State<SettingsModal> {
           ? '个性外观'
           : _selectedCategory == 'playback'
           ? '播放设置'
+          : _selectedCategory == 'developer'
+          ? '开发者模式'
           : _selectedCategory == 'floatingLyrics'
           ? '桌面歌词'
           : _selectedCategory == 'sync'
@@ -201,7 +219,10 @@ class _SettingsModalState extends State<SettingsModal> {
           child: Container(
             width: double.infinity,
             height: MediaQuery.of(context).size.height * 0.78,
-            margin: const EdgeInsets.symmetric(horizontal: AetherSpace.xl, vertical: AetherSpace.massive),
+            margin: const EdgeInsets.symmetric(
+              horizontal: AetherSpace.xl,
+              vertical: AetherSpace.massive,
+            ),
             child: AetherSurface(
               level: AetherSurfaceLevel.glass,
               blur: 18,
@@ -238,9 +259,9 @@ class _SettingsModalState extends State<SettingsModal> {
                               const SizedBox(width: AetherSpace.md),
                               Text(
                                 currentCategoryTitle,
-                                style: AetherType.titleSmStyle(cfg.textPrimary).copyWith(
-                                  fontWeight: FontWeight.w700,
-                                ),
+                                style: AetherType.titleSmStyle(
+                                  cfg.textPrimary,
+                                ).copyWith(fontWeight: FontWeight.w700),
                               ),
                             ] else ...[
                               Icon(
@@ -251,9 +272,9 @@ class _SettingsModalState extends State<SettingsModal> {
                               const SizedBox(width: AetherSpace.md),
                               Text(
                                 '系统设置',
-                                style: AetherType.titleSmStyle(cfg.textPrimary).copyWith(
-                                  fontWeight: FontWeight.w700,
-                                ),
+                                style: AetherType.titleSmStyle(
+                                  cfg.textPrimary,
+                                ).copyWith(fontWeight: FontWeight.w700),
                               ),
                             ],
                           ],
@@ -288,7 +309,9 @@ class _SettingsModalState extends State<SettingsModal> {
                             ),
                           )
                         : ListView(
-                            padding: const EdgeInsets.symmetric(vertical: AetherSpace.md),
+                            padding: const EdgeInsets.symmetric(
+                              vertical: AetherSpace.md,
+                            ),
                             children: [
                               _buildMobileMenuItem(
                                 'theme',
@@ -300,6 +323,12 @@ class _SettingsModalState extends State<SettingsModal> {
                                 'playback',
                                 Icons.play_circle_outline,
                                 '播放设置',
+                                cfg,
+                              ),
+                              _buildMobileMenuItem(
+                                'developer',
+                                Icons.developer_mode_rounded,
+                                '开发者模式',
                                 cfg,
                               ),
                               _buildMobileMenuItem(
@@ -404,28 +433,27 @@ class _SettingsModalState extends State<SettingsModal> {
           cfg: cfg,
           audioProvider: audioProvider,
           isDesktop: isDesktop,
-          onShowCustomBufferDialog: () => _showCustomBufferDialog(
-            context,
-            cfg,
-            audioProvider,
-          ),
+          onShowCustomBufferDialog: () =>
+              _showCustomBufferDialog(context, cfg, audioProvider),
         );
+      case 'developer':
+        return SettingsDeveloperTab(cfg: cfg, audioProvider: audioProvider);
       case 'library':
         return SettingsLibraryTab(
           cfg: cfg,
           libraryProvider: libraryProvider,
           isDesktop: isDesktop,
           settingsImporting: _settingsImporting,
-          onChangeLibraryPath: () => _changeLibraryPath(context, libraryProvider),
-          onImportFiles: () => _importFilesFromSettings(context, libraryProvider),
-          onImportFolder: () => _importFolderFromSettings(context, libraryProvider),
+          onChangeLibraryPath: () =>
+              _changeLibraryPath(context, libraryProvider),
+          onImportFiles: () =>
+              _importFilesFromSettings(context, libraryProvider),
+          onImportFolder: () =>
+              _importFolderFromSettings(context, libraryProvider),
         );
       case 'theme':
       default:
-        return SettingsThemeTab(
-          cfg: cfg,
-          themeProvider: themeProvider,
-        );
+        return SettingsThemeTab(cfg: cfg, themeProvider: themeProvider);
     }
   }
 
@@ -440,7 +468,8 @@ class _SettingsModalState extends State<SettingsModal> {
     final firstConfirm = await showAetherConfirmDialog(
       context: context,
       title: '从远端同步到本机？',
-      message: '${device.name} 的音乐库将同步到本机。本机曲库与 files 会以对方为准；主题、悬浮歌词、音频处理等本机设置不会被覆盖。',
+      message:
+          '${device.name} 的音乐库将同步到本机。本机曲库与 files 会以对方为准；主题、悬浮歌词、音频处理等本机设置不会被覆盖。',
       confirmLabel: '继续',
     );
     if (firstConfirm != true || !context.mounted) {
@@ -467,19 +496,19 @@ class _SettingsModalState extends State<SettingsModal> {
         return;
       }
       showAetherToast(
-                            this.context,
-                            message: '已从 ${device.name} 同步到本机',
-                            kind: AetherToastKind.success,
-                          );
+        this.context,
+        message: '已从 ${device.name} 同步到本机',
+        kind: AetherToastKind.success,
+      );
     } catch (e) {
       if (!mounted) {
         return;
       }
       showAetherToast(
-                            this.context,
-                            message: '同步失败: $e',
-                            kind: AetherToastKind.error,
-                          );
+        this.context,
+        message: '同步失败: $e',
+        kind: AetherToastKind.error,
+      );
     }
   }
 
@@ -511,19 +540,19 @@ class _SettingsModalState extends State<SettingsModal> {
         return;
       }
       showAetherToast(
-                            this.context,
-                            message: '已导入 $success 首歌曲',
-                            kind: AetherToastKind.success,
-                          );
+        this.context,
+        message: '已导入 $success 首歌曲',
+        kind: AetherToastKind.success,
+      );
     } catch (e) {
       if (!mounted) {
         return;
       }
       showAetherToast(
-                            this.context,
-                            message: '导入失败: $e',
-                            kind: AetherToastKind.error,
-                          );
+        this.context,
+        message: '导入失败: $e',
+        kind: AetherToastKind.error,
+      );
     } finally {
       if (mounted) {
         setState(() {
@@ -562,19 +591,19 @@ class _SettingsModalState extends State<SettingsModal> {
         return;
       }
       showAetherToast(
-                            this.context,
-                            message: '已从目录导入 $success 首歌曲',
-                            kind: AetherToastKind.success,
-                          );
+        this.context,
+        message: '已从目录导入 $success 首歌曲',
+        kind: AetherToastKind.success,
+      );
     } catch (e) {
       if (!mounted) {
         return;
       }
       showAetherToast(
-                            this.context,
-                            message: '导入目录失败: $e',
-                            kind: AetherToastKind.error,
-                          );
+        this.context,
+        message: '导入目录失败: $e',
+        kind: AetherToastKind.error,
+      );
     } finally {
       if (mounted) {
         setState(() {
@@ -650,18 +679,18 @@ class _SettingsModalState extends State<SettingsModal> {
         await provider.initializeLibrary(selectedDirectory);
         if (!context.mounted) return;
         showAetherToast(
-                            context,
-                            message: '托管路径已更新: $selectedDirectory',
-                            kind: AetherToastKind.info,
-                          );
+          context,
+          message: '托管路径已更新: $selectedDirectory',
+          kind: AetherToastKind.info,
+        );
       }
     } catch (e) {
       if (!context.mounted) return;
       showAetherToast(
-                            context,
-                            message: '更改路径失败: $e',
-                            kind: AetherToastKind.info,
-                          );
+        context,
+        message: '更改路径失败: $e',
+        kind: AetherToastKind.info,
+      );
     }
   }
 }

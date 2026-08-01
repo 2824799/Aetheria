@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
 import 'package:aetheria/core/providers/audio_player_provider.dart';
@@ -49,11 +48,12 @@ class SettingsAudioOutputInfoView extends StatelessWidget {
             SettingsInfoPill(
               cfg: cfg,
               label: '队列缓冲',
-              value: '${info?.outputBufferMs ?? audioProvider.pitchBufferMs} ms',
+              value:
+                  '${info?.outputBufferMs ?? audioProvider.pitchBufferMs} ms',
             ),
             SettingsInfoPill(
               cfg: cfg,
-              label: '1%low 队列余量',
+              label: '5秒内最低队列余量',
               value: '${info?.queuedMs ?? 0} ms',
             ),
             SettingsInfoPill(
@@ -114,7 +114,10 @@ class SettingsInfoPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: AetherSpace.lg - 2, vertical: AetherSpace.sm + 1),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AetherSpace.lg - 2,
+        vertical: AetherSpace.sm + 1,
+      ),
       decoration: BoxDecoration(
         color: cfg.bgHover,
         borderRadius: BorderRadius.circular(AetherRadius.sm + 2),
@@ -125,9 +128,9 @@ class SettingsInfoPill extends StatelessWidget {
         children: [
           Text(
             '$label: ',
-            style: AetherType.captionStyle(cfg.textSecondary).copyWith(
-              fontWeight: FontWeight.w600,
-            ),
+            style: AetherType.captionStyle(
+              cfg.textSecondary,
+            ).copyWith(fontWeight: FontWeight.w600),
           ),
           ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 260),
@@ -142,6 +145,7 @@ class SettingsInfoPill extends StatelessWidget {
     );
   }
 }
+
 class SettingsFloatingLyricPreview extends StatelessWidget {
   const SettingsFloatingLyricPreview({
     super.key,
@@ -174,15 +178,19 @@ class SettingsFloatingLyricPreview extends StatelessWidget {
       level: AetherSurfaceLevel.flat,
       color: cfg.bgHover,
       borderRadius: BorderRadius.circular(AetherRadius.md),
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: AetherSpace.xl),
+      padding: const EdgeInsets.symmetric(
+        horizontal: 18,
+        vertical: AetherSpace.xl,
+      ),
       child: AnimatedDefaultTextStyle(
         duration: AetherMotion.duration(context, AetherMotion.fast),
         curve: AetherMotion.curve(context),
         style: TextStyle(
           color: provider.unplayedColor,
           fontSize: fontSize,
-          fontWeight:
-              provider.boldCurrentLine ? FontWeight.w700 : FontWeight.w600,
+          fontWeight: provider.boldCurrentLine
+              ? FontWeight.w700
+              : FontWeight.w600,
           height: 1.25,
           shadows: shadows,
         ),
@@ -273,7 +281,10 @@ class SettingsSliderRow extends StatelessWidget {
         children: [
           SizedBox(
             width: 88,
-            child: Text(label, style: AetherType.captionStyle(cfg.textSecondary)),
+            child: Text(
+              label,
+              style: AetherType.captionStyle(cfg.textSecondary),
+            ),
           ),
           Expanded(
             child: AetherSlider(
@@ -301,6 +312,7 @@ class SettingsSliderRow extends StatelessWidget {
     );
   }
 }
+
 String settingsColorToHex(Color color) {
   final rgb = color.toARGB32() & 0xFFFFFF;
   return '#${rgb.toRadixString(16).padLeft(6, '0').toUpperCase()}';
