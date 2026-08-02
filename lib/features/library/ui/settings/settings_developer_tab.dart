@@ -156,6 +156,11 @@ class _SettingsDeveloperTabState extends State<SettingsDeveloperTab> {
         .toList(growable: false);
   }
 
+  int get _threadCount {
+    final raw = _report['threads'];
+    return raw is List ? raw.length : 0;
+  }
+
   String _fixed(Object? value, [int digits = 3]) {
     return value is num ? value.toDouble().toStringAsFixed(digits) : '0.000';
   }
@@ -165,13 +170,14 @@ class _SettingsDeveloperTabState extends State<SettingsDeveloperTab> {
     final cfg = widget.cfg;
     final enabled = widget.audioProvider.developerModeEnabled;
     final metrics = _metrics;
+    final threadCount = _threadCount;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const AetherSectionHeader(title: '开发者模式'),
         AetherSwitchTile(
           title: enabled ? '性能统计已启用' : '启用性能统计',
-          subtitle: '按音频块记录热点函数调用次数、总耗时、平均耗时和单次最大耗时。统计本身只在开启时产生开销。',
+          subtitle: '记录 Rust 音频引擎调用树、函数调用次数、CPU 自耗时/总耗时和墙上耗时。关闭时只保留一次原子开关检查。',
           value: enabled,
           onChanged: _setEnabled,
         ),
@@ -214,6 +220,29 @@ class _SettingsDeveloperTabState extends State<SettingsDeveloperTab> {
             ],
           ),
           const SizedBox(height: AetherSpace.lg),
+          Wrap(
+            spacing: AetherSpace.md,
+            runSpacing: AetherSpace.sm,
+            children: [
+              SettingsInfoPill(
+                cfg: cfg,
+                label: '采集模式',
+                value: _report['captureMode']?.toString() ?? '调用树',
+              ),
+              SettingsInfoPill(
+                cfg: cfg,
+                label: 'CPU 时钟',
+                value: _report['cpuClock']?.toString() ?? '等待数据',
+              ),
+              SettingsInfoPill(cfg: cfg, label: '线程', value: '$threadCount 个'),
+              SettingsInfoPill(
+                cfg: cfg,
+                label: '时长',
+                value: '${_report['sessionDurationMs'] ?? 0} ms',
+              ),
+            ],
+          ),
+          const SizedBox(height: AetherSpace.lg),
           Text(
             _report['note']?.toString() ?? '正在收集性能数据…',
             style: AetherType.captionStyle(
@@ -242,7 +271,7 @@ class _SettingsDeveloperTabState extends State<SettingsDeveloperTab> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      metric['label']?.toString() ?? '未知热点',
+                      metric['id']?.toString() ?? '未知函数',
                       style: AetherType.labelStyle(cfg.textPrimary),
                     ),
                     const SizedBox(height: AetherSpace.sm),
@@ -257,18 +286,28 @@ class _SettingsDeveloperTabState extends State<SettingsDeveloperTab> {
                         ),
                         SettingsInfoPill(
                           cfg: cfg,
-                          label: '总耗时',
-                          value: '${_fixed(metric['totalMs'])} ms',
+                          label: 'CPU 自耗时',
+                          value: '${_fixed(metric['cpuSelfMs'])} ms',
                         ),
                         SettingsInfoPill(
                           cfg: cfg,
-                          label: '平均',
-                          value: '${_fixed(metric['averageUs'])} μs',
+                          label: 'CPU 总耗时',
+                          value: '${_fixed(metric['cpuTotalMs'])} ms',
                         ),
                         SettingsInfoPill(
                           cfg: cfg,
-                          label: '最大',
-                          value: '${_fixed(metric['maxUs'])} μs',
+                          label: '平均 CPU',
+                          value: '${_fixed(metric['averageCpuUs'])} μs',
+                        ),
+                        SettingsInfoPill(
+                          cfg: cfg,
+                          label: '最大 CPU',
+                          value: '${_fixed(metric['maxCpuUs'])} μs',
+                        ),
+                        SettingsInfoPill(
+                          cfg: cfg,
+                          label: '墙上总耗时',
+                          value: '${_fixed(metric['wallTotalMs'])} ms',
                         ),
                       ],
                     ),

@@ -102,7 +102,10 @@ class _MainLayoutState extends State<MainLayout>
     final media = MediaQuery.of(context);
     final isMobile = media.size.width < 768;
     final libraryProvider = context.watch<LibraryProvider>();
-    final audioProvider = context.watch<AudioPlayerProvider>();
+    final audioProvider = context.read<AudioPlayerProvider>();
+    final isDetailOpen = context.select<AudioPlayerProvider, bool>(
+      (provider) => provider.isDetailOpen,
+    );
     context.watch<UIThemeProvider>();
     final syncProvider = context.watch<SyncProvider>();
     final cfg = context.tokens;
@@ -128,7 +131,7 @@ class _MainLayoutState extends State<MainLayout>
       AetherMotion.panel,
     );
 
-    if (audioProvider.isDetailOpen) {
+    if (isDetailOpen) {
       if (_drawerController.status != AnimationStatus.forward &&
           _drawerController.status != AnimationStatus.completed) {
         if (AetherMotion.reduce(context)) {

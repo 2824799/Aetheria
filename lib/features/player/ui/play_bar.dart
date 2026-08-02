@@ -5,6 +5,7 @@ import 'package:aetheria/core/providers/ui_theme_provider.dart';
 import 'package:aetheria/core/widgets/aether_icon_button.dart';
 import 'package:aetheria/core/widgets/aether_pressable.dart';
 import 'package:aetheria/core/widgets/aether_slider.dart';
+import 'package:aetheria/features/player/ui/song_cover_art.dart';
 
 class PlayBar extends StatelessWidget {
   final double height;
@@ -92,28 +93,30 @@ class PlayBar extends StatelessWidget {
                       children: [
                         AetherPressable(
                           enabled: playingSong != null,
-                          borderRadius:
-                              BorderRadius.circular(AetherRadius.md),
+                          borderRadius: BorderRadius.circular(AetherRadius.md),
                           pressScale: AetherMotion.pressScale,
                           hoverColor: cfg.bgHover,
                           tooltip: playingSong == null
                               ? null
-                              : (audioProvider.isDetailOpen
-                                  ? '关闭详情'
-                                  : '打开详情'),
+                              : (audioProvider.isDetailOpen ? '关闭详情' : '打开详情'),
                           onTap: playingSong == null
                               ? null
                               : () => audioProvider.setDetailOpen(
-                                    !audioProvider.isDetailOpen,
-                                  ),
+                                  !audioProvider.isDetailOpen,
+                                ),
                           child: AnimatedContainer(
-                            duration: AetherMotion.duration(context, AetherMotion.fast),
+                            duration: AetherMotion.duration(
+                              context,
+                              AetherMotion.fast,
+                            ),
                             curve: AetherMotion.out,
                             width: 44,
                             height: 44,
+                            padding: const EdgeInsets.all(1),
                             decoration: BoxDecoration(
-                              borderRadius:
-                                  BorderRadius.circular(AetherRadius.md),
+                              borderRadius: BorderRadius.circular(
+                                AetherRadius.md,
+                              ),
                               color: playingSong != null
                                   ? cfg.accentMuted
                                   : cfg.bgHover,
@@ -123,13 +126,20 @@ class PlayBar extends StatelessWidget {
                                     : cfg.borderSubtle,
                               ),
                             ),
-                            child: Icon(
-                              Icons.music_note,
-                              color: playingSong != null
-                                  ? cfg.accent
-                                  : cfg.textTertiary,
-                              size: AetherIconSize.xl,
-                            ),
+                            child: playingSong != null
+                                ? SongCoverArt(
+                                    song: playingSong,
+                                    cfg: cfg,
+                                    size: 42,
+                                    borderRadius: AetherRadius.md - 1,
+                                    iconSize: AetherIconSize.xl,
+                                    shadow: false,
+                                  )
+                                : Icon(
+                                    Icons.music_note,
+                                    color: cfg.textTertiary,
+                                    size: AetherIconSize.xl,
+                                  ),
                           ),
                         ),
                         const SizedBox(width: AetherSpace.lg),
@@ -140,16 +150,18 @@ class PlayBar extends StatelessWidget {
                             children: [
                               Text(
                                 playingSong?.title ?? '暂无播放',
-                                style: AetherType.bodyStyle(cfg.textPrimary)
-                                    .copyWith(fontWeight: FontWeight.w600),
+                                style: AetherType.bodyStyle(
+                                  cfg.textPrimary,
+                                ).copyWith(fontWeight: FontWeight.w600),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                               ),
                               const SizedBox(height: AetherSpace.xxs),
                               Text(
                                 playingSong?.artist ?? '…',
-                                style:
-                                    AetherType.captionStyle(cfg.textSecondary),
+                                style: AetherType.captionStyle(
+                                  cfg.textSecondary,
+                                ),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                               ),
@@ -189,10 +201,11 @@ class PlayBar extends StatelessWidget {
                         const SizedBox(width: AetherSpace.md),
                         AetherPressable(
                           onTap: audioProvider.playPause,
-                          borderRadius: BorderRadius.circular(AetherRadius.full),
+                          borderRadius: BorderRadius.circular(
+                            AetherRadius.full,
+                          ),
                           pressScale: AetherMotion.pressScale,
-                          tooltip:
-                              audioProvider.isPlaying ? '暂停' : '播放',
+                          tooltip: audioProvider.isPlaying ? '暂停' : '播放',
                           child: Container(
                             width: 42,
                             height: 42,
@@ -210,7 +223,10 @@ class PlayBar extends StatelessWidget {
                             alignment: Alignment.center,
                             // Short crossfade only — state indication, not decoration.
                             child: AnimatedSwitcher(
-                              duration: AetherMotion.duration(context, AetherMotion.press),
+                              duration: AetherMotion.duration(
+                                context,
+                                AetherMotion.press,
+                              ),
                               switchInCurve: AetherMotion.out,
                               switchOutCurve: AetherMotion.out,
                               transitionBuilder: (child, anim) =>
@@ -254,8 +270,8 @@ class PlayBar extends StatelessWidget {
                           audioProvider.volume <= 0.001
                               ? Icons.volume_off_rounded
                               : audioProvider.volume < 0.4
-                                  ? Icons.volume_down_rounded
-                                  : Icons.volume_up_rounded,
+                              ? Icons.volume_down_rounded
+                              : Icons.volume_up_rounded,
                           size: AetherIconSize.md,
                           color: cfg.textSecondary,
                         ),

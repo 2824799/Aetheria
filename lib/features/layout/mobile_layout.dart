@@ -103,7 +103,18 @@ class _MobileLayoutState extends State<MobileLayout>
   @override
   Widget build(BuildContext context) {
     final libraryProvider = context.watch<LibraryProvider>();
-    final audioProvider = context.watch<AudioPlayerProvider>();
+    final audioProvider = context.read<AudioPlayerProvider>();
+    final playbackState = context
+        .select<
+          AudioPlayerProvider,
+          ({Song? playingSong, String? activeSongId, bool isPlaying})
+        >(
+          (provider) => (
+            playingSong: provider.playingSong,
+            activeSongId: provider.activeSong?.id,
+            isPlaying: provider.isPlaying,
+          ),
+        );
     context.watch<UIThemeProvider>();
     final cfg = context.tokens;
 
@@ -113,14 +124,14 @@ class _MobileLayoutState extends State<MobileLayout>
     final activePlaylistName = activePlaylistId == null
         ? '全部音乐'
         : playlists
-            .firstWhere(
-              (p) => p.id == activePlaylistId,
-              orElse: () =>
-                  const Playlist(id: '', name: '未知歌单', createdAt: ''),
-            )
-            .name;
+              .firstWhere(
+                (p) => p.id == activePlaylistId,
+                orElse: () =>
+                    const Playlist(id: '', name: '未知歌单', createdAt: ''),
+              )
+              .name;
 
-    final playingSong = audioProvider.playingSong;
+    final playingSong = playbackState.playingSong;
     final bottomInset = MediaQuery.paddingOf(context).bottom;
     final miniPlayerReserve = playingSong != null ? 88.0 : 0.0;
 
@@ -240,9 +251,7 @@ class _MobileLayoutState extends State<MobileLayout>
                             AetherSpace.xl,
                             AetherSpace.md,
                             AetherSpace.xl,
-                            miniPlayerReserve +
-                                bottomInset +
-                                AetherSpace.xxxl,
+                            miniPlayerReserve + bottomInset + AetherSpace.xxxl,
                           ),
                           itemCount: songs.length,
                           itemBuilder: (context, index) {
@@ -250,7 +259,7 @@ class _MobileLayoutState extends State<MobileLayout>
                             final isCurrentlyPlaying =
                                 playingSong?.id == song.id;
                             final isActive =
-                                audioProvider.activeSong?.id == song.id;
+                                playbackState.activeSongId == song.id;
                             return MobileSongTile(
                               song: song,
                               cfg: cfg,

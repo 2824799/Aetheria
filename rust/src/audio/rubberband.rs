@@ -1,6 +1,8 @@
 use std::collections::VecDeque;
 use std::ffi::c_void;
 
+use crate::audio::profiler;
+
 type RubberBandLiveState = *mut c_void;
 
 const RUBBERBAND_LIVE_OPTION_WINDOW_SHORT: i32 = 0x0000_0000;
@@ -42,6 +44,7 @@ impl RubberBandPitchShifter {
         window: &str,
         preserve_formant: bool,
     ) -> Result<Self, String> {
+        let _scope = profiler::scope("audio::rubberband::RubberBandPitchShifter::new");
         if sample_rate == 0 || channels == 0 {
             return Err("Invalid Rubber Band output format".to_string());
         }
@@ -79,6 +82,7 @@ impl RubberBandPitchShifter {
     }
 
     pub fn reset(&mut self) {
+        let _scope = profiler::scope("audio::rubberband::RubberBandPitchShifter::reset");
         unsafe {
             rubberband_live_reset(self.state);
             rubberband_live_set_pitch_scale(self.state, self.pitch_scale);
@@ -92,6 +96,7 @@ impl RubberBandPitchShifter {
     }
 
     pub fn process(&mut self, input: &[f32], pitch_scale: f64) -> Vec<f32> {
+        let _scope = profiler::scope("audio::rubberband::RubberBandPitchShifter::process");
         if input.is_empty() {
             return Vec::new();
         }
@@ -112,12 +117,15 @@ impl RubberBandPitchShifter {
     }
 
     pub fn set_formant_preserved(&mut self, preserve_formant: bool) {
+        let _scope =
+            profiler::scope("audio::rubberband::RubberBandPitchShifter::set_formant_preserved");
         unsafe {
             rubberband_live_set_formant_option(self.state, formant_option(preserve_formant));
         }
     }
 
     pub fn finish(&mut self) -> Vec<f32> {
+        let _scope = profiler::scope("audio::rubberband::RubberBandPitchShifter::finish");
         let pending = self.input_fifo.first().map_or(0, VecDeque::len);
         if pending > 0 {
             for channel_fifo in &mut self.input_fifo {
@@ -133,6 +141,7 @@ impl RubberBandPitchShifter {
     }
 
     fn push_interleaved(&mut self, input: &[f32]) {
+        let _scope = profiler::scope("audio::rubberband::RubberBandPitchShifter::push_interleaved");
         for frame in input.chunks_exact(self.channels) {
             for (channel, &sample) in frame.iter().enumerate() {
                 self.input_fifo[channel].push_back(sample);
@@ -141,6 +150,8 @@ impl RubberBandPitchShifter {
     }
 
     fn shift_ready_blocks(&mut self) {
+        let _scope =
+            profiler::scope("audio::rubberband::RubberBandPitchShifter::shift_ready_blocks");
         while self
             .input_fifo
             .first()
@@ -176,6 +187,7 @@ impl RubberBandPitchShifter {
     }
 
     fn pop_interleaved(&mut self, requested_frames: usize) -> Vec<f32> {
+        let _scope = profiler::scope("audio::rubberband::RubberBandPitchShifter::pop_interleaved");
         let available = self.output_fifo.first().map_or(0, VecDeque::len);
         let frames = requested_frames.min(available);
         let mut output = Vec::with_capacity(frames * self.channels);

@@ -559,7 +559,11 @@ class _SongTableState extends State<SongTable> {
           0,
           (sum, column) => sum + (_columnWidths[column] ?? column.defaultWidth),
         );
-    return math.max(availableWidth, contentWidth);
+    // Keep a small logical-pixel guard. The table is often rendered through
+    // FittedBox at a fractional scale; without this guard the Row can be
+    // rounded 0.333px wider than its viewport and Flutter paints overflow
+    // stripes across the last column.
+    return math.max(availableWidth, contentWidth + 1.0);
   }
 
   AudioVersion? _primaryVersionFor(Song song) {
@@ -577,7 +581,18 @@ class _SongTableState extends State<SongTable> {
   @override
   Widget build(BuildContext context) {
     final libraryProvider = context.watch<LibraryProvider>();
-    final audioProvider = context.watch<AudioPlayerProvider>();
+    final audioProvider = context.read<AudioPlayerProvider>();
+    final playbackState = context
+        .select<
+          AudioPlayerProvider,
+          ({String? playingSongId, String? activeSongId, bool isPlaying})
+        >(
+          (provider) => (
+            playingSongId: provider.playingSong?.id,
+            activeSongId: provider.activeSong?.id,
+            isPlaying: provider.isPlaying,
+          ),
+        );
     context.watch<UIThemeProvider>();
     final cfg = context.tokens;
     final songs = libraryProvider.displaySongs;
@@ -648,9 +663,9 @@ class _SongTableState extends State<SongTable> {
                             itemBuilder: (context, index) {
                               final song = songs[index];
                               final isCurrentlyPlaying =
-                                  audioProvider.playingSong?.id == song.id;
+                                  playbackState.playingSongId == song.id;
                               final isActive =
-                                  audioProvider.activeSong?.id == song.id;
+                                  playbackState.activeSongId == song.id;
                               final isSelected = _selectedSongIds.contains(
                                 song.id,
                               );
@@ -717,7 +732,7 @@ class _SongTableState extends State<SongTable> {
                                               child: AetherIconButton(
                                                 icon:
                                                     isCurrentlyPlaying &&
-                                                        audioProvider.isPlaying
+                                                        playbackState.isPlaying
                                                     ? Icons.pause_circle_filled
                                                     : Icons.play_circle_filled,
                                                 iconSize: AetherIconSize.lg,
@@ -727,7 +742,7 @@ class _SongTableState extends State<SongTable> {
                                                     : cfg.textSecondary,
                                                 tooltip:
                                                     isCurrentlyPlaying &&
-                                                        audioProvider.isPlaying
+                                                        playbackState.isPlaying
                                                     ? '暂停'
                                                     : '播放',
                                                 onPressed: () async {

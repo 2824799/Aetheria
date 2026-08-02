@@ -10,7 +10,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{BufferSize, SampleFormat, StreamConfig, SupportedBufferSize};
 
 use crate::audio::dsp::{self, StreamDecoder};
-use crate::audio::profiler::{self, AUDIO_PROFILER};
+use crate::audio::profiler;
 use crate::audio::rubberband::RubberBandPitchShifter;
 
 // Thread-safe ring buffer / FIFO used to bridge the decode thread and the cpal
@@ -105,6 +105,7 @@ impl DecodePipeline {
         channels: u32,
         params: ProcessingParams,
     ) -> Result<Self, String> {
+        let _scope = profiler::scope("audio::player::DecodePipeline::new");
         let initial_quality = params
             .quality_settings
             .lock()
@@ -127,6 +128,7 @@ impl DecodePipeline {
     }
 
     fn seek(&mut self, secs: f64) -> Result<(), String> {
+        let _scope = profiler::scope("audio::player::DecodePipeline::seek");
         self.decoder.seek(secs)?;
         Ok(())
     }
@@ -135,6 +137,7 @@ impl DecodePipeline {
         &mut self,
         rubberband_shifter: &mut Option<RubberBandPitchShifter>,
     ) -> Result<Option<Vec<f32>>, String> {
+        let _scope = profiler::scope("audio::player::DecodePipeline::next_block");
         let current_quality = self
             .params
             .quality_settings
@@ -166,7 +169,7 @@ impl DecodePipeline {
 
         let current_pitch = *self.params.pitch.lock().unwrap_or_else(|e| e.into_inner());
         let mut processed = if current_pitch.abs() > 0.01 && self.channels == 2 {
-            let _pitch_scope = profiler::scope(&AUDIO_PROFILER.pitch_shift);
+            let _pitch_scope = profiler::scope("audio::player::DecodePipeline::pitch_shift");
             let current_algo = self
                 .params
                 .algo
@@ -212,7 +215,8 @@ impl DecodePipeline {
         }
 
         {
-            let _protection_scope = profiler::scope(&AUDIO_PROFILER.post_dsp_protection);
+            let _protection_scope =
+                profiler::scope("audio::player::DecodePipeline::post_dsp_protection");
             apply_post_dsp_protection(
                 &mut processed,
                 current_quality.peak_protection_enabled,
@@ -226,6 +230,7 @@ impl DecodePipeline {
 
 impl AudioBuffer {
     pub fn new(capacity: usize) -> Self {
+        let _scope = profiler::scope("audio::player::AudioBuffer::new");
         Self {
             data: Mutex::new(VecDeque::with_capacity(capacity)),
             capacity,
@@ -237,6 +242,7 @@ impl AudioBuffer {
     /// the block) if `stop_flag` becomes set, so the decode thread can always be joined even
     /// when the output stream is paused and therefore not draining the buffer.
     pub fn push(&self, samples: &[f32], stop_flag: &AtomicBool) {
+        let _scope = profiler::scope("audio::player::AudioBuffer::push");
         let mut queue = self.data.lock().unwrap_or_else(|e| e.into_inner());
         while queue.len() + samples.len() > self.capacity {
             drop(queue);
@@ -251,6 +257,7 @@ impl AudioBuffer {
     }
 
     pub fn try_push(&self, samples: &[f32]) -> bool {
+        let _scope = profiler::scope("audio::player::AudioBuffer::try_push");
         let mut queue = self.data.lock().unwrap_or_else(|e| e.into_inner());
         if queue.len() + samples.len() > self.capacity {
             return false;
@@ -265,6 +272,7 @@ impl AudioBuffer {
     }
 
     pub fn pop(&self, out: &mut [f32]) -> usize {
+        let _scope = profiler::scope("audio::player::AudioBuffer::pop");
         let mut queue = self.data.lock().unwrap_or_else(|e| e.into_inner());
         let len = out.len().min(queue.len());
         for i in 0..len {
@@ -277,11 +285,13 @@ impl AudioBuffer {
     }
 
     pub fn clear(&self) {
+        let _scope = profiler::scope("audio::player::AudioBuffer::clear");
         self.data.lock().unwrap_or_else(|e| e.into_inner()).clear();
         self.len_samples.store(0, Ordering::Relaxed);
     }
 
     pub fn len(&self) -> usize {
+        let _scope = profiler::scope("audio::player::AudioBuffer::len");
         self.len_samples.load(Ordering::Relaxed)
     }
 }
@@ -375,6 +385,7 @@ fn apply_post_dsp_protection(
     clipped_sample_count: &AtomicU64,
     peak_bits: &AtomicU64,
 ) {
+    let _scope = profiler::scope("audio::player::apply_post_dsp_protection");
     if samples.is_empty() {
         return;
     }
@@ -470,6 +481,7 @@ fn prefill_audio_buffer(
     stop_flag: &AtomicBool,
     target_ms: u32,
 ) -> Result<(), String> {
+    let _scope = profiler::scope("audio::player::prefill_audio_buffer");
     let requested_samples = ((pipeline.sample_rate as usize
         * pipeline.channels as usize
         * target_ms.clamp(20, 500) as usize)
@@ -507,6 +519,7 @@ fn build_output(
     output_buffer_ms: u32,
     output_latency_mode: String,
 ) -> Result<(SendStream, OutputDeviceInfo, Arc<AudioBuffer>), String> {
+    let _scope = profiler::scope("audio::player::build_output");
     let host = cpal::default_host();
     let device = host
         .default_output_device()
@@ -576,7 +589,7 @@ fn build_output(
                             $stream_config,
                             move |data: &mut [f32], _| {
                                 let _profile_scope =
-                                    profiler::scope(&AUDIO_PROFILER.output_callback);
+                                    profiler::scope("audio::player::output_callback");
                                 let n = buf.pop(data);
                                 if n < data.len() {
                                     uc.fetch_add(1, Ordering::Relaxed);
@@ -612,7 +625,7 @@ fn build_output(
                             $stream_config,
                             move |data: &mut [i16], _| {
                                 let _profile_scope =
-                                    profiler::scope(&AUDIO_PROFILER.output_callback);
+                                    profiler::scope("audio::player::output_callback");
                                 tmp.resize(data.len(), 0.0);
                                 let n = buf.pop(&mut tmp);
                                 if n < data.len() {
@@ -655,7 +668,7 @@ fn build_output(
                             $stream_config,
                             move |data: &mut [u16], _| {
                                 let _profile_scope =
-                                    profiler::scope(&AUDIO_PROFILER.output_callback);
+                                    profiler::scope("audio::player::output_callback");
                                 tmp.resize(data.len(), 0.0);
                                 let n = buf.pop(&mut tmp);
                                 if n < data.len() {
@@ -698,7 +711,7 @@ fn build_output(
                             $stream_config,
                             move |data: &mut [i32], _| {
                                 let _profile_scope =
-                                    profiler::scope(&AUDIO_PROFILER.output_callback);
+                                    profiler::scope("audio::player::output_callback");
                                 tmp.resize(data.len(), 0.0);
                                 let n = buf.pop(&mut tmp);
                                 if n < data.len() {
@@ -741,7 +754,7 @@ fn build_output(
                             $stream_config,
                             move |data: &mut [u8], _| {
                                 let _profile_scope =
-                                    profiler::scope(&AUDIO_PROFILER.output_callback);
+                                    profiler::scope("audio::player::output_callback");
                                 tmp.resize(data.len(), 0.0);
                                 let n = buf.pop(&mut tmp);
                                 if n < data.len() {
@@ -782,7 +795,7 @@ fn build_output(
                             $stream_config,
                             move |data: &mut [f64], _| {
                                 let _profile_scope =
-                                    profiler::scope(&AUDIO_PROFILER.output_callback);
+                                    profiler::scope("audio::player::output_callback");
                                 tmp.resize(data.len(), 0.0);
                                 let n = buf.pop(&mut tmp);
                                 if n < data.len() {
@@ -842,6 +855,7 @@ fn build_output(
 }
 
 pub fn default_output_device_name() -> Result<String, String> {
+    let _scope = profiler::scope("audio::player::default_output_device_name");
     let host = cpal::default_host();
     let device = host
         .default_output_device()
@@ -857,6 +871,7 @@ pub fn start_playback(
     pitch_algo: String,
     normalization_gain: f32,
 ) -> Result<(), String> {
+    let _scope = profiler::scope("audio::player::start_playback");
     let mut state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
 
     // Stop any existing playback.
@@ -935,72 +950,77 @@ pub fn start_playback(
     state.clipped_sample_count = clipped_sample_count.clone();
     state.peak_bits = peak_bits.clone();
 
-    let handle = thread::spawn(move || {
-        let mut rubberband_shifter: Option<RubberBandPitchShifter> = None;
-        loop {
-            if stop_flag.load(Ordering::SeqCst) {
-                break;
-            }
-
-            // Handle seek requests.
-            {
-                let mut req = seek_request.lock().unwrap_or_else(|e| e.into_inner());
-                if let Some(sec) = req.take() {
-                    if let Err(e) = pipeline.seek(sec) {
-                        eprintln!("Seek error: {}", e);
-                    }
-                    if let Some(shifter) = &mut rubberband_shifter {
-                        shifter.reset();
-                    }
-                    buffer.clear();
-                    // A seek starts a fresh five-second headroom window.
-                    stream_finished.store(false, Ordering::SeqCst);
-                    if let Err(e) = prefill_audio_buffer(
-                        &mut pipeline,
-                        &mut rubberband_shifter,
-                        &buffer,
-                        &stop_flag,
-                        80,
-                    ) {
-                        eprintln!("Prefill error after seek: {}", e);
-                    }
-                    frames_played
-                        .store((sec * sample_rate as f64).round() as u64, Ordering::SeqCst);
-                }
-            }
-
-            let block = match pipeline.next_block(&mut rubberband_shifter) {
-                Ok(Some(block)) => block,
-                Ok(None) => {
-                    // End of stream: let the hardware drain whatever is still buffered.
-                    while buffer.len() > 0 && !stop_flag.load(Ordering::SeqCst) {
-                        thread::sleep(Duration::from_millis(20));
-                    }
-                    stream_finished.store(true, Ordering::SeqCst);
+    let handle = thread::Builder::new()
+        .name("aetheria-audio-decode".to_string())
+        .spawn(move || {
+            let mut rubberband_shifter: Option<RubberBandPitchShifter> = None;
+            loop {
+                if stop_flag.load(Ordering::SeqCst) {
                     break;
                 }
-                Err(e) => {
-                    eprintln!("Decode error: {}", e);
-                    stream_finished.store(true, Ordering::SeqCst);
-                    break;
-                }
-            };
+                let _loop_scope = profiler::scope("audio::player::decode_thread_loop");
 
-            if block.is_empty() {
-                continue;
+                // Handle seek requests.
+                {
+                    let mut req = seek_request.lock().unwrap_or_else(|e| e.into_inner());
+                    if let Some(sec) = req.take() {
+                        if let Err(e) = pipeline.seek(sec) {
+                            eprintln!("Seek error: {}", e);
+                        }
+                        if let Some(shifter) = &mut rubberband_shifter {
+                            shifter.reset();
+                        }
+                        buffer.clear();
+                        // A seek starts a fresh five-second headroom window.
+                        stream_finished.store(false, Ordering::SeqCst);
+                        if let Err(e) = prefill_audio_buffer(
+                            &mut pipeline,
+                            &mut rubberband_shifter,
+                            &buffer,
+                            &stop_flag,
+                            80,
+                        ) {
+                            eprintln!("Prefill error after seek: {}", e);
+                        }
+                        frames_played
+                            .store((sec * sample_rate as f64).round() as u64, Ordering::SeqCst);
+                    }
+                }
+
+                let block = match pipeline.next_block(&mut rubberband_shifter) {
+                    Ok(Some(block)) => block,
+                    Ok(None) => {
+                        // End of stream: let the hardware drain whatever is still buffered.
+                        while buffer.len() > 0 && !stop_flag.load(Ordering::SeqCst) {
+                            thread::sleep(Duration::from_millis(20));
+                        }
+                        stream_finished.store(true, Ordering::SeqCst);
+                        break;
+                    }
+                    Err(e) => {
+                        eprintln!("Decode error: {}", e);
+                        stream_finished.store(true, Ordering::SeqCst);
+                        break;
+                    }
+                };
+
+                if block.is_empty() {
+                    continue;
+                }
+                {
+                    let _push_scope = profiler::scope("audio::player::AudioBuffer::push_wait");
+                    buffer.push(&block, &stop_flag);
+                }
             }
-            {
-                let _push_scope = profiler::scope(&AUDIO_PROFILER.buffer_push_wait);
-                buffer.push(&block, &stop_flag);
-            }
-        }
-    });
+        })
+        .map_err(|e| e.to_string())?;
 
     state.thread_handle = Some(handle);
     Ok(())
 }
 
 pub fn pause_playback() -> Result<(), String> {
+    let _scope = profiler::scope("audio::player::pause_playback");
     let state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(s) = &state.stream {
         s.0.pause().map_err(|e| e.to_string())?;
@@ -1009,6 +1029,7 @@ pub fn pause_playback() -> Result<(), String> {
 }
 
 pub fn resume_playback() -> Result<(), String> {
+    let _scope = profiler::scope("audio::player::resume_playback");
     let state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(s) = &state.stream {
         s.0.play().map_err(|e| e.to_string())?;
@@ -1017,6 +1038,7 @@ pub fn resume_playback() -> Result<(), String> {
 }
 
 pub fn seek_playback(secs: f64) -> Result<(), String> {
+    let _scope = profiler::scope("audio::player::seek_playback");
     let mut state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
     // Clear buffered audio immediately so resume/seek is responsive and stale samples
     // are never played. The decode thread will refill from the requested position.
@@ -1034,6 +1056,7 @@ pub fn seek_playback(secs: f64) -> Result<(), String> {
 }
 
 pub fn stop_playback() -> Result<(), String> {
+    let _scope = profiler::scope("audio::player::stop_playback");
     let mut state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
     state.stop_flag.store(true, Ordering::SeqCst);
     if let Some(handle) = state.thread_handle.take() {
@@ -1047,12 +1070,14 @@ pub fn stop_playback() -> Result<(), String> {
 }
 
 pub fn set_volume(vol: f32) -> Result<(), String> {
+    let _scope = profiler::scope("audio::player::set_volume");
     let state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
     *state.volume.lock().unwrap_or_else(|e| e.into_inner()) = vol;
     Ok(())
 }
 
 pub fn set_pitch(pitch_val: f64, pitch_algo: String) -> Result<(), String> {
+    let _scope = profiler::scope("audio::player::set_pitch");
     let state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
     *state.pitch.lock().unwrap_or_else(|e| e.into_inner()) = pitch_val;
     *state.algo.lock().unwrap_or_else(|e| e.into_inner()) = pitch_algo;
@@ -1060,12 +1085,14 @@ pub fn set_pitch(pitch_val: f64, pitch_algo: String) -> Result<(), String> {
 }
 
 pub fn set_output_buffer_ms(ms: i32) -> Result<(), String> {
+    let _scope = profiler::scope("audio::player::set_output_buffer_ms");
     let mut state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
     state.output_buffer_ms = ms.clamp(60, 1500) as u32;
     Ok(())
 }
 
 pub fn set_output_latency_mode(mode: String) -> Result<(), String> {
+    let _scope = profiler::scope("audio::player::set_output_latency_mode");
     let mut state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
     let normalized = normalize_output_latency_mode(&mode);
     state.output_latency_mode = normalized.clone();
@@ -1084,6 +1111,7 @@ pub fn set_quality_settings(
     rubberband_formant_preserved: bool,
     resampler_quality: String,
 ) -> Result<(), String> {
+    let _scope = profiler::scope("audio::player::set_quality_settings");
     let state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
     *state
         .quality_settings
@@ -1099,6 +1127,7 @@ pub fn set_quality_settings(
 }
 
 pub fn get_output_info() -> AudioOutputInfo {
+    let _scope = profiler::scope("audio::player::get_output_info");
     let mut state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
     let info = state
         .output_info
@@ -1160,6 +1189,7 @@ pub fn get_output_info() -> AudioOutputInfo {
 /// hardware (not samples queued in the buffer), so it stays accurate regardless of
 /// buffering or pitch shifting.
 pub fn get_position() -> f64 {
+    let _scope = profiler::scope("audio::player::get_position");
     let state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
     let frames = state.frames_played.load(Ordering::Relaxed);
     if state.sample_rate == 0 {
@@ -1170,6 +1200,7 @@ pub fn get_position() -> f64 {
 }
 
 pub fn is_finished() -> bool {
+    let _scope = profiler::scope("audio::player::is_finished");
     let state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
     state.stream_finished.load(Ordering::Relaxed)
 }

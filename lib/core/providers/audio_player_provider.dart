@@ -156,7 +156,7 @@ class AudioPlayerProvider extends ChangeNotifier {
   void _startOutputInfoTimer() {
     _outputInfoTimer?.cancel();
     unawaited(_refreshOutputInfoAndDeviceChange());
-    _outputInfoTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
+    _outputInfoTimer = Timer.periodic(const Duration(seconds: 2), (_) {
       unawaited(_refreshOutputInfoAndDeviceChange());
     });
   }
@@ -364,8 +364,11 @@ class AudioPlayerProvider extends ChangeNotifier {
 
   Future<void> refreshAudioOutputInfo() async {
     try {
-      audioOutputInfo = await music.getRustAudioOutputInfo();
-      notifyListeners();
+      final next = await music.getRustAudioOutputInfo();
+      if (audioOutputInfo != next) {
+        audioOutputInfo = next;
+        notifyListeners();
+      }
     } catch (_) {}
   }
 

@@ -7,6 +7,7 @@ import 'package:aetheria/core/widgets/aether_icon_button.dart';
 import 'package:aetheria/core/widgets/aether_pressable.dart';
 import 'package:aetheria/core/widgets/aether_slider.dart';
 import 'package:aetheria/core/widgets/aether_surface.dart';
+import 'package:aetheria/features/player/ui/song_cover_art.dart';
 import 'package:aetheria/src/rust/models/song.dart';
 
 /// Floating mini play bar pinned above the system gesture area.
@@ -50,6 +51,13 @@ class _MobileMiniPlayerState extends State<MobileMiniPlayer> {
 
   @override
   Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: widget.audioProvider,
+      builder: (context, _) => _buildPlayer(context),
+    );
+  }
+
+  Widget _buildPlayer(BuildContext context) {
     final curMs = widget.audioProvider.currentPosition.inMilliseconds
         .toDouble();
     final totMs = widget.audioProvider.totalDuration.inMilliseconds.toDouble();
@@ -75,19 +83,13 @@ class _MobileMiniPlayerState extends State<MobileMiniPlayer> {
               borderRadius: BorderRadius.circular(AetherRadius.lg),
               child: Row(
                 children: [
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: widget.cfg.accentMuted,
-                      borderRadius: BorderRadius.circular(AetherRadius.md),
-                    ),
-                    alignment: Alignment.center,
-                    child: Icon(
-                      Icons.music_note,
-                      color: widget.cfg.accent,
-                      size: 20,
-                    ),
+                  SongCoverArt(
+                    song: widget.playingSong,
+                    cfg: widget.cfg,
+                    size: 40,
+                    borderRadius: AetherRadius.md,
+                    iconSize: 20,
+                    shadow: false,
                   ),
                   const SizedBox(width: AetherSpace.lg),
                   Expanded(

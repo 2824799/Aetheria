@@ -1,4 +1,4 @@
-use crate::audio::profiler::{self, AUDIO_PROFILER};
+use crate::audio::profiler;
 use std::fs::File;
 use symphonia::core::audio::{AudioBufferRef, Signal};
 use symphonia::core::codecs::{Decoder, DecoderOptions};
@@ -16,6 +16,7 @@ const HIGH_QUALITY_SINC_HALF_TAPS: isize = 32;
 /// Calculate the loudness metric of an audio file in dBFS (decibels relative to full scale).
 /// This is computed by analyzing the average RMS level of the first 300 packets (approx. 5-10 seconds) for speed.
 pub fn calculate_loudness(filepath: &str) -> Result<f64, String> {
+    let _scope = profiler::scope("audio::dsp::calculate_loudness");
     let file = File::open(filepath).map_err(|e| e.to_string())?;
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
     let mut hint = Hint::new();
@@ -129,6 +130,7 @@ pub fn calculate_loudness(filepath: &str) -> Result<f64, String> {
 /// Calculate the loudness metric of the ENTIRE audio file in dBFS (decibels relative to full scale).
 /// This is used during manual database refresh for high-fidelity volume normalization.
 pub fn calculate_loudness_full(filepath: &str) -> Result<f64, String> {
+    let _scope = profiler::scope("audio::dsp::calculate_loudness_full");
     let file = File::open(filepath).map_err(|e| e.to_string())?;
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
     let mut hint = Hint::new();
@@ -259,6 +261,7 @@ impl StreamDecoder {
         target_sample_rate: u32,
         resampler_quality: &str,
     ) -> Result<Self, String> {
+        let _scope = profiler::scope("audio::dsp::StreamDecoder::new");
         let file = File::open(path).map_err(|e| e.to_string())?;
         let mss = MediaSourceStream::new(Box::new(file), Default::default());
         let mut hint = Hint::new();
@@ -311,6 +314,7 @@ impl StreamDecoder {
     /// Decode the next packet from the source and append channel-converted f32 frames to src_buffer.
     /// Returns Ok(false) at end of stream.
     fn decode_next_packet(&mut self) -> Result<bool, String> {
+        let _scope = profiler::scope("audio::dsp::StreamDecoder::decode_next_packet");
         if self.eof {
             return Ok(false);
         }
@@ -328,7 +332,7 @@ impl StreamDecoder {
                 continue;
             }
             let decoded = {
-                let _scope = profiler::scope(&AUDIO_PROFILER.decode_packet);
+                let _scope = profiler::scope("audio::dsp::StreamDecoder::decode_packet");
                 match self.decoder.decode(&packet) {
                     Ok(b) => b,
                     Err(Error::DecodeError(_)) => continue,
@@ -364,7 +368,7 @@ impl StreamDecoder {
     /// Read up to `out_frames` resampled frames (interleaved at target_channels).
     /// Returns fewer frames near end of stream; an empty result signals EOF.
     pub fn read_block(&mut self, out_frames: usize) -> Result<Vec<f32>, String> {
-        let _block_scope = profiler::scope(&AUDIO_PROFILER.decode_resample_block);
+        let _block_scope = profiler::scope("audio::dsp::StreamDecoder::read_block");
         let tc = self.target_channels;
         let mut out: Vec<f32> = Vec::with_capacity(out_frames * tc);
 
@@ -379,7 +383,7 @@ impl StreamDecoder {
             return Ok(out);
         }
 
-        let _sinc_scope = profiler::scope(&AUDIO_PROFILER.sinc_resampler);
+        let _sinc_scope = profiler::scope("audio::dsp::StreamDecoder::sinc_resampler");
         let mut frame = vec![0.0f64; tc];
         while out.len() / tc < out_frames {
             // Keep enough history for the windowed-sinc kernel. Linear interpolation is cheaper,
@@ -457,6 +461,7 @@ impl StreamDecoder {
 
     /// Seek the source to `secs` seconds and reset internal buffers/resampler state.
     pub fn seek(&mut self, secs: f64) -> Result<(), String> {
+        let _scope = profiler::scope("audio::dsp::StreamDecoder::seek");
         let time = Time {
             seconds: secs.floor() as u64,
             frac: secs - secs.floor(),
@@ -507,6 +512,7 @@ fn sinc_half_taps_for_quality(quality: &str) -> isize {
 
 /// Convert a decoded symphonia packet into interleaved f32 samples at the source channel count.
 fn packet_to_interleaved_f32(decoded: &AudioBufferRef) -> (Vec<f32>, usize) {
+    let _scope = profiler::scope("audio::dsp::packet_to_interleaved_f32");
     let spec = decoded.spec();
     let chans = spec.channels.count();
     let frames = decoded.frames();
@@ -563,6 +569,7 @@ fn packet_to_interleaved_f32(decoded: &AudioBufferRef) -> (Vec<f32>, usize) {
 
 /// Simple Resampling pitch shifting: changes pitch and speed together (high quality, no speed preservation).
 pub fn pitch_shift_resample(input: &[f32], pitch_factor: f64) -> Vec<f32> {
+    let _scope = profiler::scope("audio::dsp::pitch_shift_resample");
     if input.len() < 4 || pitch_factor <= 0.0 || !pitch_factor.is_finite() {
         return input.to_vec();
     }
@@ -604,6 +611,7 @@ fn cubic_stereo(input: &[f32], frames: usize, pos: f64, channel: usize) -> f32 {
 
 /// Time domain OLA (Overlap Add) time-stretches the signal.
 pub fn time_stretch_ola(input: &[f32], stretch_factor: f64) -> Vec<f32> {
+    let _scope = profiler::scope("audio::dsp::time_stretch_ola");
     if input.len() < 4 || stretch_factor <= 0.0 || !stretch_factor.is_finite() {
         return input.to_vec();
     }
@@ -670,6 +678,7 @@ pub fn time_stretch_ola(input: &[f32], stretch_factor: f64) -> Vec<f32> {
 
 /// Pitch shift using OLA (Overlap Add): stretches speed first then resamples back (tempo preserved).
 pub fn pitch_shift_ola(input: &[f32], pitch_factor: f64) -> Vec<f32> {
+    let _scope = profiler::scope("audio::dsp::pitch_shift_ola");
     if input.len() < 4 || pitch_factor <= 0.0 || !pitch_factor.is_finite() {
         return input.to_vec();
     }
@@ -686,6 +695,7 @@ pub fn pitch_shift_ola(input: &[f32], pitch_factor: f64) -> Vec<f32> {
 
 /// WSOLA (Waveform Similarity Overlap Add) time stretching for enhanced tempo preservation.
 pub fn time_stretch_wsola(input: &[f32], stretch_factor: f64) -> Vec<f32> {
+    let _scope = profiler::scope("audio::dsp::time_stretch_wsola");
     if (stretch_factor - 1.0).abs() < 0.005 {
         return input.to_vec();
     }
@@ -778,6 +788,7 @@ pub fn time_stretch_wsola(input: &[f32], stretch_factor: f64) -> Vec<f32> {
 
 /// Pitch shift using WSOLA (Waveform Similarity Overlap Add) for high quality tempo preservation.
 pub fn pitch_shift_wsola(input: &[f32], pitch_factor: f64) -> Vec<f32> {
+    let _scope = profiler::scope("audio::dsp::pitch_shift_wsola");
     let stretch_factor = 1.0 / pitch_factor;
     let stretched = time_stretch_wsola(input, stretch_factor);
     pitch_shift_resample(&stretched, pitch_factor)
