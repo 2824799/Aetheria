@@ -1851,6 +1851,7 @@ pub fn set_rust_audio_quality_settings(
     dither_enabled: bool,
     rubberband_window: String,
     rubberband_formant_preserved: bool,
+    rubberband_vocal_only_pitch: bool,
     resampler_quality: String,
 ) -> Result<(), String> {
     crate::audio::player::set_quality_settings(
@@ -1858,6 +1859,7 @@ pub fn set_rust_audio_quality_settings(
         dither_enabled,
         rubberband_window,
         rubberband_formant_preserved,
+        rubberband_vocal_only_pitch,
         resampler_quality,
     )
 }

@@ -274,12 +274,14 @@ Future<void> setRustAudioQualitySettings({
   required bool ditherEnabled,
   required String rubberbandWindow,
   required bool rubberbandFormantPreserved,
+  required bool rubberbandVocalOnlyPitch,
   required String resamplerQuality,
 }) => RustLib.instance.api.crateApiMusicSetRustAudioQualitySettings(
   peakProtectionEnabled: peakProtectionEnabled,
   ditherEnabled: ditherEnabled,
   rubberbandWindow: rubberbandWindow,
   rubberbandFormantPreserved: rubberbandFormantPreserved,
+  rubberbandVocalOnlyPitch: rubberbandVocalOnlyPitch,
   resamplerQuality: resamplerQuality,
 );
 

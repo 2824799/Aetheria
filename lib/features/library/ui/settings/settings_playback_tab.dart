@@ -72,7 +72,9 @@ class SettingsPlaybackTab extends StatelessWidget {
         const SizedBox(height: AetherSpace.sm),
         Text(
           '控制系统音频设备本身的回调块大小：默认跟随系统；低延迟响应更快但更容易欠载；稳定模式使用更大的设备块来减少爆音风险。',
-          style: AetherType.captionStyle(cfg.textSecondary).copyWith(height: 1.5),
+          style: AetherType.captionStyle(
+            cfg.textSecondary,
+          ).copyWith(height: 1.5),
         ),
         const SizedBox(height: AetherSpace.md),
         AetherChoiceGroup<String>(
@@ -114,7 +116,9 @@ class SettingsPlaybackTab extends StatelessWidget {
         const SizedBox(height: AetherSpace.sm),
         Text(
           '这是软件内部预先解码和 DSP 处理好的音频队列长度，表示当前播放点之后大约有多少毫秒音频已经准备好送往设备。',
-          style: AetherType.captionStyle(cfg.textSecondary).copyWith(height: 1.5),
+          style: AetherType.captionStyle(
+            cfg.textSecondary,
+          ).copyWith(height: 1.5),
         ),
         const SizedBox(height: AetherSpace.md),
         AetherChoiceGroup<int>(
@@ -156,7 +160,8 @@ class SettingsPlaybackTab extends StatelessWidget {
         const SizedBox(height: AetherSpace.sm),
         AetherChoiceGroup<String>(
           value: audioProvider.rubberbandWindow,
-          enabled: audioProvider.pitchEnabled &&
+          enabled:
+              audioProvider.pitchEnabled &&
               audioProvider.pitchAlgorithm == 'rubberband',
           onChanged: audioProvider.setRubberbandWindow,
           options: const [
@@ -168,9 +173,19 @@ class SettingsPlaybackTab extends StatelessWidget {
           title: '保留人声音色',
           subtitle: '适合人声升降调，可能增加处理压力。',
           value: audioProvider.rubberbandFormantPreserved,
-          enabled: audioProvider.pitchEnabled &&
+          enabled:
+              audioProvider.pitchEnabled &&
               audioProvider.pitchAlgorithm == 'rubberband',
           onChanged: audioProvider.setRubberbandFormantPreserved,
+        ),
+        AetherSwitchTile(
+          title: '仅人声升降调',
+          subtitle: '变调中置成分并尽量保留左右声道背景乐器；中置乐器也可能受到影响。',
+          value: audioProvider.rubberbandVocalOnlyPitch,
+          enabled:
+              audioProvider.pitchEnabled &&
+              audioProvider.pitchAlgorithm == 'rubberband',
+          onChanged: audioProvider.setRubberbandVocalOnlyPitch,
         ),
         const SizedBox(height: AetherSpace.md),
         Text('重采样质量', style: AetherType.labelStyle(cfg.textPrimary)),

@@ -1644,6 +1644,7 @@ fn wire__crate__api__music__set_rust_audio_quality_settings_impl(
             let api_dither_enabled = <bool>::sse_decode(&mut deserializer);
             let api_rubberband_window = <String>::sse_decode(&mut deserializer);
             let api_rubberband_formant_preserved = <bool>::sse_decode(&mut deserializer);
+            let api_rubberband_vocal_only_pitch = <bool>::sse_decode(&mut deserializer);
             let api_resampler_quality = <String>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
@@ -1653,6 +1654,7 @@ fn wire__crate__api__music__set_rust_audio_quality_settings_impl(
                         api_dither_enabled,
                         api_rubberband_window,
                         api_rubberband_formant_preserved,
+                        api_rubberband_vocal_only_pitch,
                         api_resampler_quality,
                     )?;
                     Ok(output_ok)

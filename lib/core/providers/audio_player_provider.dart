@@ -22,6 +22,7 @@ class AudioPlayerProvider extends ChangeNotifier {
   static const String _ditherEnabledKey = 'dither-enabled';
   static const String _rubberbandWindowKey = 'rubberband-window';
   static const String _rubberbandFormantKey = 'rubberband-formant-preserved';
+  static const String _rubberbandVocalOnlyKey = 'rubberband-vocal-only-pitch';
   static const String _resamplerQualityKey = 'resampler-quality';
   static const String _outputLatencyModeKey = 'output-latency-mode';
   static const String _developerModeKey = 'developer-mode-enabled';
@@ -50,6 +51,7 @@ class AudioPlayerProvider extends ChangeNotifier {
   bool ditherEnabled = true;
   String rubberbandWindow = 'latency';
   bool rubberbandFormantPreserved = false;
+  bool rubberbandVocalOnlyPitch = false;
   String resamplerQuality = 'standard';
   String outputLatencyMode = 'shared-default';
   AudioOutputInfo? audioOutputInfo;
@@ -193,6 +195,8 @@ class AudioPlayerProvider extends ChangeNotifier {
       );
       rubberbandFormantPreserved =
           prefs.getBool(_rubberbandFormantKey) ?? false;
+      rubberbandVocalOnlyPitch =
+          prefs.getBool(_rubberbandVocalOnlyKey) ?? false;
       resamplerQuality = _normalizeResamplerQuality(
         prefs.getString(_resamplerQualityKey),
       );
@@ -334,6 +338,17 @@ class AudioPlayerProvider extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(_rubberbandFormantKey, value);
       await _syncAudioQualitySettings();
+    } catch (_) {}
+  }
+
+  Future<void> setRubberbandVocalOnlyPitch(bool value) async {
+    rubberbandVocalOnlyPitch = value;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_rubberbandVocalOnlyKey, value);
+      await _syncAudioQualitySettings();
+      await _hotReloadDSP();
     } catch (_) {}
   }
 
@@ -500,6 +515,7 @@ class AudioPlayerProvider extends ChangeNotifier {
       ditherEnabled: ditherEnabled,
       rubberbandWindow: rubberbandWindow,
       rubberbandFormantPreserved: rubberbandFormantPreserved,
+      rubberbandVocalOnlyPitch: rubberbandVocalOnlyPitch,
       resamplerQuality: resamplerQuality,
     );
   }

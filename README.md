@@ -786,6 +786,7 @@ Rubber Band 设置：
 - `latency`：低延迟窗口。
 - `quality`：高质量窗口。
 - formant preserved：保留人声音色。
+- vocal-only pitch：变调立体声中置成分并尽量保留左右声道背景乐器；中置乐器也可能受到影响。
 
 Resampler 设置：
 

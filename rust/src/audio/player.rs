@@ -27,6 +27,7 @@ struct AudioQualitySettings {
     dither_enabled: bool,
     rubberband_window: String,
     rubberband_formant_preserved: bool,
+    rubberband_vocal_only_pitch: bool,
     resampler_quality: String,
 }
 
@@ -37,6 +38,7 @@ impl Default for AudioQualitySettings {
             dither_enabled: true,
             rubberband_window: "latency".to_string(),
             rubberband_formant_preserved: false,
+            rubberband_vocal_only_pitch: false,
             resampler_quality: "standard".to_string(),
         }
     }
@@ -83,6 +85,108 @@ struct DecodePipeline {
     sample_rate: u32,
     channels: u32,
     params: ProcessingParams,
+}
+
+/// Pitch-shifts the stereo center component while keeping the side component intact.
+///
+/// In a typical music mix, lead vocals are placed near the stereo center. Keeping the
+/// side component untouched preserves stereo background material without requiring an
+/// offline stem-separation model. Center-panned instruments are intentionally part of
+/// the trade-off and may be shifted as well.
+struct VocalOnlyPitchProcessor {
+    shifter: RubberBandPitchShifter,
+    pending_mid: VecDeque<f32>,
+    pending_left_side: VecDeque<f32>,
+    pending_right_side: VecDeque<f32>,
+}
+
+impl VocalOnlyPitchProcessor {
+    fn new(
+        sample_rate: u32,
+        pitch_scale: f64,
+        window: &str,
+        preserve_formant: bool,
+    ) -> Result<Self, String> {
+        Ok(Self {
+            shifter: RubberBandPitchShifter::new(
+                sample_rate,
+                1,
+                pitch_scale,
+                window,
+                preserve_formant,
+            )?,
+            pending_mid: VecDeque::new(),
+            pending_left_side: VecDeque::new(),
+            pending_right_side: VecDeque::new(),
+        })
+    }
+
+    fn reset(&mut self) {
+        self.shifter.reset();
+        self.pending_mid.clear();
+        self.pending_left_side.clear();
+        self.pending_right_side.clear();
+    }
+
+    fn set_formant_preserved(&mut self, preserve_formant: bool) {
+        self.shifter.set_formant_preserved(preserve_formant);
+    }
+
+    fn process(&mut self, input: &[f32], pitch_scale: f64) -> Vec<f32> {
+        if input.is_empty() {
+            return Vec::new();
+        }
+        if input.len() % 2 != 0 {
+            return input.to_vec();
+        }
+
+        let frames = input.len() / 2;
+        let mut mid = Vec::with_capacity(frames);
+        for frame in input.chunks_exact(2) {
+            let center = (frame[0] + frame[1]) * 0.5;
+            self.pending_mid.push_back(center);
+            self.pending_left_side.push_back(frame[0] - center);
+            self.pending_right_side.push_back(frame[1] - center);
+            mid.push(center);
+        }
+
+        let shifted_mid = self.shifter.process(&mid, pitch_scale);
+        self.combine_shifted(&shifted_mid)
+    }
+
+    fn finish(&mut self) -> Vec<f32> {
+        let shifted_mid = self.shifter.finish();
+        let mut output = self.combine_shifted(&shifted_mid);
+
+        // If the live shifter cannot emit its final latency window, drain the
+        // unmatched frames unchanged rather than truncating the song tail.
+        while let (Some(mid), Some(left_side), Some(right_side)) = (
+            self.pending_mid.pop_front(),
+            self.pending_left_side.pop_front(),
+            self.pending_right_side.pop_front(),
+        ) {
+            output.push(mid + left_side);
+            output.push(mid + right_side);
+        }
+        output
+    }
+
+    fn combine_shifted(&mut self, shifted_mid: &[f32]) -> Vec<f32> {
+        let frames = shifted_mid
+            .len()
+            .min(self.pending_mid.len())
+            .min(self.pending_left_side.len())
+            .min(self.pending_right_side.len());
+        let mut output = Vec::with_capacity(frames * 2);
+        for &mid in shifted_mid.iter().take(frames) {
+            let _ = self.pending_mid.pop_front();
+            let left_side = self.pending_left_side.pop_front().unwrap_or(0.0);
+            let right_side = self.pending_right_side.pop_front().unwrap_or(0.0);
+            output.push(mid + left_side);
+            output.push(mid + right_side);
+        }
+        output
+    }
 }
 
 impl Default for OutputDeviceInfo {
@@ -136,6 +240,7 @@ impl DecodePipeline {
     fn next_block(
         &mut self,
         rubberband_shifter: &mut Option<RubberBandPitchShifter>,
+        vocal_only_shifter: &mut Option<VocalOnlyPitchProcessor>,
     ) -> Result<Option<Vec<f32>>, String> {
         let _scope = profiler::scope("audio::player::DecodePipeline::next_block");
         let current_quality = self
@@ -145,9 +250,28 @@ impl DecodePipeline {
             .unwrap_or_else(|e| e.into_inner())
             .clone();
 
+        let current_pitch = *self.params.pitch.lock().unwrap_or_else(|e| e.into_inner());
+        let current_algo = self
+            .params
+            .algo
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        let vocal_only_active = current_pitch.abs() > 0.01
+            && self.channels == 2
+            && current_algo == "rubberband"
+            && current_quality.rubberband_vocal_only_pitch;
+
         let mut block = self.decoder.read_block(self.block_frames)?;
         if block.is_empty() {
-            if let Some(shifter) = rubberband_shifter {
+            if vocal_only_active {
+                if let Some(shifter) = vocal_only_shifter {
+                    let tail = shifter.finish();
+                    if !tail.is_empty() {
+                        return Ok(Some(tail));
+                    }
+                }
+            } else if let Some(shifter) = rubberband_shifter {
                 let tail = shifter.finish();
                 if !tail.is_empty() {
                     return Ok(Some(tail));
@@ -167,46 +291,86 @@ impl DecodePipeline {
             }
         }
 
-        let current_pitch = *self.params.pitch.lock().unwrap_or_else(|e| e.into_inner());
         let mut processed = if current_pitch.abs() > 0.01 && self.channels == 2 {
             let _pitch_scope = profiler::scope("audio::player::DecodePipeline::pitch_shift");
-            let current_algo = self
-                .params
-                .algo
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .clone();
             let pitch_factor = 2.0f64.powf(current_pitch / 12.0);
             match current_algo.as_str() {
-                "resample" => dsp::pitch_shift_resample(&block, pitch_factor),
-                "ola" => dsp::pitch_shift_ola(&block, pitch_factor),
-                "wsola" => dsp::pitch_shift_wsola(&block, pitch_factor),
+                "resample" => {
+                    *rubberband_shifter = None;
+                    *vocal_only_shifter = None;
+                    dsp::pitch_shift_resample(&block, pitch_factor)
+                }
+                "ola" => {
+                    *rubberband_shifter = None;
+                    *vocal_only_shifter = None;
+                    dsp::pitch_shift_ola(&block, pitch_factor)
+                }
+                "wsola" => {
+                    *rubberband_shifter = None;
+                    *vocal_only_shifter = None;
+                    dsp::pitch_shift_wsola(&block, pitch_factor)
+                }
                 _ => {
-                    if rubberband_shifter.is_none() {
-                        match RubberBandPitchShifter::new(
-                            self.sample_rate,
-                            self.channels,
-                            pitch_factor,
-                            &current_quality.rubberband_window,
-                            current_quality.rubberband_formant_preserved,
-                        ) {
-                            Ok(shifter) => {
-                                *rubberband_shifter = Some(shifter);
-                            }
-                            Err(e) => {
-                                eprintln!("Rubber Band initialization failed: {}", e);
+                    if vocal_only_active {
+                        *rubberband_shifter = None;
+                        if vocal_only_shifter.is_none() {
+                            match VocalOnlyPitchProcessor::new(
+                                self.sample_rate,
+                                pitch_factor,
+                                &current_quality.rubberband_window,
+                                current_quality.rubberband_formant_preserved,
+                            ) {
+                                Ok(shifter) => {
+                                    *vocal_only_shifter = Some(shifter);
+                                }
+                                Err(e) => {
+                                    eprintln!(
+                                        "Rubber Band vocal-only initialization failed: {}",
+                                        e
+                                    );
+                                }
                             }
                         }
-                    }
-                    if let Some(shifter) = rubberband_shifter {
-                        shifter.set_formant_preserved(current_quality.rubberband_formant_preserved);
-                        shifter.process(&block, pitch_factor)
+                        if let Some(shifter) = vocal_only_shifter {
+                            shifter.set_formant_preserved(
+                                current_quality.rubberband_formant_preserved,
+                            );
+                            shifter.process(&block, pitch_factor)
+                        } else {
+                            block
+                        }
                     } else {
-                        block
+                        *vocal_only_shifter = None;
+                        if rubberband_shifter.is_none() {
+                            match RubberBandPitchShifter::new(
+                                self.sample_rate,
+                                self.channels,
+                                pitch_factor,
+                                &current_quality.rubberband_window,
+                                current_quality.rubberband_formant_preserved,
+                            ) {
+                                Ok(shifter) => {
+                                    *rubberband_shifter = Some(shifter);
+                                }
+                                Err(e) => {
+                                    eprintln!("Rubber Band initialization failed: {}", e);
+                                }
+                            }
+                        }
+                        if let Some(shifter) = rubberband_shifter {
+                            shifter.set_formant_preserved(
+                                current_quality.rubberband_formant_preserved,
+                            );
+                            shifter.process(&block, pitch_factor)
+                        } else {
+                            block
+                        }
                     }
                 }
             }
         } else {
+            *rubberband_shifter = None;
+            *vocal_only_shifter = None;
             block
         };
 
@@ -477,6 +641,7 @@ fn select_output_buffer_size(
 fn prefill_audio_buffer(
     pipeline: &mut DecodePipeline,
     rubberband_shifter: &mut Option<RubberBandPitchShifter>,
+    vocal_only_shifter: &mut Option<VocalOnlyPitchProcessor>,
     buffer: &AudioBuffer,
     stop_flag: &AtomicBool,
     target_ms: u32,
@@ -490,7 +655,7 @@ fn prefill_audio_buffer(
     let target_samples = requested_samples.min(buffer.capacity().saturating_mul(2) / 3);
 
     while buffer.len() < target_samples && !stop_flag.load(Ordering::SeqCst) {
-        let Some(block) = pipeline.next_block(rubberband_shifter)? else {
+        let Some(block) = pipeline.next_block(rubberband_shifter, vocal_only_shifter)? else {
             break;
         };
         if block.is_empty() {
@@ -923,9 +1088,11 @@ pub fn start_playback(
         && algo.lock().unwrap_or_else(|e| e.into_inner()).as_str() != "resample")
     {
         let mut prefill_rubberband_shifter: Option<RubberBandPitchShifter> = None;
+        let mut prefill_vocal_only_shifter: Option<VocalOnlyPitchProcessor> = None;
         prefill_audio_buffer(
             &mut pipeline,
             &mut prefill_rubberband_shifter,
+            &mut prefill_vocal_only_shifter,
             &buffer,
             &stop_flag,
             output_buffer_ms.min(160),
@@ -954,6 +1121,7 @@ pub fn start_playback(
         .name("aetheria-audio-decode".to_string())
         .spawn(move || {
             let mut rubberband_shifter: Option<RubberBandPitchShifter> = None;
+            let mut vocal_only_shifter: Option<VocalOnlyPitchProcessor> = None;
             loop {
                 if stop_flag.load(Ordering::SeqCst) {
                     break;
@@ -970,12 +1138,16 @@ pub fn start_playback(
                         if let Some(shifter) = &mut rubberband_shifter {
                             shifter.reset();
                         }
+                        if let Some(shifter) = &mut vocal_only_shifter {
+                            shifter.reset();
+                        }
                         buffer.clear();
                         // A seek starts a fresh five-second headroom window.
                         stream_finished.store(false, Ordering::SeqCst);
                         if let Err(e) = prefill_audio_buffer(
                             &mut pipeline,
                             &mut rubberband_shifter,
+                            &mut vocal_only_shifter,
                             &buffer,
                             &stop_flag,
                             80,
@@ -987,22 +1159,23 @@ pub fn start_playback(
                     }
                 }
 
-                let block = match pipeline.next_block(&mut rubberband_shifter) {
-                    Ok(Some(block)) => block,
-                    Ok(None) => {
-                        // End of stream: let the hardware drain whatever is still buffered.
-                        while buffer.len() > 0 && !stop_flag.load(Ordering::SeqCst) {
-                            thread::sleep(Duration::from_millis(20));
+                let block =
+                    match pipeline.next_block(&mut rubberband_shifter, &mut vocal_only_shifter) {
+                        Ok(Some(block)) => block,
+                        Ok(None) => {
+                            // End of stream: let the hardware drain whatever is still buffered.
+                            while buffer.len() > 0 && !stop_flag.load(Ordering::SeqCst) {
+                                thread::sleep(Duration::from_millis(20));
+                            }
+                            stream_finished.store(true, Ordering::SeqCst);
+                            break;
                         }
-                        stream_finished.store(true, Ordering::SeqCst);
-                        break;
-                    }
-                    Err(e) => {
-                        eprintln!("Decode error: {}", e);
-                        stream_finished.store(true, Ordering::SeqCst);
-                        break;
-                    }
-                };
+                        Err(e) => {
+                            eprintln!("Decode error: {}", e);
+                            stream_finished.store(true, Ordering::SeqCst);
+                            break;
+                        }
+                    };
 
                 if block.is_empty() {
                     continue;
@@ -1109,6 +1282,7 @@ pub fn set_quality_settings(
     dither_enabled: bool,
     rubberband_window: String,
     rubberband_formant_preserved: bool,
+    rubberband_vocal_only_pitch: bool,
     resampler_quality: String,
 ) -> Result<(), String> {
     let _scope = profiler::scope("audio::player::set_quality_settings");
@@ -1121,6 +1295,7 @@ pub fn set_quality_settings(
         dither_enabled,
         rubberband_window: normalize_rubberband_window(&rubberband_window),
         rubberband_formant_preserved,
+        rubberband_vocal_only_pitch,
         resampler_quality: normalize_resampler_quality(&resampler_quality),
     };
     Ok(())

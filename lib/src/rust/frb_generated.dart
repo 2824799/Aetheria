@@ -233,6 +233,7 @@ abstract class RustLibApi extends BaseApi {
     required bool ditherEnabled,
     required String rubberbandWindow,
     required bool rubberbandFormantPreserved,
+    required bool rubberbandVocalOnlyPitch,
     required String resamplerQuality,
   });
 
@@ -1745,6 +1746,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required bool ditherEnabled,
     required String rubberbandWindow,
     required bool rubberbandFormantPreserved,
+    required bool rubberbandVocalOnlyPitch,
     required String resamplerQuality,
   }) {
     return handler.executeNormal(
@@ -1755,6 +1757,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_bool(ditherEnabled, serializer);
           sse_encode_String(rubberbandWindow, serializer);
           sse_encode_bool(rubberbandFormantPreserved, serializer);
+          sse_encode_bool(rubberbandVocalOnlyPitch, serializer);
           sse_encode_String(resamplerQuality, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
@@ -1773,6 +1776,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           ditherEnabled,
           rubberbandWindow,
           rubberbandFormantPreserved,
+          rubberbandVocalOnlyPitch,
           resamplerQuality,
         ],
         apiImpl: this,
@@ -1788,6 +1792,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           "ditherEnabled",
           "rubberbandWindow",
           "rubberbandFormantPreserved",
+          "rubberbandVocalOnlyPitch",
           "resamplerQuality",
         ],
       );
