@@ -1834,6 +1834,20 @@ pub fn set_rust_volume(vol: f32) -> Result<(), String> {
     crate::audio::player::set_volume(vol)
 }
 
+pub fn set_rust_motor_audio_enabled(enabled: bool) -> Result<(), String> {
+    crate::audio::player::set_motor_audio_enabled(enabled)
+}
+
+#[frb(sync)]
+pub fn drain_rust_motor_audio_control_points(max_points: i32) -> Vec<f64> {
+    crate::audio::player::drain_motor_audio_control_points(max_points)
+}
+
+#[frb(sync)]
+pub fn get_rust_motor_audio_frame_duration_ms() -> i32 {
+    crate::audio::player::motor_audio_frame_duration_ms()
+}
+
 pub fn set_rust_pitch(pitch: f64, algo: String) -> Result<(), String> {
     crate::audio::player::set_pitch(pitch, algo)
 }

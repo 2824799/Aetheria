@@ -108,6 +108,56 @@ class NativeAudioHelper {
     }
   }
 
+  static Future<Map<String, dynamic>> getMotorAudioCapabilities() async {
+    try {
+      final result = await _channel.invokeMapMethod<String, dynamic>(
+        'getMotorAudioCapabilities',
+      );
+      return result ?? const <String, dynamic>{};
+    } catch (_) {
+      return const <String, dynamic>{
+        'supported': false,
+        'reason': '无法读取马达包络能力',
+      };
+    }
+  }
+
+  static Future<bool> setMotorAudioEnabled(bool enabled) async {
+    try {
+      return await _channel.invokeMethod<bool>(
+            'setMotorAudioEnabled',
+            <String, dynamic>{'enabled': enabled},
+          ) ??
+          false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<int> pushMotorAudioEnvelope({
+    required List<double> amplitudes,
+    required List<double> frequencyPositions,
+    required int pointDurationMs,
+  }) async {
+    try {
+      return await _channel
+              .invokeMethod<int>('pushMotorAudioEnvelope', <String, dynamic>{
+                'amplitudes': amplitudes,
+                'frequencyPositions': frequencyPositions,
+                'pointDurationMs': pointDurationMs,
+              }) ??
+          0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  static Future<void> stopMotorAudio() async {
+    try {
+      await _channel.invokeMethod<void>('stopMotorAudio');
+    } catch (_) {}
+  }
+
   static Future<bool> canDrawOverlays() async {
     try {
       return await _channel.invokeMethod<bool>('canDrawOverlays') ?? false;

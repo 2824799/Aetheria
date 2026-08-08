@@ -29,7 +29,9 @@ typedef ProgressDialogUpdate =
     });
 
 class MainContent extends StatefulWidget {
-  const MainContent({super.key});
+  final SongTableController? songTableController;
+
+  const MainContent({super.key, this.songTableController});
 
   @override
   State<MainContent> createState() => _MainContentState();
@@ -564,7 +566,7 @@ class _MainContentState extends State<MainContent> {
                   }
                   return false;
                 },
-                child: const SongTable(),
+                child: SongTable(controller: widget.songTableController),
               ),
             ),
           ),

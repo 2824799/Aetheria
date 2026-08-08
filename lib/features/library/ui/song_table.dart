@@ -22,8 +22,32 @@ import 'package:aetheria/src/rust/models/song.dart';
 /// Max interval between two primary taps to count as open/play double-tap.
 const Duration kSongTablePrimaryTapInterval = Duration(milliseconds: 260);
 
+class SongTableController {
+  _SongTableState? _state;
+
+  Future<bool> revealSong(String songId) async {
+    final state = _state;
+    if (state == null) {
+      return false;
+    }
+    return state._revealSong(songId);
+  }
+
+  void _attach(_SongTableState state) {
+    _state = state;
+  }
+
+  void _detach(_SongTableState state) {
+    if (identical(_state, state)) {
+      _state = null;
+    }
+  }
+}
+
 class SongTable extends StatefulWidget {
-  const SongTable({super.key});
+  final SongTableController? controller;
+
+  const SongTable({super.key, this.controller});
 
   @override
   State<SongTable> createState() => _SongTableState();
@@ -70,13 +94,65 @@ class _SongTableState extends State<SongTable> {
   @override
   void initState() {
     super.initState();
+    widget.controller?._attach(this);
     _loadColumnLayout();
   }
 
   @override
   void dispose() {
+    widget.controller?._detach(this);
     _verticalController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant SongTable oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller == widget.controller) {
+      return;
+    }
+    oldWidget.controller?._detach(this);
+    widget.controller?._attach(this);
+  }
+
+  Future<bool> _revealSong(String songId) async {
+    if (!mounted) {
+      return false;
+    }
+
+    final songs = context.read<LibraryProvider>().displaySongs;
+    final index = songs.indexWhere((song) => song.id == songId);
+    if (index < 0) {
+      return false;
+    }
+
+    if (!_verticalController.hasClients) {
+      await WidgetsBinding.instance.endOfFrame;
+    }
+    if (!mounted || !_verticalController.hasClients) {
+      return false;
+    }
+
+    final position = _verticalController.position;
+    final targetOffset =
+        (index * _rowHeight - (position.viewportDimension - _rowHeight) / 2)
+            .clamp(position.minScrollExtent, position.maxScrollExtent)
+            .toDouble();
+
+    if ((position.pixels - targetOffset).abs() < 0.5) {
+      return true;
+    }
+
+    if (AetherMotion.reduce(context)) {
+      _verticalController.jumpTo(targetOffset);
+    } else {
+      await _verticalController.animateTo(
+        targetOffset,
+        duration: AetherMotion.slow,
+        curve: AetherMotion.outQuart,
+      );
+    }
+    return true;
   }
 
   Future<void> _loadColumnLayout() async {
@@ -659,6 +735,7 @@ class _SongTableState extends State<SongTable> {
                         children: [
                           ListView.builder(
                             controller: _verticalController,
+                            itemExtent: _rowHeight,
                             itemCount: songs.length,
                             itemBuilder: (context, index) {
                               final song = songs[index];

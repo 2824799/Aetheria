@@ -9,7 +9,13 @@ import 'package:aetheria/features/player/ui/song_cover_art.dart';
 
 class PlayBar extends StatelessWidget {
   final double height;
-  const PlayBar({super.key, this.height = AetherSpace.playBarHeight});
+  final VoidCallback? onPlayingSongLongPress;
+
+  const PlayBar({
+    super.key,
+    this.height = AetherSpace.playBarHeight,
+    this.onPlayingSongLongPress,
+  });
 
   String _formatDuration(Duration d) {
     String twoDigits(int n) => n.toString().padLeft(2, '0');
@@ -98,12 +104,15 @@ class PlayBar extends StatelessWidget {
                           hoverColor: cfg.bgHover,
                           tooltip: playingSong == null
                               ? null
-                              : (audioProvider.isDetailOpen ? '关闭详情' : '打开详情'),
+                              : '${audioProvider.isDetailOpen ? '关闭详情' : '打开详情'} · 长按定位到列表',
                           onTap: playingSong == null
                               ? null
                               : () => audioProvider.setDetailOpen(
                                   !audioProvider.isDetailOpen,
                                 ),
+                          onLongPress: playingSong == null
+                              ? null
+                              : onPlayingSongLongPress,
                           child: AnimatedContainer(
                             duration: AetherMotion.duration(
                               context,

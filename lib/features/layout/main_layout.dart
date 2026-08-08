@@ -8,8 +8,10 @@ import 'package:aetheria/core/providers/sync_provider.dart';
 import 'package:aetheria/core/widgets/aether_button.dart';
 import 'package:aetheria/core/widgets/aether_dialog.dart';
 import 'package:aetheria/core/widgets/aether_empty_state.dart';
+import 'package:aetheria/core/widgets/aether_toast.dart';
 import 'package:aetheria/features/sidebar/ui/sidebar.dart';
 import 'package:aetheria/features/library/ui/main_content.dart';
+import 'package:aetheria/features/library/ui/song_table.dart';
 import 'package:aetheria/features/player/ui/play_bar.dart';
 import 'package:aetheria/features/player/ui/detail_pane.dart';
 import 'package:aetheria/features/layout/mobile_layout.dart';
@@ -28,6 +30,7 @@ class _MainLayoutState extends State<MainLayout>
   late AnimationController _drawerController;
   late Animation<Offset> _drawerSlide;
   late Animation<double> _scrimFade;
+  final SongTableController _songTableController = SongTableController();
   String? _handledSyncRequestId;
   bool _imeDismissedInBackground = false;
 
@@ -95,6 +98,30 @@ class _MainLayoutState extends State<MainLayout>
   void _dismissKeyboard() {
     FocusManager.instance.primaryFocus?.unfocus();
     SystemChannels.textInput.invokeMethod('TextInput.hide');
+  }
+
+  Future<void> _revealPlayingSong() async {
+    final audioProvider = context.read<AudioPlayerProvider>();
+    final playingSong = audioProvider.playingSong;
+    if (playingSong == null) {
+      return;
+    }
+
+    _dismissKeyboard();
+    if (audioProvider.isDetailOpen) {
+      audioProvider.setDetailOpen(false);
+    }
+
+    final revealed = await _songTableController.revealSong(playingSong.id);
+    if (!mounted || revealed) {
+      return;
+    }
+
+    showAetherToast(
+      context,
+      message: '当前歌曲不在这个歌单或筛选结果中',
+      kind: AetherToastKind.info,
+    );
   }
 
   @override
@@ -211,42 +238,47 @@ class _MainLayoutState extends State<MainLayout>
                   Expanded(
                     child: Stack(
                       children: [
-                        const MainContent(),
+                        MainContent(songTableController: _songTableController),
                         if (showDrawer)
                           Positioned.fill(
                             child: AnimatedBuilder(
                               animation: _drawerController,
                               builder: (context, _) {
-                                return Stack(
-                                  children: [
-                                    Positioned.fill(
-                                      child: GestureDetector(
-                                        behavior: HitTestBehavior.translucent,
-                                        onTap: () {
-                                          _dismissKeyboard();
-                                          audioProvider.setDetailOpen(false);
-                                        },
-                                        child: FadeTransition(
-                                          opacity: _scrimFade,
-                                          child: ColoredBox(
-                                            color: cfg.scrim.withValues(
-                                              alpha: 0.28,
+                                return IgnorePointer(
+                                  ignoring:
+                                      _drawerController.status ==
+                                      AnimationStatus.dismissed,
+                                  child: Stack(
+                                    children: [
+                                      Positioned.fill(
+                                        child: GestureDetector(
+                                          behavior: HitTestBehavior.translucent,
+                                          onTap: () {
+                                            _dismissKeyboard();
+                                            audioProvider.setDetailOpen(false);
+                                          },
+                                          child: FadeTransition(
+                                            opacity: _scrimFade,
+                                            child: ColoredBox(
+                                              color: cfg.scrim.withValues(
+                                                alpha: 0.28,
+                                              ),
                                             ),
                                           ),
                                         ),
                                       ),
-                                    ),
-                                    Positioned(
-                                      right: 0,
-                                      top: 0,
-                                      bottom: 0,
-                                      width: 380,
-                                      child: SlideTransition(
-                                        position: _drawerSlide,
-                                        child: const DetailPane(),
+                                      Positioned(
+                                        right: 0,
+                                        top: 0,
+                                        bottom: 0,
+                                        width: 380,
+                                        child: SlideTransition(
+                                          position: _drawerSlide,
+                                          child: const DetailPane(),
+                                        ),
                                       ),
-                                    ),
-                                  ],
+                                    ],
+                                  ),
                                 );
                               },
                             ),
@@ -257,7 +289,7 @@ class _MainLayoutState extends State<MainLayout>
                 ],
               ),
             ),
-            const PlayBar(height: 84),
+            PlayBar(height: 84, onPlayingSongLongPress: _revealPlayingSong),
           ],
         ),
       ],
