@@ -26,8 +26,6 @@ class AudioPlayerProvider extends ChangeNotifier {
   static const String _resamplerQualityKey = 'resampler-quality';
   static const String _outputLatencyModeKey = 'output-latency-mode';
   static const String _developerModeKey = 'developer-mode-enabled';
-  static const String _motorAudioEnabledKey =
-      'experimental-motor-audio-enabled';
 
   Song? activeSong;
   Song? playingSong;
@@ -58,15 +56,6 @@ class AudioPlayerProvider extends ChangeNotifier {
   String outputLatencyMode = 'shared-default';
   AudioOutputInfo? audioOutputInfo;
   bool developerModeEnabled = false;
-  bool motorAudioEnabled = false;
-  bool motorAudioSupported = false;
-  String motorAudioCapabilityReason = '仅支持 Android 16 的兼容设备';
-  int motorAudioSdkInt = 0;
-  int motorAudioMinControlPointMs = 0;
-  int motorAudioMaxSize = 0;
-  double motorAudioMinFrequencyHz = 0;
-  double motorAudioMaxFrequencyHz = 0;
-  double motorAudioResonantFrequencyHz = 0;
 
   bool isDetailOpen = false;
   String activeTab = 'lyrics';
@@ -76,7 +65,6 @@ class AudioPlayerProvider extends ChangeNotifier {
   Timer? _positionTimer;
   Timer? _outputInfoTimer;
   Timer? _audioRouteChangeDebounce;
-  Timer? _motorAudioTimer;
   int _lastPositionMs = -1;
   int _lastPersistedSecond = -1;
   int _stallTicks = 0;
@@ -85,8 +73,6 @@ class AudioPlayerProvider extends ChangeNotifier {
   Duration? _pendingRestorePosition;
   String? _lastDefaultOutputDeviceName;
   bool _isCheckingOutputDeviceChange = false;
-  bool _motorAudioPumpBusy = false;
-  int _motorAudioPushFailures = 0;
 
   AudioPlayerProvider() {
     NativeAudioHelper.setNotificationActionHandler(_handleNotificationAction);
@@ -218,7 +204,6 @@ class AudioPlayerProvider extends ChangeNotifier {
         prefs.getString(_outputLatencyModeKey),
       );
       developerModeEnabled = prefs.getBool(_developerModeKey) ?? false;
-      await _loadMotorAudioSettings(prefs);
       music.setAudioPerformanceProfilingEnabled(enabled: developerModeEnabled);
       await music.setRustOutputBufferMs(ms: pitchBufferMs);
       await music.setRustOutputLatencyMode(mode: outputLatencyMode);
@@ -231,42 +216,6 @@ class AudioPlayerProvider extends ChangeNotifier {
       await refreshAudioOutputInfo();
       notifyListeners();
     } catch (_) {}
-  }
-
-  Future<void> _loadMotorAudioSettings(SharedPreferences prefs) async {
-    if (!Platform.isAndroid) {
-      motorAudioEnabled = false;
-      motorAudioSupported = false;
-      motorAudioCapabilityReason = '仅 Android 手机支持';
-      await music.setRustMotorAudioEnabled(enabled: false);
-      return;
-    }
-
-    final capabilities = await NativeAudioHelper.getMotorAudioCapabilities();
-    motorAudioSupported = capabilities['supported'] == true;
-    motorAudioCapabilityReason =
-        capabilities['reason']?.toString() ?? '无法确认设备支持情况';
-    motorAudioSdkInt = (capabilities['sdkInt'] as num?)?.toInt() ?? 0;
-    motorAudioMinControlPointMs =
-        (capabilities['minControlPointMs'] as num?)?.toInt() ?? 0;
-    motorAudioMaxSize = (capabilities['maxSize'] as num?)?.toInt() ?? 0;
-    motorAudioMinFrequencyHz =
-        (capabilities['minFrequencyHz'] as num?)?.toDouble() ?? 0;
-    motorAudioMaxFrequencyHz =
-        (capabilities['maxFrequencyHz'] as num?)?.toDouble() ?? 0;
-    motorAudioResonantFrequencyHz =
-        (capabilities['resonantFrequencyHz'] as num?)?.toDouble() ?? 0;
-
-    final requested = prefs.getBool(_motorAudioEnabledKey) ?? false;
-    var enabled = requested && motorAudioSupported;
-    if (enabled) {
-      enabled = await NativeAudioHelper.setMotorAudioEnabled(true);
-    }
-    motorAudioEnabled = enabled;
-    await music.setRustMotorAudioEnabled(enabled: enabled);
-    if (requested != enabled) {
-      await prefs.setBool(_motorAudioEnabledKey, enabled);
-    }
   }
 
   Future<void> setPlayAlongside(bool value) async {
@@ -482,123 +431,6 @@ class AudioPlayerProvider extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_developerModeKey, value);
-  }
-
-  Future<bool> setMotorAudioEnabled(bool value) async {
-    if (!Platform.isAndroid || (value && !motorAudioSupported)) {
-      return false;
-    }
-    if (motorAudioEnabled == value) {
-      return true;
-    }
-
-    if (value) {
-      final nativeAccepted = await NativeAudioHelper.setMotorAudioEnabled(true);
-      if (!nativeAccepted) {
-        final capabilities =
-            await NativeAudioHelper.getMotorAudioCapabilities();
-        motorAudioCapabilityReason =
-            capabilities['reason']?.toString() ?? '设备拒绝了马达包络输出';
-        notifyListeners();
-        return false;
-      }
-      try {
-        await music.setRustMotorAudioEnabled(enabled: true);
-      } catch (_) {
-        await NativeAudioHelper.setMotorAudioEnabled(false);
-        return false;
-      }
-      motorAudioEnabled = true;
-      _motorAudioPushFailures = 0;
-      if (isPlaying) {
-        _startMotorAudioPump();
-      }
-    } else {
-      motorAudioEnabled = false;
-      _stopMotorAudioPump();
-      await music.setRustMotorAudioEnabled(enabled: false);
-      await NativeAudioHelper.setMotorAudioEnabled(false);
-    }
-
-    notifyListeners();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_motorAudioEnabledKey, motorAudioEnabled);
-    return true;
-  }
-
-  void _startMotorAudioPump() {
-    if (!Platform.isAndroid || !motorAudioEnabled || !isPlaying) {
-      return;
-    }
-    _motorAudioTimer ??= Timer.periodic(
-      const Duration(milliseconds: 40),
-      (_) => unawaited(_pumpMotorAudioEnvelope()),
-    );
-    unawaited(_pumpMotorAudioEnvelope());
-  }
-
-  void _stopMotorAudioPump() {
-    _motorAudioTimer?.cancel();
-    _motorAudioTimer = null;
-    _motorAudioPushFailures = 0;
-    if (Platform.isAndroid) {
-      unawaited(NativeAudioHelper.stopMotorAudio());
-    }
-  }
-
-  Future<void> _pumpMotorAudioEnvelope() async {
-    if (_motorAudioPumpBusy ||
-        !Platform.isAndroid ||
-        !motorAudioEnabled ||
-        !isPlaying) {
-      return;
-    }
-    _motorAudioPumpBusy = true;
-    try {
-      final raw = music.drainRustMotorAudioControlPoints(maxPoints: 48);
-      final pairCount = raw.length ~/ 2;
-      if (pairCount == 0) {
-        return;
-      }
-      final amplitudes = List<double>.filled(pairCount, 0);
-      final frequencyPositions = List<double>.filled(pairCount, 0.5);
-      for (var index = 0; index < pairCount; index++) {
-        amplitudes[index] = raw[index * 2].clamp(0.0, 1.0);
-        frequencyPositions[index] = raw[index * 2 + 1].clamp(0.0, 1.0);
-      }
-      final accepted = await NativeAudioHelper.pushMotorAudioEnvelope(
-        amplitudes: amplitudes,
-        frequencyPositions: frequencyPositions,
-        pointDurationMs: music.getRustMotorAudioFrameDurationMs(),
-      );
-      if (accepted > 0) {
-        _motorAudioPushFailures = 0;
-      } else {
-        _motorAudioPushFailures += 1;
-        if (_motorAudioPushFailures >= 3) {
-          await _disableMotorAudioAfterRuntimeFailure();
-        }
-      }
-    } finally {
-      _motorAudioPumpBusy = false;
-    }
-  }
-
-  Future<void> _disableMotorAudioAfterRuntimeFailure() async {
-    if (!motorAudioEnabled) {
-      return;
-    }
-    motorAudioEnabled = false;
-    _motorAudioTimer?.cancel();
-    _motorAudioTimer = null;
-    await music.setRustMotorAudioEnabled(enabled: false);
-    await NativeAudioHelper.setMotorAudioEnabled(false);
-    final capabilities = await NativeAudioHelper.getMotorAudioCapabilities();
-    motorAudioCapabilityReason =
-        capabilities['reason']?.toString() ?? '马达包络输出已意外停止';
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_motorAudioEnabledKey, false);
-    notifyListeners();
   }
 
   Future<void> _handleAudioRouteChanged() async {
@@ -823,10 +655,6 @@ class AudioPlayerProvider extends ChangeNotifier {
         ? totalDuration
         : startPosition;
 
-    if (motorAudioEnabled && Platform.isAndroid) {
-      _stopMotorAudioPump();
-      await NativeAudioHelper.stopMotorAudio();
-    }
     await music.startRustPlayback(
       path: path,
       volume: volume,
@@ -844,12 +672,10 @@ class AudioPlayerProvider extends ChangeNotifier {
       await music.pauseRustPlayback();
       isPlaying = false;
       _stopPositionTimer();
-      _stopMotorAudioPump();
     } else {
       isPlaying = true;
       _startPositionTimer();
       _startOutputInfoTimer();
-      _startMotorAudioPump();
     }
 
     currentPosition = clampedPosition;
@@ -891,10 +717,6 @@ class AudioPlayerProvider extends ChangeNotifier {
       '/',
     );
 
-    if (motorAudioEnabled && Platform.isAndroid) {
-      _stopMotorAudioPump();
-      await NativeAudioHelper.stopMotorAudio();
-    }
     await music.startRustPlayback(
       path: path,
       volume: volume,
@@ -905,10 +727,8 @@ class AudioPlayerProvider extends ChangeNotifier {
     await music.seekRustPlayback(secs: pos.inMilliseconds / 1000.0);
     if (wasPlaying) {
       _startOutputInfoTimer();
-      _startMotorAudioPump();
     } else {
       await music.pauseRustPlayback();
-      _stopMotorAudioPump();
       await refreshAudioOutputInfo();
     }
   }
@@ -946,7 +766,6 @@ class AudioPlayerProvider extends ChangeNotifier {
       isPlaying = false;
       _stopPositionTimer();
       _stopOutputInfoTimer();
-      _stopMotorAudioPump();
     } else {
       if (playingSong != null && playingVersion != null) {
         if (!_hasPreparedPlayback) {
@@ -961,7 +780,6 @@ class AudioPlayerProvider extends ChangeNotifier {
         isPlaying = true;
         _startPositionTimer();
         _startOutputInfoTimer();
-        _startMotorAudioPump();
       }
     }
     notifyListeners();
@@ -983,7 +801,6 @@ class AudioPlayerProvider extends ChangeNotifier {
       isPlaying = true;
       _startPositionTimer();
       _startOutputInfoTimer();
-      _startMotorAudioPump();
       notifyListeners();
       _updateNotification();
       unawaited(_persistPlaybackState());
@@ -1004,14 +821,7 @@ class AudioPlayerProvider extends ChangeNotifier {
       unawaited(_persistPlaybackState());
       return;
     }
-    if (motorAudioEnabled && Platform.isAndroid) {
-      _stopMotorAudioPump();
-      await NativeAudioHelper.stopMotorAudio();
-    }
     await music.seekRustPlayback(secs: targetPosition.inMilliseconds / 1000.0);
-    if (motorAudioEnabled && isPlaying) {
-      _startMotorAudioPump();
-    }
     currentPosition = targetPosition;
     notifyListeners();
     _updateNotification();
@@ -1021,7 +831,6 @@ class AudioPlayerProvider extends ChangeNotifier {
   Future<void> stopForLibrarySync() async {
     _stopPositionTimer();
     _stopOutputInfoTimer();
-    _stopMotorAudioPump();
     await music.stopRustPlayback();
     isPlaying = false;
     _hasPreparedPlayback = false;
@@ -1278,13 +1087,10 @@ class AudioPlayerProvider extends ChangeNotifier {
     _positionTimer?.cancel();
     _outputInfoTimer?.cancel();
     _audioRouteChangeDebounce?.cancel();
-    _motorAudioTimer?.cancel();
     unawaited(_persistPlaybackState());
     if (Platform.isAndroid) {
       NativeAudioHelper.hideNotification();
-      NativeAudioHelper.stopMotorAudio();
     }
-    music.setRustMotorAudioEnabled(enabled: false);
     music.stopRustPlayback();
     super.dispose();
   }

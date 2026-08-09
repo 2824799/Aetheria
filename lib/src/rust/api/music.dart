@@ -260,19 +260,6 @@ Future<void> stopRustPlayback() =>
 Future<void> setRustVolume({required double vol}) =>
     RustLib.instance.api.crateApiMusicSetRustVolume(vol: vol);
 
-Future<void> setRustMotorAudioEnabled({required bool enabled}) => RustLib
-    .instance
-    .api
-    .crateApiMusicSetRustMotorAudioEnabled(enabled: enabled);
-
-Float64List drainRustMotorAudioControlPoints({required int maxPoints}) =>
-    RustLib.instance.api.crateApiMusicDrainRustMotorAudioControlPoints(
-      maxPoints: maxPoints,
-    );
-
-int getRustMotorAudioFrameDurationMs() =>
-    RustLib.instance.api.crateApiMusicGetRustMotorAudioFrameDurationMs();
-
 Future<void> setRustPitch({required double pitch, required String algo}) =>
     RustLib.instance.api.crateApiMusicSetRustPitch(pitch: pitch, algo: algo);
 

@@ -49,7 +49,6 @@ class MainActivity : FlutterActivity() {
     private var multicastLock: WifiManager.MulticastLock? = null
     private var audioManager: AudioManager? = null
     private var audioDeviceCallback: AudioDeviceCallback? = null
-    private var motorAudioController: MotorAudioController? = null
 
     private external fun initAudioContext(context: Context)
 
@@ -107,14 +106,11 @@ class MainActivity : FlutterActivity() {
         setHighRefreshRate()
         initAudioContext(applicationContext)
         registerAudioRouteCallback()
-        motorAudioController = MotorAudioController(applicationContext)
     }
 
     override fun onDestroy() {
         unregisterAudioRouteCallback()
         releaseMulticastLock()
-        motorAudioController?.release()
-        motorAudioController = null
         mediaSession?.release()
         mediaSession = null
         super.onDestroy()
@@ -185,45 +181,6 @@ class MainActivity : FlutterActivity() {
                 }
                 "getDeviceName" -> {
                     result.success(resolveDeviceName())
-                }
-                "getMotorAudioCapabilities" -> {
-                    result.success(
-                        motorAudioController
-                            ?.getCapabilities()
-                            ?: MotorAudioController(applicationContext).getCapabilities(),
-                    )
-                }
-                "setMotorAudioEnabled" -> {
-                    val enabled = call.argument<Boolean>("enabled") ?: false
-                    val controller = motorAudioController
-                        ?: MotorAudioController(applicationContext).also {
-                            motorAudioController = it
-                        }
-                    result.success(controller.setEnabled(enabled))
-                }
-                "pushMotorAudioEnvelope" -> {
-                    val amplitudes = (call.argument<List<*>>("amplitudes") ?: emptyList<Any>())
-                        .mapNotNull { (it as? Number)?.toDouble() }
-                    val frequencyPositions =
-                        (call.argument<List<*>>("frequencyPositions") ?: emptyList<Any>())
-                            .mapNotNull { (it as? Number)?.toDouble() }
-                    val pointDurationMs =
-                        call.argument<Number>("pointDurationMs")?.toInt() ?: 10
-                    val controller = motorAudioController
-                        ?: MotorAudioController(applicationContext).also {
-                            motorAudioController = it
-                        }
-                    result.success(
-                        controller.pushEnvelope(
-                            amplitudes,
-                            frequencyPositions,
-                            pointDurationMs,
-                        ),
-                    )
-                }
-                "stopMotorAudio" -> {
-                    motorAudioController?.stopOutput()
-                    result.success(null)
                 }
                 "canDrawOverlays" -> {
                     result.success(canDrawOverlays())

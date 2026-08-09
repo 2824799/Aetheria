@@ -21,158 +21,6 @@ pub struct AudioBuffer {
     len_samples: AtomicUsize,
 }
 
-const HAPTIC_FRAME_DURATION_MS: u32 = 10;
-const MAX_HAPTIC_QUEUE_POINTS: usize = 80;
-
-#[derive(Clone, Copy, Debug)]
-struct HapticControlPoint {
-    amplitude: f32,
-    frequency_position: f32,
-}
-
-struct HapticAnalyzer {
-    sample_rate: u32,
-    channels: usize,
-    target_frames: usize,
-    accumulated_frames: usize,
-    sum_squares: f64,
-    zero_crossings: usize,
-    previous_sample: f32,
-    has_previous_sample: bool,
-    smoothed_amplitude: f32,
-    smoothed_frequency_position: f32,
-}
-
-impl HapticAnalyzer {
-    fn new(sample_rate: u32, channels: usize) -> Self {
-        Self {
-            sample_rate,
-            channels: channels.max(1),
-            target_frames: ((sample_rate as usize * HAPTIC_FRAME_DURATION_MS as usize) / 1000)
-                .max(1),
-            accumulated_frames: 0,
-            sum_squares: 0.0,
-            zero_crossings: 0,
-            previous_sample: 0.0,
-            has_previous_sample: false,
-            smoothed_amplitude: 0.0,
-            smoothed_frequency_position: 0.5,
-        }
-    }
-
-    fn reset(&mut self) {
-        self.accumulated_frames = 0;
-        self.sum_squares = 0.0;
-        self.zero_crossings = 0;
-        self.previous_sample = 0.0;
-        self.has_previous_sample = false;
-        self.smoothed_amplitude = 0.0;
-        self.smoothed_frequency_position = 0.5;
-    }
-
-    fn push(
-        &mut self,
-        samples: &[f32],
-        intensity: f32,
-        queue: &Mutex<VecDeque<HapticControlPoint>>,
-    ) {
-        for frame in samples.chunks(self.channels) {
-            if frame.is_empty() {
-                continue;
-            }
-            let mono = frame.iter().copied().sum::<f32>() / frame.len() as f32;
-            self.sum_squares += (mono as f64) * (mono as f64);
-            if self.has_previous_sample
-                && ((self.previous_sample < 0.0 && mono >= 0.0)
-                    || (self.previous_sample >= 0.0 && mono < 0.0))
-            {
-                self.zero_crossings += 1;
-            }
-            self.previous_sample = mono;
-            self.has_previous_sample = true;
-            self.accumulated_frames += 1;
-
-            if self.accumulated_frames >= self.target_frames {
-                self.finish_frame(intensity, queue);
-            }
-        }
-    }
-
-    fn finish_frame(&mut self, intensity: f32, queue: &Mutex<VecDeque<HapticControlPoint>>) {
-        let frame_count = self.accumulated_frames.max(1);
-        let rms = (self.sum_squares / frame_count as f64).sqrt() as f32;
-        let gated = if rms < 0.004 {
-            0.0
-        } else {
-            ((rms - 0.004) * 5.5).clamp(0.0, 1.0).powf(0.58)
-        };
-        let target_amplitude = gated * intensity.clamp(0.0, 1.0);
-        let amplitude_mix = if target_amplitude > self.smoothed_amplitude {
-            0.48
-        } else {
-            0.22
-        };
-        self.smoothed_amplitude += (target_amplitude - self.smoothed_amplitude) * amplitude_mix;
-
-        let estimated_frequency_hz =
-            self.zero_crossings as f32 * self.sample_rate as f32 / (2.0 * frame_count as f32);
-        let target_frequency_position =
-            ((estimated_frequency_hz.clamp(70.0, 420.0) - 70.0) / 350.0).clamp(0.0, 1.0);
-        self.smoothed_frequency_position +=
-            (target_frequency_position - self.smoothed_frequency_position) * 0.28;
-
-        if let Ok(mut points) = queue.try_lock() {
-            while points.len() >= MAX_HAPTIC_QUEUE_POINTS {
-                points.pop_front();
-            }
-            points.push_back(HapticControlPoint {
-                amplitude: self.smoothed_amplitude.clamp(0.0, 1.0),
-                frequency_position: self.smoothed_frequency_position.clamp(0.0, 1.0),
-            });
-        }
-
-        self.accumulated_frames = 0;
-        self.sum_squares = 0.0;
-        self.zero_crossings = 0;
-    }
-}
-
-#[derive(Clone)]
-struct HapticCapture {
-    enabled: Arc<AtomicBool>,
-    queue: Arc<Mutex<VecDeque<HapticControlPoint>>>,
-    analyzer: Arc<Mutex<HapticAnalyzer>>,
-}
-
-impl HapticCapture {
-    fn new(
-        enabled: Arc<AtomicBool>,
-        queue: Arc<Mutex<VecDeque<HapticControlPoint>>>,
-        sample_rate: u32,
-        channels: usize,
-    ) -> Self {
-        Self {
-            enabled,
-            queue,
-            analyzer: Arc::new(Mutex::new(HapticAnalyzer::new(sample_rate, channels))),
-        }
-    }
-
-    /// Returns true when normal speaker output should be silenced.
-    fn process(&self, samples: &[f32], intensity: f32) -> bool {
-        if !self.enabled.load(Ordering::Relaxed) {
-            if let Ok(mut analyzer) = self.analyzer.try_lock() {
-                analyzer.reset();
-            }
-            return false;
-        }
-        if let Ok(mut analyzer) = self.analyzer.try_lock() {
-            analyzer.push(samples, intensity, &self.queue);
-        }
-        true
-    }
-}
-
 #[derive(Clone, Debug)]
 struct AudioQualitySettings {
     peak_protection_enabled: bool,
@@ -640,8 +488,6 @@ struct PlayerState {
     underrun_count: Arc<AtomicU64>,
     clipped_sample_count: Arc<AtomicU64>,
     peak_bits: Arc<AtomicU64>,
-    haptic_enabled: Arc<AtomicBool>,
-    haptic_queue: Arc<Mutex<VecDeque<HapticControlPoint>>>,
     queue_headroom_history: VecDeque<(Instant, u32)>,
 }
 
@@ -667,8 +513,6 @@ lazy_static::lazy_static! {
         underrun_count: Arc::new(AtomicU64::new(0)),
         clipped_sample_count: Arc::new(AtomicU64::new(0)),
         peak_bits: Arc::new(AtomicU64::new(0.0f64.to_bits())),
-        haptic_enabled: Arc::new(AtomicBool::new(false)),
-        haptic_queue: Arc::new(Mutex::new(VecDeque::new())),
         queue_headroom_history: VecDeque::new(),
     });
 }
@@ -837,8 +681,6 @@ fn build_output(
     underrun_count: Arc<AtomicU64>,
     live_volume: Arc<Mutex<f32>>,
     quality_settings: Arc<Mutex<AudioQualitySettings>>,
-    haptic_enabled: Arc<AtomicBool>,
-    haptic_queue: Arc<Mutex<VecDeque<HapticControlPoint>>>,
     output_buffer_ms: u32,
     output_latency_mode: String,
 ) -> Result<(SendStream, OutputDeviceInfo, Arc<AudioBuffer>), String> {
@@ -894,7 +736,6 @@ fn build_output(
     let sample_rate = config.sample_rate.0;
     let channels = config.channels as u32;
     let ch = channels as usize;
-    let haptic_capture = HapticCapture::new(haptic_enabled, haptic_queue, sample_rate, ch);
 
     let buffer_ms = output_buffer_ms.clamp(60, 1500) as usize;
     let capacity = ((sample_rate as usize * ch * buffer_ms) / 1000).max(8192);
@@ -908,7 +749,6 @@ fn build_output(
                     let fp = frames_played.clone();
                     let uc = underrun_count.clone();
                     let vol = live_volume.clone();
-                    let haptics = haptic_capture.clone();
                     device
                         .build_output_stream(
                             $stream_config,
@@ -920,10 +760,7 @@ fn build_output(
                                     uc.fetch_add(1, Ordering::Relaxed);
                                 }
                                 let output_volume = current_output_volume(&vol);
-                                let motor_audio_active = haptics.process(&data[..n], output_volume);
-                                if motor_audio_active {
-                                    data[..n].fill(0.0);
-                                } else if (output_volume - 1.0).abs() > 0.001 {
+                                if (output_volume - 1.0).abs() > 0.001 {
                                     for sample in &mut data[..n] {
                                         *sample *= output_volume;
                                     }
@@ -946,7 +783,6 @@ fn build_output(
                     let uc = underrun_count.clone();
                     let qs = quality_settings.clone();
                     let vol = live_volume.clone();
-                    let haptics = haptic_capture.clone();
                     let mut tmp = Vec::<f32>::new();
                     let mut dither = TpdfDither::new(0xA17E_51A3_59C3_0D42);
                     device
@@ -963,19 +799,14 @@ fn build_output(
                                 let dither_enabled =
                                     qs.lock().unwrap_or_else(|e| e.into_inner()).dither_enabled;
                                 let output_volume = current_output_volume(&vol);
-                                let motor_audio_active = haptics.process(&tmp[..n], output_volume);
-                                if motor_audio_active {
-                                    data[..n].fill(0);
-                                } else {
-                                    for i in 0..n {
-                                        let sample = tmp[i] * output_volume;
-                                        let v = if dither_enabled {
-                                            dither.apply(sample, 1.0 / 32768.0)
-                                        } else {
-                                            sample
-                                        };
-                                        data[i] = (v.clamp(-1.0, 1.0) * 32767.0) as i16;
-                                    }
+                                for i in 0..n {
+                                    let sample = tmp[i] * output_volume;
+                                    let v = if dither_enabled {
+                                        dither.apply(sample, 1.0 / 32768.0)
+                                    } else {
+                                        sample
+                                    };
+                                    data[i] = (v.clamp(-1.0, 1.0) * 32767.0) as i16;
                                 }
                                 for i in n..data.len() {
                                     data[i] = 0;
@@ -995,7 +826,6 @@ fn build_output(
                     let uc = underrun_count.clone();
                     let qs = quality_settings.clone();
                     let vol = live_volume.clone();
-                    let haptics = haptic_capture.clone();
                     let mut tmp = Vec::<f32>::new();
                     let mut dither = TpdfDither::new(0x9E37_79B9_7F4A_7C15);
                     device
@@ -1012,20 +842,14 @@ fn build_output(
                                 let dither_enabled =
                                     qs.lock().unwrap_or_else(|e| e.into_inner()).dither_enabled;
                                 let output_volume = current_output_volume(&vol);
-                                let motor_audio_active = haptics.process(&tmp[..n], output_volume);
-                                if motor_audio_active {
-                                    data[..n].fill(32768);
-                                } else {
-                                    for i in 0..n {
-                                        let sample = tmp[i] * output_volume;
-                                        let v = if dither_enabled {
-                                            dither.apply(sample, 1.0 / 65536.0)
-                                        } else {
-                                            sample
-                                        };
-                                        data[i] =
-                                            ((v.clamp(-1.0, 1.0) * 0.5 + 0.5) * 65535.0) as u16;
-                                    }
+                                for i in 0..n {
+                                    let sample = tmp[i] * output_volume;
+                                    let v = if dither_enabled {
+                                        dither.apply(sample, 1.0 / 65536.0)
+                                    } else {
+                                        sample
+                                    };
+                                    data[i] = ((v.clamp(-1.0, 1.0) * 0.5 + 0.5) * 65535.0) as u16;
                                 }
                                 for i in n..data.len() {
                                     data[i] = 0;
@@ -1045,7 +869,6 @@ fn build_output(
                     let uc = underrun_count.clone();
                     let qs = quality_settings.clone();
                     let vol = live_volume.clone();
-                    let haptics = haptic_capture.clone();
                     let mut tmp = Vec::<f32>::new();
                     let mut dither = TpdfDither::new(0xD1B5_4A32_D192_ED03);
                     device
@@ -1062,19 +885,14 @@ fn build_output(
                                 let dither_enabled =
                                     qs.lock().unwrap_or_else(|e| e.into_inner()).dither_enabled;
                                 let output_volume = current_output_volume(&vol);
-                                let motor_audio_active = haptics.process(&tmp[..n], output_volume);
-                                if motor_audio_active {
-                                    data[..n].fill(0);
-                                } else {
-                                    for i in 0..n {
-                                        let sample = tmp[i] * output_volume;
-                                        let v = if dither_enabled {
-                                            dither.apply(sample, 1.0 / 2_147_483_648.0)
-                                        } else {
-                                            sample
-                                        };
-                                        data[i] = (v.clamp(-1.0, 1.0) * 2147483647.0) as i32;
-                                    }
+                                for i in 0..n {
+                                    let sample = tmp[i] * output_volume;
+                                    let v = if dither_enabled {
+                                        dither.apply(sample, 1.0 / 2_147_483_648.0)
+                                    } else {
+                                        sample
+                                    };
+                                    data[i] = (v.clamp(-1.0, 1.0) * 2147483647.0) as i32;
                                 }
                                 for i in n..data.len() {
                                     data[i] = 0;
@@ -1094,7 +912,6 @@ fn build_output(
                     let uc = underrun_count.clone();
                     let qs = quality_settings.clone();
                     let vol = live_volume.clone();
-                    let haptics = haptic_capture.clone();
                     let mut tmp = Vec::<f32>::new();
                     let mut dither = TpdfDither::new(0x94D0_49BB_1331_11EB);
                     device
@@ -1111,19 +928,14 @@ fn build_output(
                                 let dither_enabled =
                                     qs.lock().unwrap_or_else(|e| e.into_inner()).dither_enabled;
                                 let output_volume = current_output_volume(&vol);
-                                let motor_audio_active = haptics.process(&tmp[..n], output_volume);
-                                if motor_audio_active {
-                                    data[..n].fill(128);
-                                } else {
-                                    for i in 0..n {
-                                        let sample = tmp[i] * output_volume;
-                                        let v = if dither_enabled {
-                                            dither.apply(sample, 1.0 / 256.0)
-                                        } else {
-                                            sample
-                                        };
-                                        data[i] = ((v.clamp(-1.0, 1.0) * 0.5 + 0.5) * 255.0) as u8;
-                                    }
+                                for i in 0..n {
+                                    let sample = tmp[i] * output_volume;
+                                    let v = if dither_enabled {
+                                        dither.apply(sample, 1.0 / 256.0)
+                                    } else {
+                                        sample
+                                    };
+                                    data[i] = ((v.clamp(-1.0, 1.0) * 0.5 + 0.5) * 255.0) as u8;
                                 }
                                 for i in n..data.len() {
                                     data[i] = 0;
@@ -1142,7 +954,6 @@ fn build_output(
                     let fp = frames_played.clone();
                     let uc = underrun_count.clone();
                     let vol = live_volume.clone();
-                    let haptics = haptic_capture.clone();
                     let mut tmp = Vec::<f32>::new();
                     device
                         .build_output_stream(
@@ -1156,13 +967,8 @@ fn build_output(
                                     uc.fetch_add(1, Ordering::Relaxed);
                                 }
                                 let output_volume = current_output_volume(&vol);
-                                let motor_audio_active = haptics.process(&tmp[..n], output_volume);
-                                if motor_audio_active {
-                                    data[..n].fill(0.0);
-                                } else {
-                                    for i in 0..n {
-                                        data[i] = (tmp[i] * output_volume) as f64;
-                                    }
+                                for i in 0..n {
+                                    data[i] = (tmp[i] * output_volume) as f64;
                                 }
                                 for i in n..data.len() {
                                     data[i] = 0.0;
@@ -1255,12 +1061,6 @@ pub fn start_playback(
     let output_buffer_ms = state.output_buffer_ms;
     let output_latency_mode = state.output_latency_mode.clone();
     let quality_settings = state.quality_settings.clone();
-    let haptic_enabled = state.haptic_enabled.clone();
-    let haptic_queue = state.haptic_queue.clone();
-    haptic_queue
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .clear();
     let underrun_count = Arc::new(AtomicU64::new(0));
     let clipped_sample_count = Arc::new(AtomicU64::new(0));
     let peak_bits = Arc::new(AtomicU64::new(0.0f64.to_bits()));
@@ -1278,8 +1078,6 @@ pub fn start_playback(
         underrun_count.clone(),
         volume.clone(),
         quality_settings.clone(),
-        haptic_enabled,
-        haptic_queue,
         output_buffer_ms,
         output_latency_mode,
     )?;
@@ -1400,11 +1198,6 @@ pub fn pause_playback() -> Result<(), String> {
     if let Some(s) = &state.stream {
         s.0.pause().map_err(|e| e.to_string())?;
     }
-    state
-        .haptic_queue
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .clear();
     Ok(())
 }
 
@@ -1431,11 +1224,6 @@ pub fn seek_playback(secs: f64) -> Result<(), String> {
         Ordering::SeqCst,
     );
     state.stream_finished.store(false, Ordering::SeqCst);
-    state
-        .haptic_queue
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .clear();
     state.queue_headroom_history.clear();
     Ok(())
 }
@@ -1450,11 +1238,6 @@ pub fn stop_playback() -> Result<(), String> {
     state.stream = None;
     state.buffer = None;
     state.stream_finished.store(false, Ordering::SeqCst);
-    state
-        .haptic_queue
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .clear();
     state.queue_headroom_history.clear();
     Ok(())
 }
@@ -1464,40 +1247,6 @@ pub fn set_volume(vol: f32) -> Result<(), String> {
     let state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
     *state.volume.lock().unwrap_or_else(|e| e.into_inner()) = vol;
     Ok(())
-}
-
-pub fn set_motor_audio_enabled(enabled: bool) -> Result<(), String> {
-    let state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
-    state.haptic_enabled.store(enabled, Ordering::SeqCst);
-    state
-        .haptic_queue
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .clear();
-    Ok(())
-}
-
-pub fn drain_motor_audio_control_points(max_points: i32) -> Vec<f64> {
-    let state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
-    if !state.haptic_enabled.load(Ordering::Relaxed) {
-        return Vec::new();
-    }
-
-    let mut queue = state.haptic_queue.lock().unwrap_or_else(|e| e.into_inner());
-    let count = (max_points.max(0) as usize).min(queue.len());
-    let mut values = Vec::with_capacity(count * 2);
-    for _ in 0..count {
-        let Some(point) = queue.pop_front() else {
-            break;
-        };
-        values.push(point.amplitude as f64);
-        values.push(point.frequency_position as f64);
-    }
-    values
-}
-
-pub fn motor_audio_frame_duration_ms() -> i32 {
-    HAPTIC_FRAME_DURATION_MS as i32
 }
 
 pub fn set_pitch(pitch_val: f64, pitch_algo: String) -> Result<(), String> {
@@ -1629,46 +1378,6 @@ pub fn is_finished() -> bool {
     let _scope = profiler::scope("audio::player::is_finished");
     let state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
     state.stream_finished.load(Ordering::Relaxed)
-}
-
-#[cfg(test)]
-mod motor_audio_tests {
-    use super::*;
-
-    #[test]
-    fn silence_produces_zero_amplitude_control_points() {
-        let queue = Mutex::new(VecDeque::new());
-        let mut analyzer = HapticAnalyzer::new(1_000, 1);
-        analyzer.push(&vec![0.0; 20], 1.0, &queue);
-
-        let points = queue.lock().unwrap();
-        assert_eq!(points.len(), 2);
-        assert!(points.iter().all(|point| point.amplitude == 0.0));
-    }
-
-    #[test]
-    fn alternating_signal_produces_audible_motor_envelope() {
-        let queue = Mutex::new(VecDeque::new());
-        let mut analyzer = HapticAnalyzer::new(1_000, 1);
-        let samples = (0..20)
-            .map(|index| if index % 2 == 0 { -0.5 } else { 0.5 })
-            .collect::<Vec<_>>();
-        analyzer.push(&samples, 1.0, &queue);
-
-        let points = queue.lock().unwrap();
-        assert_eq!(points.len(), 2);
-        assert!(points.iter().any(|point| point.amplitude > 0.2));
-        assert!(points.iter().all(|point| point.frequency_position > 0.5));
-    }
-
-    #[test]
-    fn control_point_queue_stays_bounded_to_limit_latency() {
-        let queue = Mutex::new(VecDeque::new());
-        let mut analyzer = HapticAnalyzer::new(1_000, 1);
-        analyzer.push(&vec![0.4; 2_000], 1.0, &queue);
-
-        assert_eq!(queue.lock().unwrap().len(), MAX_HAPTIC_QUEUE_POINTS);
-    }
 }
 
 fn normalize_rubberband_window(value: &str) -> String {

@@ -79,26 +79,6 @@ class _SettingsDeveloperTabState extends State<SettingsDeveloperTab> {
     }
   }
 
-  Future<void> _setMotorAudioEnabled(bool value) async {
-    final changed = await widget.audioProvider.setMotorAudioEnabled(value);
-    if (!mounted) {
-      return;
-    }
-    if (!changed) {
-      showAetherToast(
-        context,
-        message: widget.audioProvider.motorAudioCapabilityReason,
-        kind: AetherToastKind.warning,
-      );
-      return;
-    }
-    showAetherToast(
-      context,
-      message: value ? '已切换为仅马达实验输出' : '已恢复普通音频输出',
-      kind: value ? AetherToastKind.warning : AetherToastKind.success,
-    );
-  }
-
   void _resetStats() {
     music.resetAudioPerformanceStats();
     _refreshReport();
@@ -194,72 +174,6 @@ class _SettingsDeveloperTabState extends State<SettingsDeveloperTab> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (Platform.isAndroid) ...[
-          const AetherSectionHeader(title: '实验性硬件输出'),
-          AetherSwitchTile(
-            title: widget.audioProvider.motorAudioEnabled
-                ? '线性马达音频已启用'
-                : '线性马达音频输出（Android 16）',
-            subtitle: widget.audioProvider.motorAudioSupported
-                ? '把实时音乐压缩成 Android 16 振动包络，仅由手机马达输出；扬声器会被静音。'
-                : widget.audioProvider.motorAudioCapabilityReason,
-            value: widget.audioProvider.motorAudioEnabled,
-            enabled: widget.audioProvider.motorAudioSupported,
-            onChanged: _setMotorAudioEnabled,
-          ),
-          const SizedBox(height: AetherSpace.sm),
-          AetherSurface(
-            level: AetherSurfaceLevel.flat,
-            color: cfg.bgHover,
-            padding: const EdgeInsets.all(AetherSpace.lg),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  widget.audioProvider.motorAudioSupported
-                      ? '这是低带宽实验模式，不等同于把 PCM 直接接入马达功放。音量滑块会同时作为马达强度；首次输出会有约 80ms 缓冲。'
-                      : '当前不可用：${widget.audioProvider.motorAudioCapabilityReason}',
-                  style: AetherType.bodySmStyle(
-                    cfg.textSecondary,
-                  ).copyWith(height: 1.5),
-                ),
-                if (widget.audioProvider.motorAudioSupported) ...[
-                  const SizedBox(height: AetherSpace.md),
-                  Wrap(
-                    spacing: AetherSpace.md,
-                    runSpacing: AetherSpace.sm,
-                    children: [
-                      SettingsInfoPill(
-                        cfg: cfg,
-                        label: '系统',
-                        value: 'API ${widget.audioProvider.motorAudioSdkInt}',
-                      ),
-                      SettingsInfoPill(
-                        cfg: cfg,
-                        label: '控制点',
-                        value:
-                            '${widget.audioProvider.motorAudioMinControlPointMs} ms',
-                      ),
-                      SettingsInfoPill(
-                        cfg: cfg,
-                        label: '频率范围',
-                        value:
-                            '${widget.audioProvider.motorAudioMinFrequencyHz.toStringAsFixed(0)}–${widget.audioProvider.motorAudioMaxFrequencyHz.toStringAsFixed(0)} Hz',
-                      ),
-                      SettingsInfoPill(
-                        cfg: cfg,
-                        label: '谐振频率',
-                        value:
-                            '${widget.audioProvider.motorAudioResonantFrequencyHz.toStringAsFixed(0)} Hz',
-                      ),
-                    ],
-                  ),
-                ],
-              ],
-            ),
-          ),
-          const AetherDivider(),
-        ],
         const AetherSectionHeader(title: '开发者模式'),
         AetherSwitchTile(
           title: enabled ? '性能统计已启用' : '启用性能统计',
