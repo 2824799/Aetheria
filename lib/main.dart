@@ -11,6 +11,7 @@ import 'package:aetheria/core/providers/sync_provider.dart';
 import 'package:aetheria/core/providers/floating_lyrics_provider.dart';
 import 'package:aetheria/features/layout/main_layout.dart';
 import 'package:aetheria/features/lyrics/floating_lyrics_bridge.dart';
+import 'package:aetheria/features/lyrics/super_lyric_bridge.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -88,10 +89,7 @@ class _BootstrapErrorScreen extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'Aetheria 启动失败',
-                style: AetherType.displayStyle(cfg.danger),
-              ),
+              Text('Aetheria 启动失败', style: AetherType.displayStyle(cfg.danger)),
               const SizedBox(height: AetherSpace.xl),
               Text(
                 '底层初始化没有完成。下面是完整诊断信息，可直接复制给开发者。',
@@ -108,10 +106,9 @@ class _BootstrapErrorScreen extends StatelessWidget {
                 ),
                 child: SelectableText(
                   error,
-                  style: AetherType.bodySmStyle(cfg.textPrimary).copyWith(
-                    fontFamily: 'monospace',
-                    height: 1.45,
-                  ),
+                  style: AetherType.bodySmStyle(
+                    cfg.textPrimary,
+                  ).copyWith(fontFamily: 'monospace', height: 1.45),
                 ),
               ),
             ],
@@ -132,7 +129,9 @@ class AetheriaApp extends StatelessWidget {
       title: 'Aetheria',
       theme: themeProvider.themeData,
       debugShowCheckedModeBanner: false,
-      home: const FloatingLyricsBridge(child: MainLayout()),
+      home: const SuperLyricBridge(
+        child: FloatingLyricsBridge(child: MainLayout()),
+      ),
     );
   }
 }

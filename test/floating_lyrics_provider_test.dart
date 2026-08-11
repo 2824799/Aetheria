@@ -45,4 +45,20 @@ void main() {
       expect(notifiedCount, equals(2));
     },
   );
+
+  test('SuperLyric output is optional and disabled by default', () async {
+    final provider = FloatingLyricsProvider();
+    await provider.load();
+
+    expect(provider.superLyricEnabled, isFalse);
+
+    await provider.setSuperLyricEnabled(true);
+    expect(provider.superLyricEnabled, isTrue);
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(
+      prefs.getBool('aetheria-floating-lyrics-super-lyric-enabled'),
+      isTrue,
+    );
+  });
 }

@@ -8,6 +8,7 @@ class FloatingLyricsProvider extends ChangeNotifier {
   static const double unsetWindowPos = -99999.0;
 
   bool enabled = false;
+  bool superLyricEnabled = false;
   bool locked = false;
   bool alwaysOnTop = true;
   bool pauseFade = true;
@@ -46,6 +47,8 @@ class FloatingLyricsProvider extends ChangeNotifier {
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
     enabled = prefs.getBool('$_prefix-enabled') ?? enabled;
+    superLyricEnabled =
+        prefs.getBool('$_prefix-super-lyric-enabled') ?? superLyricEnabled;
     locked = prefs.getBool('$_prefix-locked') ?? locked;
     alwaysOnTop = prefs.getBool('$_prefix-always-on-top') ?? alwaysOnTop;
     pauseFade = prefs.getBool('$_prefix-pause-fade') ?? pauseFade;
@@ -110,6 +113,12 @@ class FloatingLyricsProvider extends ChangeNotifier {
     enabled = value;
     notifyListeners();
     await _setBool('enabled', value);
+  }
+
+  Future<void> setSuperLyricEnabled(bool value) async {
+    superLyricEnabled = value;
+    notifyListeners();
+    await _setBool('super-lyric-enabled', value);
   }
 
   Future<void> setLocked(bool value) async {

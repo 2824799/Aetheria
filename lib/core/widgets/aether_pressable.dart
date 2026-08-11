@@ -16,6 +16,7 @@ class AetherPressable extends StatefulWidget {
   final Widget child;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
+  final GestureLongPressStartCallback? onLongPressStart;
   final VoidCallback? onSecondaryTap;
   final bool enabled;
   final bool enableHover;
@@ -33,6 +34,7 @@ class AetherPressable extends StatefulWidget {
     required this.child,
     this.onTap,
     this.onLongPress,
+    this.onLongPressStart,
     this.onSecondaryTap,
     this.enabled = true,
     this.enableHover = true,
@@ -60,6 +62,7 @@ class _AetherPressableState extends State<AetherPressable> {
       widget.enabled &&
       (widget.onTap != null ||
           widget.onLongPress != null ||
+          widget.onLongPressStart != null ||
           widget.onSecondaryTap != null);
 
   void _setHovered(bool value) {
@@ -76,11 +79,16 @@ class _AetherPressableState extends State<AetherPressable> {
   Widget build(BuildContext context) {
     final cfg = context.tokens;
     final reduce = AetherMotion.reduce(context);
-    final scale =
-        (!reduce && _pressed && _canInteract) ? widget.pressScale : 1.0;
-    final radius = widget.borderRadius ?? BorderRadius.circular(AetherRadius.md);
+    final scale = (!reduce && _pressed && _canInteract)
+        ? widget.pressScale
+        : 1.0;
+    final radius =
+        widget.borderRadius ?? BorderRadius.circular(AetherRadius.md);
     final showHover =
-        widget.enableHover && _finePointer && _hovered && widget.hoverColor != null;
+        widget.enableHover &&
+        _finePointer &&
+        _hovered &&
+        widget.hoverColor != null;
     final showFocusRing = widget.showFocus && _focused && _canInteract;
 
     Widget child = AnimatedScale(
@@ -127,10 +135,14 @@ class _AetherPressableState extends State<AetherPressable> {
               ),
             },
       child: MouseRegion(
-        cursor: widget.cursor ??
-            (_canInteract ? SystemMouseCursors.click : SystemMouseCursors.basic),
+        cursor:
+            widget.cursor ??
+            (_canInteract
+                ? SystemMouseCursors.click
+                : SystemMouseCursors.basic),
         onEnter: (event) {
-          final fine = event.kind == PointerDeviceKind.mouse ||
+          final fine =
+              event.kind == PointerDeviceKind.mouse ||
               event.kind == PointerDeviceKind.trackpad;
           if (_finePointer != fine) {
             setState(() => _finePointer = fine);
@@ -149,10 +161,12 @@ class _AetherPressableState extends State<AetherPressable> {
           behavior: HitTestBehavior.opaque,
           onTap: _canInteract ? widget.onTap : null,
           onLongPress: _canInteract ? widget.onLongPress : null,
+          onLongPressStart: _canInteract ? widget.onLongPressStart : null,
           onSecondaryTap: _canInteract ? widget.onSecondaryTap : null,
           onTapDown: (details) {
             if (!_canInteract) return;
-            final fine = details.kind == PointerDeviceKind.mouse ||
+            final fine =
+                details.kind == PointerDeviceKind.mouse ||
                 details.kind == PointerDeviceKind.trackpad;
             if (_finePointer != fine) {
               setState(() {
@@ -189,9 +203,6 @@ class _AetherPressableState extends State<AetherPressable> {
       );
     }
 
-    return Opacity(
-      opacity: widget.enabled ? 1 : 0.45,
-      child: child,
-    );
+    return Opacity(opacity: widget.enabled ? 1 : 0.45, child: child);
   }
 }

@@ -111,6 +111,7 @@ class MainActivity : FlutterActivity() {
     override fun onDestroy() {
         unregisterAudioRouteCallback()
         releaseMulticastLock()
+        SuperLyricPublisher.dispose()
         mediaSession?.release()
         mediaSession = null
         super.onDestroy()
@@ -187,6 +188,29 @@ class MainActivity : FlutterActivity() {
                 }
                 "requestOverlayPermission" -> {
                     requestOverlayPermission()
+                    result.success(null)
+                }
+                "initializeSuperLyric" -> {
+                    result.success(SuperLyricPublisher.initialize())
+                }
+                "publishSuperLyric" -> {
+                    @Suppress("UNCHECKED_CAST")
+                    result.success(
+                        SuperLyricPublisher.publish(
+                            call.arguments as? Map<String, Any?> ?: emptyMap(),
+                        ),
+                    )
+                }
+                "stopSuperLyric" -> {
+                    @Suppress("UNCHECKED_CAST")
+                    result.success(
+                        SuperLyricPublisher.stop(
+                            call.arguments as? Map<String, Any?> ?: emptyMap(),
+                        ),
+                    )
+                }
+                "disposeSuperLyric" -> {
+                    SuperLyricPublisher.dispose()
                     result.success(null)
                 }
                 "showFloatingLyrics" -> {

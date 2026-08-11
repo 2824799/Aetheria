@@ -122,6 +122,38 @@ class NativeAudioHelper {
     } catch (_) {}
   }
 
+  static Future<bool> initializeSuperLyric() async {
+    try {
+      return await _channel.invokeMethod<bool>('initializeSuperLyric') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<bool> publishSuperLyric(Map<String, dynamic> payload) async {
+    try {
+      return await _channel.invokeMethod<bool>('publishSuperLyric', payload) ??
+          false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<bool> stopSuperLyric(Map<String, dynamic> payload) async {
+    try {
+      return await _channel.invokeMethod<bool>('stopSuperLyric', payload) ??
+          false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<void> disposeSuperLyric() async {
+    try {
+      await _channel.invokeMethod('disposeSuperLyric');
+    } catch (_) {}
+  }
+
   static Future<void> showFloatingLyrics() async {
     try {
       await _channel.invokeMethod('showFloatingLyrics');

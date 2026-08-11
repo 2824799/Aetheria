@@ -98,6 +98,7 @@ Aetheria 当前已经实现的主要功能包括：
 - 滚动歌词高亮、翻译显示、滚动到某行后从该时间点播放。
 - Windows 桌面悬浮歌词窗口。
 - Android 系统悬浮窗歌词。
+- Android 可选通过 SuperLyricApi 向 SuperLyric 模块发送逐行、逐字、翻译和罗马音歌词。
 - 悬浮歌词样式、颜色、透明度、大小、位置、锁定、置顶、刷新帧率等设置。
 - Android 通知栏播放控制与 MediaSession。
 - Android 导出音频到系统 Downloads/Aetheria。
@@ -1577,6 +1578,7 @@ Android 原生能力：
 - 初始化 Rust / Oboe 所需 Android context。
 - 播放通知栏。
 - MediaSession。
+- 可选 SuperLyric Binder 歌词发布。
 - 通知栏操作回调。
 - 系统 Downloads 导出。
 - 系统悬浮窗歌词。

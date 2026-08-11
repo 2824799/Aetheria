@@ -28,9 +28,7 @@ class SettingsFloatingLyricsTab extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        AetherSectionHeader(
-          title: isDesktop ? '电脑桌面歌词' : '安卓悬浮歌词',
-        ),
+        AetherSectionHeader(title: isDesktop ? '电脑桌面歌词' : '安卓悬浮歌词'),
         AetherSwitchTile(
           title: provider.enabled ? '已显示悬浮歌词' : '显示悬浮歌词',
           subtitle: isDesktop
@@ -54,6 +52,18 @@ class SettingsFloatingLyricsTab extends StatelessWidget {
                     : () => NativeAudioHelper.requestOverlayPermission(),
               );
             },
+          ),
+          const AetherDivider(),
+          const AetherSectionHeader(title: 'SuperLyric 扩展'),
+          AetherSwitchTile(
+            title: provider.superLyricEnabled
+                ? '已向 SuperLyric 发送歌词'
+                : '发送歌词到 SuperLyric',
+            subtitle:
+                '这是独立的可选输出，不会替代应用内歌词或安卓悬浮歌词。'
+                '设备需要安装并启用 SuperLyric 模块；不可用时不会影响正常播放。',
+            value: provider.superLyricEnabled,
+            onChanged: provider.setSuperLyricEnabled,
           ),
         ],
         const AetherDivider(),

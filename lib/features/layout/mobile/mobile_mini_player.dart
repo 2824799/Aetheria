@@ -16,6 +16,7 @@ class MobileMiniPlayer extends StatefulWidget {
   final AppThemeConfig cfg;
   final AudioPlayerProvider audioProvider;
   final VoidCallback onOpenDetail;
+  final VoidCallback onPlayingSongLongPress;
 
   const MobileMiniPlayer({
     super.key,
@@ -23,6 +24,7 @@ class MobileMiniPlayer extends StatefulWidget {
     required this.cfg,
     required this.audioProvider,
     required this.onOpenDetail,
+    required this.onPlayingSongLongPress,
   });
 
   @override
@@ -80,6 +82,11 @@ class _MobileMiniPlayerState extends State<MobileMiniPlayer> {
           children: [
             AetherPressable(
               onTap: widget.onOpenDetail,
+              onLongPressStart: (details) {
+                if (details.localPosition.dx <= 40) {
+                  widget.onPlayingSongLongPress();
+                }
+              },
               borderRadius: BorderRadius.circular(AetherRadius.lg),
               child: Row(
                 children: [
