@@ -40,9 +40,7 @@ dependencies:
   provider: ^6.1.5+1
   path_provider: ^2.1.6
   shared_preferences: ^2.5.5
-  audioplayers: ^6.8.1
   file_picker: 8.1.2
-  audio_session: ^0.2.4
   crypto: ^3.0.6
 dev_dependencies:
   flutter_test:
