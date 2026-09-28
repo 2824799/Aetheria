@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 
 import 'package:aetheria/core/providers/audio_player_provider.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
+import 'package:aetheria/features/lyrics/lyric_timeline.dart';
 import 'package:aetheria/features/player/ui/lyrics/lyrics_shared.dart';
 
 class SyncedLyricsView extends StatefulWidget {
@@ -33,12 +34,36 @@ class SyncedLyricsView extends StatefulWidget {
 
 class _SyncedLyricsViewState extends State<SyncedLyricsView> {
   final ScrollController _controller = ScrollController();
+  late LyricTimeline _timeline;
   Timer? _guideTimer;
   int _lastActiveIndex = -1;
   bool _guideVisible = false;
   bool _autoScrolling = false;
 
   double get _lineExtent => widget.compact ? 72 : 84;
+
+  @override
+  void initState() {
+    super.initState();
+    _parseTimeline();
+  }
+
+  @override
+  void didUpdateWidget(covariant SyncedLyricsView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.content != widget.content ||
+        oldWidget.translation != widget.translation) {
+      _parseTimeline();
+      _lastActiveIndex = -1;
+    }
+  }
+
+  void _parseTimeline() {
+    _timeline = LyricTimeline.parse(
+      content: widget.content,
+      translation: widget.translation,
+    );
+  }
 
   @override
   void dispose() {
@@ -50,9 +75,9 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
   @override
   Widget build(BuildContext context) {
     final audio = context.watch<AudioPlayerProvider>();
-    final lines = parseLyrics(widget.content);
-    final translation = translationByTime(widget.translation);
-    final timed = lines.any((line) => line.timeMs != null);
+    final timeline = _timeline;
+    final lines = timeline.lines;
+    final timed = timeline.hasTimedLines;
     if (lines.isEmpty) {
       return Center(
         child: Text(
@@ -63,7 +88,7 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
     }
 
     final activeIndex = timed
-        ? activeLyricLineIndex(
+        ? LyricTimeline.activeLineIndex(
             lines,
             audio.currentPosition.inMilliseconds + widget.offsetMs,
           )
@@ -107,12 +132,12 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
                 itemBuilder: (context, index) {
                   final line = lines[index];
                   final active = index == activeIndex;
-                  final lineTranslation = line.timeMs == null
-                      ? null
-                      : translation[line.timeMs]?.trim();
+                  final lineTranslation = timeline.translationFor(line);
                   return LyricLineTile(
                     line: line,
-                    translation: lineTranslation,
+                    translation: lineTranslation.isEmpty
+                        ? null
+                        : lineTranslation,
                     active: active,
                     cfg: widget.cfg,
                     compact: widget.compact,
@@ -195,11 +220,11 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
       _guideVisible = false;
     });
   }
-
 }
 
 class LyricLineTile extends StatelessWidget {
-  const LyricLineTile({super.key, 
+  const LyricLineTile({
+    super.key,
     required this.line,
     required this.translation,
     required this.active,
@@ -217,7 +242,9 @@ class LyricLineTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final baseStyle = TextStyle(
       color: active ? cfg.textPrimary : cfg.textSecondary,
-      fontSize: active ? (compact ? AetherType.titleSm : AetherType.title) : (compact ? AetherType.body : AetherType.body),
+      fontSize: active
+          ? (compact ? AetherType.titleSm : AetherType.title)
+          : (compact ? AetherType.body : AetherType.body),
       fontWeight: active ? FontWeight.w700 : FontWeight.w500,
       fontFamilyFallback: lyricsFontFallback,
       height: 1.24,
@@ -269,7 +296,11 @@ class LyricLineTile extends StatelessWidget {
 }
 
 class LyricSeekGuideOverlay extends StatelessWidget {
-  const LyricSeekGuideOverlay({super.key, required this.cfg, required this.onSeek});
+  const LyricSeekGuideOverlay({
+    super.key,
+    required this.cfg,
+    required this.onSeek,
+  });
 
   final AppThemeConfig cfg;
   final VoidCallback? onSeek;
@@ -341,4 +372,3 @@ class LyricDashedLinePainter extends CustomPainter {
     return oldDelegate.color != color;
   }
 }
-

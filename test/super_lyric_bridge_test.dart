@@ -50,6 +50,24 @@ void main() {
     expect(payload, isNot(contains('secondary')));
   });
 
+  test('publishes embedded bilingual lyrics as original and translation', () {
+    final timeline = LyricTimeline.parse(
+      content: '[00:01.000]A bright morning\n[00:01.000]明亮的早晨',
+    );
+    final line =
+        timeline.lines[LyricTimeline.activeLineIndex(timeline.lines, 1500)];
+    final payload = buildSuperLyricPayload(
+      title: 'Test song',
+      line: line,
+      translation: timeline.translationFor(line),
+    );
+
+    expect(payload['line'], 'A bright morning');
+    expect(payload['translation'], '明亮的早晨');
+    expect(payload['startTimeMs'], 1000);
+    expect(payload['endTimeMs'], greaterThan(1000));
+  });
+
   test('timed empty lines hold the current SuperLyric instead of stopping', () {
     final timeline = LyricTimeline.parse(
       content: '''

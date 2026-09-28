@@ -121,7 +121,7 @@ class _SuperLyricBridgeState extends State<SuperLyricBridge> {
 
       final translation = line.timeMs == null
           ? ''
-          : timeline.translationByTime[line.timeMs]?.trim() ?? '';
+          : timeline.translationFor(line);
       final secondary = line.timeMs == null
           ? ''
           : _romanizedByTime[line.timeMs]?.trim() ?? '';

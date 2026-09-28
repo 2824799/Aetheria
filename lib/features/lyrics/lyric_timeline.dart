@@ -9,9 +9,14 @@ class LyricTimeline {
   bool get hasTimedLines => lines.any((line) => line.timeMs != null);
 
   static LyricTimeline parse({required String content, String? translation}) {
+    final lines = parseLines(content);
     return LyricTimeline(
-      lines: parseLines(content),
-      translationByTime: parseTranslationByTime(translation),
+      lines: lines,
+      translationByTime: <int, String>{
+        for (final line in lines)
+          if (line.translation != null) line.timeMs!: line.translation!,
+        ...parseTranslationByTime(translation),
+      },
     );
   }
 
@@ -26,7 +31,7 @@ class LyricTimeline {
       final first = lines.first;
       return LyricFrame(
         line: first.text,
-        translation: _translationFor(first),
+        translation: translationFor(first),
         nextLine: lines.length > 1 ? lines[1].text : '',
         progress: 0,
         activeIndex: 0,
@@ -36,7 +41,7 @@ class LyricTimeline {
     final line = lines[activeIndex];
     return LyricFrame(
       line: line.text,
-      translation: _translationFor(line),
+      translation: translationFor(line),
       nextLine: activeIndex + 1 < lines.length
           ? lines[activeIndex + 1].text
           : '',
@@ -45,16 +50,23 @@ class LyricTimeline {
     );
   }
 
-  String _translationFor(LyricLine line) {
+  String translationFor(LyricLine line) {
     final time = line.timeMs;
     if (time == null) {
       return '';
     }
-    return translationByTime[time]?.trim() ?? '';
+    final explicit = translationByTime[time]?.trim() ?? '';
+    return explicit.isNotEmpty ? explicit : line.translation?.trim() ?? '';
   }
 
-  static List<LyricLine> parseLines(String content) {
-    final timedLines = <LyricLine>[];
+  static List<LyricLine> parseLines(String content) =>
+      _parseLines(content, mergeEmbeddedTranslations: true);
+
+  static List<LyricLine> _parseLines(
+    String content, {
+    required bool mergeEmbeddedTranslations,
+  }) {
+    var timedLines = <LyricLine>[];
     final plainLines = <LyricLine>[];
     final timeReg = RegExp(
       r'\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?(?:,\d{1,8})?\]',
@@ -122,7 +134,10 @@ class LyricTimeline {
       return plainLines.isEmpty ? const <LyricLine>[] : plainLines;
     }
 
-    timedLines.sort((a, b) => (a.timeMs ?? 0).compareTo(b.timeMs ?? 0));
+    timedLines = _groupTimedLines(
+      timedLines,
+      mergeEmbeddedTranslations: mergeEmbeddedTranslations,
+    );
     for (var i = 0; i < timedLines.length; i++) {
       final line = timedLines[i];
       final start = line.timeMs;
@@ -153,13 +168,104 @@ class LyricTimeline {
       return const <int, String>{};
     }
     final result = <int, String>{};
-    for (final line in parseLines(content)) {
+    for (final line in _parseLines(content, mergeEmbeddedTranslations: false)) {
       final time = line.timeMs;
       if (time != null && line.text.trim().isNotEmpty) {
         result[time] = line.text;
       }
     }
     return result;
+  }
+
+  // Some LRC files contain a full original track followed by a translation
+  // track in the same text. Match their timestamps before sorting so the
+  // first occurrence remains the primary lyric even for non-interleaved files.
+  static List<LyricLine> _groupTimedLines(
+    List<LyricLine> lines, {
+    required bool mergeEmbeddedTranslations,
+  }) {
+    final byTime = <int, List<LyricLine>>{};
+    for (final line in lines) {
+      byTime.putIfAbsent(line.timeMs!, () => <LyricLine>[]).add(line);
+    }
+    final hasJapaneseTranslation = byTime.values.any((group) {
+      if (group.length != 2) {
+        return false;
+      }
+      return _scriptFamily(group[0].text) == _LyricScript.japanese &&
+          _scriptFamily(group[1].text) == _LyricScript.han;
+    });
+
+    final result = <LyricLine>[];
+    final times = byTime.keys.toList()..sort();
+    for (final time in times) {
+      final group = byTime[time]!;
+      if (!mergeEmbeddedTranslations ||
+          group.length != 2 ||
+          group[0].text.isEmpty ||
+          group[1].text.isEmpty ||
+          group[0].text == group[1].text) {
+        result.addAll(group);
+        continue;
+      }
+
+      final firstScript = _scriptFamily(group[0].text);
+      final secondScript = _scriptFamily(group[1].text);
+      final differentScripts =
+          firstScript != secondScript &&
+          firstScript != _LyricScript.other &&
+          secondScript != _LyricScript.other;
+      // Kana in other timestamp pairs identifies the original Japanese
+      // track, including short lines written entirely in kanji.
+      final japaneseKanjiPair =
+          hasJapaneseTranslation &&
+          firstScript == _LyricScript.han &&
+          secondScript == _LyricScript.han;
+      if (!differentScripts && !japaneseKanjiPair) {
+        result.addAll(group);
+        continue;
+      }
+
+      final original = group[0];
+      final translation = group[1];
+      result.add(
+        LyricLine(
+          original.timeMs,
+          original.endMs,
+          original.text,
+          original.segments,
+          translation: translation.text,
+        ),
+      );
+    }
+    return result;
+  }
+
+  static _LyricScript _scriptFamily(String text) {
+    var han = false;
+    var latin = false;
+    for (final rune in text.runes) {
+      if ((rune >= 0x3040 && rune <= 0x30ff) ||
+          (rune >= 0xff66 && rune <= 0xff9f)) {
+        return _LyricScript.japanese;
+      }
+      if (rune >= 0xac00 && rune <= 0xd7af) {
+        return _LyricScript.korean;
+      }
+      if ((rune >= 0x3400 && rune <= 0x4dbf) ||
+          (rune >= 0x4e00 && rune <= 0x9fff) ||
+          (rune >= 0xf900 && rune <= 0xfaff)) {
+        han = true;
+      } else if ((rune >= 0x0041 && rune <= 0x005a) ||
+          (rune >= 0x0061 && rune <= 0x007a) ||
+          (rune >= 0x00c0 && rune <= 0x024f)) {
+        latin = true;
+      }
+    }
+    if (han) {
+      return _LyricScript.han;
+    }
+    return latin ? _LyricScript.latin : _LyricScript.other;
   }
 
   static int activeLineIndex(List<LyricLine> lines, int positionMs) {
@@ -326,12 +432,19 @@ class LyricFrame {
 }
 
 class LyricLine {
-  LyricLine(this.timeMs, this.endMs, this.text, this.segments);
+  LyricLine(
+    this.timeMs,
+    this.endMs,
+    this.text,
+    this.segments, {
+    this.translation,
+  });
 
   final int? timeMs;
   int? endMs;
   final String text;
   final List<LyricSegment> segments;
+  final String? translation;
 }
 
 class LyricSegment {
@@ -355,3 +468,5 @@ class _ParsedLineContent {
   final String text;
   final List<LyricSegment> segments;
 }
+
+enum _LyricScript { japanese, korean, han, latin, other }
