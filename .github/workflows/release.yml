@@ -188,8 +188,20 @@ jobs:
       - name: Prepare Android SDK
         run: |
           flutter config --jdk-dir "$JAVA_HOME"
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;28.2.13676358' 'cmake;3.22.1'
+          android_sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          if [[ -z "$android_sdk_root" ]]; then
+            android_sdk_root="$(flutter config --machine | jq -r '.android-sdk // empty')"
+          fi
+          sdkmanager="$android_sdk_root/cmdline-tools/latest/bin/sdkmanager"
+          if [[ ! -x "$sdkmanager" ]]; then
+            sdkmanager="$(find "$android_sdk_root/cmdline-tools" -type f -name sdkmanager -perm -u+x -print -quit 2>/dev/null || true)"
+          fi
+          if [[ -z "$sdkmanager" || ! -x "$sdkmanager" ]]; then
+            echo "Unable to locate sdkmanager under $android_sdk_root" >&2
+            exit 1
+          fi
+          yes | "$sdkmanager" --licenses >/dev/null || true
+          "$sdkmanager" 'platforms;android-36' 'build-tools;36.0.0' 'ndk;28.2.13676358' 'cmake;3.22.1'
       - name: Clean generated Flutter and Gradle state
         run: flutter clean
       - run: flutter pub get --enforce-lockfile
