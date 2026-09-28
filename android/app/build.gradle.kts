@@ -1,7 +1,33 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+}
+
+val keystorePropertiesFile = rootProject.file("key.properties")
+val keystoreProperties = Properties().apply {
+    if (keystorePropertiesFile.isFile) {
+        keystorePropertiesFile.inputStream().use { load(it) }
+    }
+}
+val hasReleaseSigning = keystorePropertiesFile.isFile
+val requireReleaseSigning =
+    providers.environmentVariable("AETHERIA_REQUIRE_RELEASE_SIGNING").orNull == "true"
+
+require(!requireReleaseSigning || hasReleaseSigning) {
+    "Official releases require android/key.properties and a release keystore."
+}
+if (hasReleaseSigning) {
+    for (key in listOf("storeFile", "storePassword", "keyAlias", "keyPassword")) {
+        require(!keystoreProperties.getProperty(key).isNullOrBlank()) {
+            "Missing release signing property: $key"
+        }
+    }
+    require(rootProject.file(keystoreProperties.getProperty("storeFile")).isFile) {
+        "The configured Android release keystore does not exist."
+    }
 }
 
 android {
@@ -31,11 +57,24 @@ android {
         }
     }
 
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = rootProject.file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            // Local development can use debug signing; the release workflow
+            // requires the release keystore through AETHERIA_REQUIRE_RELEASE_SIGNING.
+            signingConfig = signingConfigs.getByName(
+                if (hasReleaseSigning) "release" else "debug"
+            )
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",

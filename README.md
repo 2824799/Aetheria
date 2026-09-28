@@ -5,9 +5,10 @@ Aetheria 是一个以 **Flutter + Rust** 为核心技术栈构建的本地音乐
 当前代码重点面向：
 
 - **Windows 桌面端**：完整桌面布局、Rust 原生音频输出、桌面悬浮歌词透明窗口。
+- **Linux 桌面端**：Flutter/GTK 布局、Rust 原生音频与桌面悬浮歌词窗口。
 - **Android 移动端**：移动端布局、播放通知栏、MediaSession、系统悬浮窗歌词、局域网同步辅助能力。
 
-项目已经从早期方案演进为当前的 **Flutter UI + Provider 状态层 + Rust 数据/音频核心 + 平台原生桥接** 架构。Flutter 负责界面、交互和状态编排；Rust 负责 SQLite 数据库、音频文件导入、元数据解析、封面提取、歌词持久化、音频解码/播放/DSP；Android Kotlin 与 Windows C++ 补齐通知栏、悬浮窗、设备名、组播锁、窗口绘制等平台能力。
+项目已经从早期方案演进为当前的 **Flutter UI + Provider 状态层 + Rust 数据/音频核心 + 平台原生桥接** 架构。Flutter 负责界面、交互和状态编排；Rust 负责 SQLite 数据库、音频文件导入、元数据解析、封面提取、歌词持久化、音频解码/播放/DSP；Android Kotlin、Windows C++ 与 Linux GTK 补齐通知栏、悬浮窗、设备名、组播锁、窗口绘制等平台能力。
 
 > 本 README 按当前仓库代码重新整理，优先以 `lib/`、`rust/`、`android/`、`windows/` 的真实实现为准，而不是旧文档中的历史描述。
 
@@ -23,6 +24,7 @@ Aetheria 是一个以 **Flutter + Rust** 为核心技术栈构建的本地音乐
 - [开发环境](#开发环境)
 - [快速开始](#快速开始)
 - [常用开发命令](#常用开发命令)
+- [正式发布](#正式发布)
 - [平台说明](#平台说明)
 - [Flutter / Rust 桥接说明](#flutter--rust-桥接说明)
 - [音频引擎说明](#音频引擎说明)
@@ -49,7 +51,7 @@ Aetheria 面向下面这些场景：
 
 | 模块 | 当前实现 |
 | --- | --- |
-| 桌面端 | Windows 是当前重点支持平台 |
+| 桌面端 | Windows x64、Linux x64 |
 | 移动端 | Android 是当前重点支持平台 |
 | UI 框架 | Flutter |
 | 状态管理 | `provider` / `ChangeNotifier` |
@@ -62,7 +64,7 @@ Aetheria 面向下面这些场景：
 | 歌词来源 | 本地、LRCLIB、网易云音乐、QQ 音乐、酷狗音乐 |
 | 局域网同步 | UDP 发现 + HTTP 拉取 + 临时 token 授权 + 镜像覆盖 |
 | 主题 | Dark、Light、Pink、Pink Dark |
-| 主要构建目标 | Windows、Android |
+| 主要构建目标 | Windows x64、Linux x64、Android arm64 APK / 多架构 AAB |
 
 ## 功能总览
 
@@ -1523,7 +1525,7 @@ flutter build apk --target-platform android-arm64
 build/app/outputs/flutter-apk/app-release.apk
 ```
 
-当前 Android release 构建仍使用 debug signingConfig，正式发布前需要替换为自己的签名配置。
+本地未配置 `android/key.properties` 时，Release 构建可使用调试签名方便开发。正式发布工作流强制检查 Release 密钥，并使用同一密钥为 APK 与 AAB 签名。不要将调试签名的本地包当作正式安装包分发。
 
 ## 常用开发命令
 
@@ -1537,6 +1539,34 @@ flutter build windows
 flutter build apk --target-platform android-arm64
 flutter_rust_bridge_codegen
 ```
+
+## 正式发布
+
+当前自动发布范围为仓库实际包含平台工程的 **Linux x64、Windows x64 和 Android**。仓库没有应用级 `ios/` 或 `macos/` 工程，因此不生成这两个平台的产物。
+
+维护者在 GitHub Actions 的 **Release** 工作流点击 **Run workflow**，选择 `main`，填写版本号即可，例如 `0.0.1` 或 `v0.0.1`。命令行等价操作：
+
+```bash
+gh workflow run release.yml --ref main -f version=0.0.1
+```
+
+工作流会自动读取启动时最新的 `main` 提交，并将构建来源固定到该提交。随后执行 Flutter 分析与测试、Rust 测试，分别在 GitHub 托管的 Ubuntu、Windows 运行器上构建。只有 Linux、Windows、Android APK 和 AAB 都上传完成并通过验证后，才会创建 `v<版本号>` 正式标签并将 Release 标记为 Latest。若任一平台失败，版本不会作为正式 Release 发布；修复后使用相同版本号重新运行即可。已公开的版本号不能被覆盖，请使用新版本发布更新。
+
+每个版本包含：
+
+| 产物 | 用途 |
+| --- | --- |
+| `Aetheria-v<版本号>-linux-x64.tar.gz` | 完整 Linux bundle；解压后执行 `./install.sh` 注册桌面入口，或直接运行 `./aetheria` |
+| `Aetheria-v<版本号>-windows-x64.zip` | 完整解压后运行 `aetheria.exe`，同目录中需要保留 DLL 和 `data/` |
+| `Aetheria-v<版本号>-android-arm64.apk` | 可直接安装的正式签名 Android arm64 APK |
+| `Aetheria-v<版本号>-android.aab` | 含 ARM32、ARM64、x86_64 的 Android 商店分发包 |
+| `SHA256SUMS` 和 `BUILD-INFO.json` | 文件完整性校验与构建来源 |
+
+Linux 构建基于 Ubuntu 22.04，目标系统需要 glibc 2.35 或更新版本、GTK 3 和 ALSA。安装脚本默认放到 `~/.local/opt/aetheria`，桌面入口写入 `~/.local/share/applications`；也可向脚本传入自定义绝对安装路径。
+
+Android 正式签名由仓库 Actions Secrets 提供：`ANDROID_KEYSTORE_BASE64`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`。工作流缺少任一项时会在构建前失败，不会退回调试签名。签名私钥、密码与本地生成的 `android/key.properties` 均不入库。**请长期、安全地备份同一套签名材料；后续更新必须沿用相同的签名证书。**
+
+版本字符串和 Android 版本号由工作流从输入及运行编号生成，平时发布只需填写版本号。发布流程记录在 `.github/workflows/release.yml`；改动构建逻辑后建议先在本地通过 `flutter analyze`、`flutter test`，以及对应平台的 Release 构建。
 
 ## 平台说明
 
@@ -1600,9 +1630,13 @@ Android Gradle 当前配置：
 
 根 `android/build.gradle.kts` 中有一段对子工程 `compileSdkVersion(36)` 的兼容逻辑，用来避免部分插件因为 compileSdk 过低触发 AAR Metadata 检查失败。不要随意删除。
 
-### iOS / macOS / Linux
+### Linux
 
-`rust_builder` 作为 Flutter FFI 插件模板声明了多个平台，仓库中也包含 cargokit 的跨平台构建胶水。但当前应用根目录实际重点代码和平台原生实现集中在 Windows 与 Android。其它平台不是当前 README 所描述的主要交付目标。
+Linux 使用 Flutter GTK runner 和 Rust 原生音频，支持 GTK 透明悬浮歌词窗口。Release 包含完整可移植 bundle、图标及安装脚本。安装脚本会按最终位置生成桌面入口，避免构建机路径混入发布产物。
+
+### iOS / macOS
+
+`rust_builder` 作为 Flutter FFI 插件模板声明了这些平台，但应用根目录尚无对应的 `ios/`、`macos/` 工程，当前不在自动发布矩阵中。
 
 ## Flutter / Rust 桥接说明
 
@@ -1945,13 +1979,13 @@ flutter pub get
 
 ## 已知边界
 
-- 当前重点支持 Windows 与 Android。
+- 当前自动发布 Windows x64、Linux x64 和 Android；iOS/macOS 尚无应用工程。
 - 局域网同步是整库镜像覆盖，不是双向合并。
 - 没有云账户、云曲库或跨互联网同步。
 - 在线歌词源依赖第三方接口，稳定性和返回结果不由本项目控制。
-- 目前没有完整的发布签名配置，Android release 使用 debug signingConfig。
+- Android 本地开发构建在没有 Release 密钥时可以使用调试签名；正式发布工作流要求 Release 密钥。
 - `covers/` 不作为同步文件清单的一部分，必要时会从音频重新提取。
-- `rust_builder` 包含多平台 FFI 模板，但当前应用主要原生能力集中在 Windows 和 Android。
+- `rust_builder` 包含多平台 FFI 模板，但当前应用主要原生能力集中在 Windows、Linux 与 Android。
 - 自动化测试覆盖了部分核心逻辑和 UI primitive，但没有覆盖所有复杂桌面/移动交互。
 
 ## 维护建议

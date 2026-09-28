@@ -1,0 +1,241 @@
+name: Release
+run-name: Release ${{ inputs.version }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '正式版本号，例如 0.0.1 或 v0.0.1；自动构建最新 main'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aetheria-release
+  cancel-in-progress: false
+
+env:
+  FLUTTER_VERSION: '3.47.0'
+
+jobs:
+  prepare:
+    name: Pin latest main and validate release
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+      tag: ${{ steps.metadata.outputs.tag }}
+      build_number: ${{ steps.metadata.outputs.build_number }}
+      source_sha: ${{ steps.metadata.outputs.source_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Validate version, signing secrets and existing tags
+        id: metadata
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: python3 scripts/release.py prepare "$RELEASE_VERSION"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-metadata
+          path: dist/BUILD-INFO.json
+          if-no-files-found: error
+          retention-days: 14
+
+  validate:
+    name: Analyze and test
+    needs: prepare
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.source_sha }}
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install native audio dependencies
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
+      - run: flutter pub get --enforce-lockfile
+      - run: flutter analyze --fatal-infos
+      - run: flutter test
+      - run: cargo test --manifest-path rust/Cargo.toml --locked
+
+  linux:
+    name: Linux x64
+    needs: [prepare, validate]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      BUILD_NUMBER: ${{ needs.prepare.outputs.build_number }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.source_sha }}
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libasound2-dev
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - uses: dtolnay/rust-toolchain@stable
+      - run: flutter config --enable-linux-desktop
+      - run: flutter pub get --enforce-lockfile
+      - name: Build release
+        run: flutter build linux --release --build-name="$VERSION" --build-number="$BUILD_NUMBER"
+      - name: Package portable bundle and installer
+        run: bash scripts/package_linux.sh "$VERSION"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-linux-x64
+          path: dist/Aetheria-v*-linux-x64.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  windows:
+    name: Windows x64
+    needs: [prepare, validate]
+    runs-on: windows-2022
+    timeout-minutes: 60
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      BUILD_NUMBER: ${{ needs.prepare.outputs.build_number }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.source_sha }}
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - uses: dtolnay/rust-toolchain@stable
+      - run: flutter config --enable-windows-desktop
+      - run: flutter pub get --enforce-lockfile
+      - name: Build release
+        shell: pwsh
+        run: |
+          flutter build windows --release --build-name=$env:VERSION --build-number=$env:BUILD_NUMBER
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Package executable, runtime libraries and assets
+        shell: pwsh
+        run: |
+          $bundle = 'build/windows/x64/runner/Release'
+          if (!(Test-Path "$bundle/aetheria.exe") -or !(Test-Path "$bundle/rust_lib_aetheria.dll")) {
+            throw 'The Windows release bundle is incomplete.'
+          }
+          Copy-Item LICENSE "$bundle/LICENSE"
+          'Extract the complete archive and run aetheria.exe. Keep the DLLs and data directory next to it.' |
+            Set-Content "$bundle/README.txt" -Encoding utf8
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Compress-Archive -Path "$bundle/*" -DestinationPath "dist/Aetheria-v$env:VERSION-windows-x64.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-windows-x64
+          path: dist/Aetheria-v*-windows-x64.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  android:
+    name: Android signed APK and AAB
+    needs: [prepare, validate]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      BUILD_NUMBER: ${{ needs.prepare.outputs.build_number }}
+      AETHERIA_REQUIRE_RELEASE_SIGNING: 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.source_sha }}
+      - name: Restore release signing credentials
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: python3 scripts/configure_android_signing.py
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+      - name: Prepare Android SDK
+        run: |
+          flutter config --jdk-dir "$JAVA_HOME"
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;28.2.13676358' 'cmake;3.22.1'
+      - name: Clean generated Flutter and Gradle state
+        run: flutter clean
+      - run: flutter pub get --enforce-lockfile
+      - name: Build arm64 APK
+        run: flutter build apk --release --target-platform android-arm64 --build-name="$VERSION" --build-number="$BUILD_NUMBER"
+      - name: Build multi-architecture app bundle
+        run: flutter build appbundle --release --build-name="$VERSION" --build-number="$BUILD_NUMBER"
+      - name: Verify signatures and collect artifacts
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose build/app/outputs/flutter-apk/app-release.apk
+          jarsigner -verify -strict -keystore android/release.keystore -storepass:env ANDROID_KEYSTORE_PASSWORD build/app/outputs/bundle/release/app-release.aab
+          mkdir -p dist
+          cp build/app/outputs/flutter-apk/app-release.apk "dist/Aetheria-v$VERSION-android-arm64.apk"
+          cp build/app/outputs/bundle/release/app-release.aab "dist/Aetheria-v$VERSION-android.aab"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-android
+          path: |
+            dist/Aetheria-v*-android-arm64.apk
+            dist/Aetheria-v*-android.aab
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Remove signing credentials
+        if: always()
+        run: rm -f android/key.properties android/release.keystore
+
+  publish:
+    name: Publish complete final release
+    needs: [prepare, linux, windows, android]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.source_sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: dist
+      - name: Verify uploads and publish release as latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/release.py publish
