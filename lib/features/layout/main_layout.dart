@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'dart:io' show Platform;
 import 'package:aetheria/core/providers/library_provider.dart';
 import 'package:aetheria/core/providers/audio_player_provider.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
@@ -212,22 +213,30 @@ class _MainLayoutState extends State<MainLayout>
     final size = MediaQuery.sizeOf(context);
     final showDrawer =
         _drawerController.value > 0.0 || audioProvider.isDetailOpen;
+    // Large ambient glows force expensive off-screen blur every frame while
+    // the drawer is animating on Linux. Hide them during the transition and
+    // drop them entirely on Linux where the GPU cost is most noticeable.
+    final showAmbientGlow =
+        !Platform.isLinux && _drawerController.status == AnimationStatus.dismissed;
 
     return Stack(
       children: [
-        Positioned(
-          top: size.height * 0.1,
-          left: size.width * 0.2,
-          child: AmbientGlow(color: cfg.accent, opacity: cfg.ambientOpacity),
-        ),
-        Positioned(
-          bottom: size.height * 0.2,
-          right: size.width * 0.15,
-          child: AmbientGlow(
-            color: cfg.accentHover,
-            opacity: cfg.ambientOpacity,
+        if (showAmbientGlow)
+          Positioned(
+            top: size.height * 0.1,
+            left: size.width * 0.2,
+            child:
+                AmbientGlow(color: cfg.accent, opacity: cfg.ambientOpacity),
           ),
-        ),
+        if (showAmbientGlow)
+          Positioned(
+            bottom: size.height * 0.2,
+            right: size.width * 0.15,
+            child: AmbientGlow(
+              color: cfg.accentHover,
+              opacity: cfg.ambientOpacity,
+            ),
+          ),
         Column(
           children: [
             Expanded(
@@ -239,50 +248,56 @@ class _MainLayoutState extends State<MainLayout>
                     child: Stack(
                       children: [
                         MainContent(songTableController: _songTableController),
-                        if (showDrawer)
-                          Positioned.fill(
-                            child: AnimatedBuilder(
-                              animation: _drawerController,
-                              builder: (context, _) {
-                                return IgnorePointer(
-                                  ignoring:
-                                      _drawerController.status ==
-                                      AnimationStatus.dismissed,
-                                  child: Stack(
-                                    children: [
-                                      Positioned.fill(
-                                        child: GestureDetector(
-                                          behavior: HitTestBehavior.translucent,
-                                          onTap: () {
-                                            _dismissKeyboard();
-                                            audioProvider.setDetailOpen(false);
-                                          },
-                                          child: FadeTransition(
-                                            opacity: _scrimFade,
-                                            child: ColoredBox(
-                                              color: cfg.scrim.withValues(
-                                                alpha: 0.28,
-                                              ),
+                                        if (showDrawer)
+                                          Positioned.fill(
+                                            child: AnimatedBuilder(
+                                              animation: _drawerController,
+                                              builder: (context, _) {
+                                                // RepaintBoundary isolates the
+                                                // sliding drawer so the song
+                                                // list below isn't repainted
+                                                // every frame of the transition.
+                                                return RepaintBoundary(
+                                                  child: IgnorePointer(
+                                                    ignoring:
+                                                        _drawerController.status ==
+                                                        AnimationStatus.dismissed,
+                                                    child: Stack(
+                                                      children: [
+                                                        Positioned.fill(
+                                                          child: GestureDetector(
+                                                            behavior: HitTestBehavior.translucent,
+                                                            onTap: () {
+                                                              _dismissKeyboard();
+                                                              audioProvider.setDetailOpen(false);
+                                                            },
+                                                            child: FadeTransition(
+                                                              opacity: _scrimFade,
+                                                              child: ColoredBox(
+                                                                color: cfg.scrim.withValues(
+                                                                  alpha: 0.28,
+                                                                ),
+                                                              ),
+                                                            ),
+                                                          ),
+                                                        ),
+                                                        Positioned(
+                                                          right: 0,
+                                                          top: 0,
+                                                          bottom: 0,
+                                                          width: 380,
+                                                          child: SlideTransition(
+                                                            position: _drawerSlide,
+                                                            child: const DetailPane(),
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                );
+                                              },
                                             ),
                                           ),
-                                        ),
-                                      ),
-                                      Positioned(
-                                        right: 0,
-                                        top: 0,
-                                        bottom: 0,
-                                        width: 380,
-                                        child: SlideTransition(
-                                          position: _drawerSlide,
-                                          child: const DetailPane(),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                              },
-                            ),
-                          ),
                       ],
                     ),
                   ),

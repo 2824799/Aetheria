@@ -6,6 +6,91 @@
 #endif
 
 #include "flutter/generated_plugin_registrant.h"
+#include "floating_lyric_window.h"
+
+namespace {
+
+constexpr char kNativeChannelName[] = "com.aetheria.app/notification";
+FlMethodChannel* g_native_channel = nullptr;
+
+void handle_native_method_call(FlMethodChannel* channel,
+                               FlMethodCall* method_call,
+                               gpointer /*user_data*/) {
+  const gchar* method = fl_method_call_get_name(method_call);
+  FlValue* args = fl_method_call_get_args(method_call);
+
+  if (g_strcmp0(method, "canDrawOverlays") == 0) {
+    fl_method_call_respond_success(method_call, fl_value_new_bool(TRUE), nullptr);
+    return;
+  }
+  if (g_strcmp0(method, "requestOverlayPermission") == 0) {
+    fl_method_call_respond_success(method_call, nullptr, nullptr);
+    return;
+  }
+  if (g_strcmp0(method, "getDeviceName") == 0) {
+    const gchar* hostname = g_get_host_name();
+    fl_method_call_respond_success(
+        method_call, fl_value_new_string(hostname != nullptr ? hostname : ""),
+        nullptr);
+    return;
+  }
+  if (g_strcmp0(method, "showFloatingLyrics") == 0) {
+    FloatingLyricWindow::GetInstance().Show();
+    fl_method_call_respond_success(method_call, nullptr, nullptr);
+    return;
+  }
+  if (g_strcmp0(method, "hideFloatingLyrics") == 0) {
+    FloatingLyricWindow::GetInstance().Hide();
+    fl_method_call_respond_success(method_call, nullptr, nullptr);
+    return;
+  }
+  if (g_strcmp0(method, "updateFloatingLyricsStyle") == 0) {
+    FloatingLyricWindow::GetInstance().UpdateStyle(args);
+    fl_method_call_respond_success(method_call, nullptr, nullptr);
+    return;
+  }
+  if (g_strcmp0(method, "updateFloatingLyrics") == 0) {
+    FloatingLyricWindow::GetInstance().UpdateLyrics(args);
+    fl_method_call_respond_success(method_call, nullptr, nullptr);
+    return;
+  }
+
+  fl_method_call_respond_not_implemented(method_call, nullptr);
+}
+
+void setup_native_channel(FlView* view) {
+  FlEngine* engine = fl_view_get_engine(view);
+  FlBinaryMessenger* messenger = fl_engine_get_binary_messenger(engine);
+  g_autoptr(FlStandardMethodCodec) codec = fl_standard_method_codec_new();
+  g_native_channel =
+      fl_method_channel_new(messenger, kNativeChannelName, FL_METHOD_CODEC(codec));
+  fl_method_channel_set_method_call_handler(
+      g_native_channel, handle_native_method_call, nullptr, nullptr);
+
+  FloatingLyricWindow::GetInstance().SetBoundsCallback(
+      [](int x, int y, int width, int height) {
+        if (g_native_channel == nullptr) {
+          return;
+        }
+        g_autoptr(FlValue) event = fl_value_new_map();
+        fl_value_set_string_take(event, "type",
+                                 fl_value_new_string("boundsChanged"));
+        fl_value_set_string_take(event, "x", fl_value_new_int(x));
+        fl_value_set_string_take(event, "y", fl_value_new_int(y));
+        fl_value_set_string_take(event, "width", fl_value_new_int(width));
+        fl_value_set_string_take(event, "height", fl_value_new_int(height));
+        fl_method_channel_invoke_method(g_native_channel, "floatingLyricsEvent",
+                                        event, nullptr, nullptr, nullptr);
+      });
+}
+
+void teardown_native_channel() {
+  FloatingLyricWindow::GetInstance().Hide();
+  FloatingLyricWindow::GetInstance().SetBoundsCallback(nullptr);
+  g_clear_object(&g_native_channel);
+}
+
+}  // namespace
 
 struct _MyApplication {
   GtkApplication parent_instance;
@@ -14,9 +99,35 @@ struct _MyApplication {
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
 
+// Resolve the icon next to the bundled executable so direct launches also
+// show the application icon in the window/task switcher.
+static void set_application_icon(GtkWindow* window) {
+  g_autofree gchar* executable_path = g_file_read_link("/proc/self/exe", nullptr);
+  if (executable_path == nullptr) {
+    return;
+  }
+
+  g_autofree gchar* executable_dir = g_path_get_dirname(executable_path);
+  g_autofree gchar* icon_path = g_build_filename(
+      executable_dir, "share", "icons", "hicolor", "scalable",
+      "apps", "aetheria.svg", nullptr);
+  if (!g_file_test(icon_path, G_FILE_TEST_IS_REGULAR)) {
+    return;
+  }
+
+  g_autoptr(GError) error = nullptr;
+  gtk_window_set_icon_from_file(window, icon_path, &error);
+}
+
 // Called when first Flutter frame received.
 static void first_frame_cb(MyApplication* self, FlView* view) {
   gtk_widget_show(gtk_widget_get_toplevel(GTK_WIDGET(view)));
+}
+
+// Called when the main window is being destroyed; tear down the overlay while
+// GTK is still fully initialized.
+static void main_window_destroy_cb(GtkWidget* /*widget*/, gpointer /*data*/) {
+  teardown_native_channel();
 }
 
 // Implements GApplication::activate.
@@ -24,6 +135,7 @@ static void my_application_activate(GApplication* application) {
   MyApplication* self = MY_APPLICATION(application);
   GtkWindow* window =
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
+  set_application_icon(window);
 
   // Use a header bar when running in GNOME as this is the common style used
   // by applications and is the setup most users will be using (e.g. Ubuntu
@@ -66,6 +178,8 @@ static void my_application_activate(GApplication* application) {
   fl_view_set_background_color(view, &background_color);
   gtk_widget_show(GTK_WIDGET(view));
   gtk_container_add(GTK_CONTAINER(window), GTK_WIDGET(view));
+  g_signal_connect(window, "destroy", G_CALLBACK(main_window_destroy_cb),
+                   nullptr);
 
   // Show the window when Flutter renders.
   // Requires the view to be realized so we can start rendering.
@@ -74,6 +188,7 @@ static void my_application_activate(GApplication* application) {
   gtk_widget_realize(GTK_WIDGET(view));
 
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
+  setup_native_channel(view);
 
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }

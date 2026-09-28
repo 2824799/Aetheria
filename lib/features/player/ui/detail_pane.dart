@@ -290,70 +290,80 @@ class DetailPane extends StatelessWidget {
     if (song.id.isEmpty) {
       return const SizedBox.shrink();
     }
-    return ClipRRect(
-      borderRadius: const BorderRadius.horizontal(
-        left: Radius.circular(AetherRadius.xxl),
-      ),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(
-          sigmaX: cfg.glassBlurDefault,
-          sigmaY: cfg.glassBlurDefault,
+    final panel = Container(
+      decoration: BoxDecoration(
+        color: cfg.bg1.withValues(alpha: 0.92),
+        border: Border(
+          left: BorderSide(color: cfg.borderSubtle),
         ),
-        child: Container(
-          decoration: BoxDecoration(
-            color: cfg.bg1.withValues(alpha: 0.92),
-            border: Border(
-              left: BorderSide(color: cfg.borderSubtle),
+        boxShadow: [
+          BoxShadow(
+            color: cfg.scrim.withValues(alpha: 0.26),
+            blurRadius: 42,
+            offset: const Offset(-14, 0),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Align(
+            alignment: Alignment.topRight,
+            child: Padding(
+              padding: const EdgeInsets.only(
+                top: AetherSpace.sm,
+                right: AetherSpace.sm,
+              ),
+              child: AetherIconButton(
+                icon: Icons.close_rounded,
+                tooltip: '关闭详情',
+                onPressed: () => audioProvider.setDetailOpen(false),
+                color: cfg.textSecondary,
+              ),
             ),
-            boxShadow: [
-              BoxShadow(
-                color: cfg.scrim.withValues(alpha: 0.26),
-                blurRadius: 42,
-                offset: const Offset(-14, 0),
-              ),
+          ),
+          Expanded(
+            child: _buildContent(
+              context,
+              song,
+              audioProvider,
+              libraryProvider,
+              cfg,
+            ),
+          ),
+          Divider(height: 1, color: cfg.borderSubtle),
+          AetherTabBar(
+            value: audioProvider.activeTab,
+            onChanged: audioProvider.setActiveTab,
+            tabs: const [
+              AetherTabItem(id: 'lyrics', label: '滚动歌词'),
+              AetherTabItem(id: 'lyric_manager', label: '歌词管理'),
+              AetherTabItem(id: 'tags', label: '标签管理'),
+              AetherTabItem(id: 'versions', label: '音源版本'),
             ],
           ),
-          child: Column(
-            children: [
-              Align(
-                alignment: Alignment.topRight,
-                child: Padding(
-                  padding: const EdgeInsets.only(
-                    top: AetherSpace.sm,
-                    right: AetherSpace.sm,
-                  ),
-                  child: AetherIconButton(
-                    icon: Icons.close_rounded,
-                    tooltip: '关闭详情',
-                    onPressed: () => audioProvider.setDetailOpen(false),
-                    color: cfg.textSecondary,
-                  ),
-                ),
-              ),
-              Expanded(
-                child: _buildContent(
-                  context,
-                  song,
-                  audioProvider,
-                  libraryProvider,
-                  cfg,
-                ),
-              ),
-              Divider(height: 1, color: cfg.borderSubtle),
-              AetherTabBar(
-                value: audioProvider.activeTab,
-                onChanged: audioProvider.setActiveTab,
-                tabs: const [
-                  AetherTabItem(id: 'lyrics', label: '滚动歌词'),
-                  AetherTabItem(id: 'lyric_manager', label: '歌词管理'),
-                  AetherTabItem(id: 'tags', label: '标签管理'),
-                  AetherTabItem(id: 'versions', label: '音源版本'),
-                ],
-              ),
-            ],
-          ),
-        ),
+        ],
       ),
+    );
+
+    final panelShape = const BorderRadius.horizontal(
+      left: Radius.circular(AetherRadius.xxl),
+    );
+
+    // Flutter's Linux GTK renderer can stall when a large BackdropFilter is
+    // introduced during an animated route. Keep the panel opaque on Linux so
+    // opening a song detail never blocks the UI; other platforms retain the
+    // glass effect.
+    return ClipRRect(
+      borderRadius: panelShape,
+      child: Platform.isLinux
+          ? panel
+          : BackdropFilter(
+              filter: ImageFilter.blur(
+                sigmaX: cfg.glassBlurDefault,
+                sigmaY: cfg.glassBlurDefault,
+              ),
+              child: panel,
+            ),
     );
   }
 
@@ -678,7 +688,6 @@ class DetailPane extends StatelessWidget {
     return const SizedBox.shrink();
   }
 }
-
 class _EditableMetadataText extends StatefulWidget {
   const _EditableMetadataText({
     required this.value,

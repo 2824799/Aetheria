@@ -88,6 +88,19 @@ if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT OR
   set(CMAKE_INSTALL_PREFIX "${BUILD_BUNDLE_DIR}" CACHE PATH "..." FORCE)
 endif()
 
+# Linux desktop integration assets. The generated desktop entry uses the
+# absolute path of this build's relocatable bundle, so it can be copied to the
+# user's desktop and launched directly after `flutter build linux`.
+set(AETHERIA_ICON_PATH
+  "${CMAKE_INSTALL_PREFIX}/share/icons/hicolor/scalable/apps/aetheria.svg")
+set(AETHERIA_EXECUTABLE "${CMAKE_INSTALL_PREFIX}/${BINARY_NAME}")
+set(AETHERIA_DESKTOP_FILE "${CMAKE_CURRENT_BINARY_DIR}/aetheria.desktop")
+configure_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/packaging/aetheria.desktop.in"
+  "${AETHERIA_DESKTOP_FILE}"
+  @ONLY
+)
+
 # Start with a clean build bundle directory every time.
 install(CODE "
   file(REMOVE_RECURSE \"${BUILD_BUNDLE_DIR}/\")
@@ -97,6 +110,16 @@ set(INSTALL_BUNDLE_DATA_DIR "${CMAKE_INSTALL_PREFIX}/data")
 set(INSTALL_BUNDLE_LIB_DIR "${CMAKE_INSTALL_PREFIX}/lib")
 
 install(TARGETS ${BINARY_NAME} RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}"
+  COMPONENT Runtime)
+
+install(FILES "${AETHERIA_DESKTOP_FILE}"
+  DESTINATION "${CMAKE_INSTALL_PREFIX}"
+  COMPONENT Runtime)
+install(FILES "${AETHERIA_DESKTOP_FILE}"
+  DESTINATION "${CMAKE_INSTALL_PREFIX}/share/applications"
+  COMPONENT Runtime)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/packaging/icons/aetheria.svg"
+  DESTINATION "${CMAKE_INSTALL_PREFIX}/share/icons/hicolor/scalable/apps"
   COMPONENT Runtime)
 
 install(FILES "${FLUTTER_ICU_DATA_FILE}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"

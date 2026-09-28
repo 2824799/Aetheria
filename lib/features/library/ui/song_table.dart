@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -146,10 +147,19 @@ class _SongTableState extends State<SongTable> {
     if (AetherMotion.reduce(context)) {
       _verticalController.jumpTo(targetOffset);
     } else {
+      // Long lists need a duration that scales with distance; a fixed 280ms
+      // over hundreds of rows makes the scroll feel like a slideshow.
+      final distanceRows = (targetOffset - position.pixels).abs() / _rowHeight;
+      final scrollDuration = Duration(
+        milliseconds: (AetherMotion.normal.inMilliseconds +
+                distanceRows * 18)
+            .clamp(AetherMotion.normal.inMilliseconds, 900)
+            .round(),
+      );
       await _verticalController.animateTo(
         targetOffset,
-        duration: AetherMotion.slow,
-        curve: AetherMotion.outQuart,
+        duration: scrollDuration,
+        curve: AetherMotion.out,
       );
     }
     return true;
@@ -736,6 +746,12 @@ class _SongTableState extends State<SongTable> {
                           ListView.builder(
                             controller: _verticalController,
                             itemExtent: _rowHeight,
+                            // Pre-build a few rows outside the viewport so the
+                            // reveal animation doesn't hitch while new rows are
+                            // being laid out for the first time.
+                            scrollCacheExtent: const ScrollCacheExtent.pixels(
+                              _rowHeight * 8,
+                            ),
                             itemCount: songs.length,
                             itemBuilder: (context, index) {
                               final song = songs[index];

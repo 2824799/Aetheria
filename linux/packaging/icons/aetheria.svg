@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="background" x1="24" y1="18" x2="232" y2="242" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FF6FAE"/>
+      <stop offset="0.52" stop-color="#9B5CFF"/>
+      <stop offset="1" stop-color="#3C2A78"/>
+    </linearGradient>
+    <linearGradient id="note" x1="83" y1="55" x2="174" y2="206" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#F7D8FF"/>
+    </linearGradient>
+    <filter id="shadow" x="22" y="24" width="212" height="216" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#1C123D" flood-opacity="0.34"/>
+    </filter>
+  </defs>
+  <rect x="16" y="16" width="224" height="224" rx="58" fill="url(#background)"/>
+  <circle cx="70" cy="62" r="42" fill="#FFFFFF" opacity="0.10"/>
+  <circle cx="195" cy="198" r="68" fill="#130D32" opacity="0.12"/>
+  <g filter="url(#shadow)" fill="url(#note)">
+    <path d="M139 55h24v101.5c0 24.3-19.7 44-44 44s-44-16.1-44-36 19.7-36 44-36c7.2 0 14.1 1.6 20 4.5V55Z"/>
+    <path d="M151 55h45v24h-45z"/>
+  </g>
+  <path d="M55 211c18 12 40 18 64 18 29 0 56-8 78-23" fill="none" stroke="#FFFFFF" stroke-opacity="0.18" stroke-width="5" stroke-linecap="round"/>
+</svg>
