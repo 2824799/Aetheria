@@ -19,6 +19,19 @@ def api(endpoint: str, *arguments: str):
     return json.loads(run("gh", "api", endpoint, *arguments))
 
 
+def find_release(repository: str, tag: str):
+    pages = api(f"repos/{repository}/releases", "--paginate", "--slurp")
+    return next(
+        (
+            release
+            for page in pages
+            for release in page
+            if release["tag_name"] == tag
+        ),
+        None,
+    )
+
+
 def normalize_version(raw: str) -> str:
     version = raw.strip().removeprefix("v")
     if not re.fullmatch(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", version):
@@ -29,9 +42,7 @@ def normalize_version(raw: str) -> str:
 
 
 def release_state(repository: str, tag: str, source_sha: str):
-    pages = api(f"repos/{repository}/releases", "--paginate", "--slurp")
-    releases = [release for page in pages for release in page]
-    existing = next((release for release in releases if release["tag_name"] == tag), None)
+    existing = find_release(repository, tag)
     if existing:
         if not existing["draft"]:
             raise ValueError(f"{tag} is already published; use a new version number.")
@@ -155,7 +166,9 @@ Linux 需要 glibc 2.35 或更高版本、GTK 3 与 ALSA。安装脚本默认使
             "--notes-file", str(notes_path),
         )
     run("gh", "release", "upload", tag, "--repo", repository, "--clobber", *(str(path) for path in paths))
-    release = api(f"repos/{repository}/releases/tags/{tag}")
+    release = find_release(repository, tag)
+    if release is None:
+        raise ValueError(f"GitHub did not create the draft release {tag}.")
     assets = {asset["name"]: asset for asset in release["assets"]}
     if set(assets) != {path.name for path in paths}:
         raise ValueError("The draft release's uploaded assets do not match the complete asset set.")
@@ -167,7 +180,9 @@ Linux 需要 glibc 2.35 或更高版本、GTK 3 与 ALSA。安装脚本默认使
         if digest and digest != f"sha256:{checksum(path)}":
             raise ValueError(f"Uploaded SHA-256 mismatch: {path.name}")
     run("gh", "release", "edit", tag, "--repo", repository, "--draft=false", "--prerelease=false", "--latest")
-    release = api(f"repos/{repository}/releases/tags/{tag}")
+    release = find_release(repository, tag)
+    if release is None:
+        raise ValueError(f"GitHub did not return the published release {tag}.")
     if release["draft"] or release["prerelease"]:
         raise ValueError("GitHub did not publish the release as a final release.")
     release_state_after = run("git", "ls-remote", "--tags", "origin", f"refs/tags/{tag}")
