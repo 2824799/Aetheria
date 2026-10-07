@@ -1,7 +1,11 @@
 #include "floating_lyric_window.h"
+#include "lyric_renderer.h"
+
+using namespace aetheria;
 
 #include <cairo.h>
 #include <gtk/gtk.h>
+#include <gtk-layer-shell.h>
 #include <pango/pango.h>
 #include <pango/pangocairo.h>
 #ifdef GDK_WINDOWING_X11
@@ -35,10 +39,11 @@ double GetDouble(FlValue* map, const gchar* key, double fallback) {
     return fallback;
   }
   FlValue* value = fl_value_lookup_string(map, key);
-  if (value == nullptr || fl_value_get_type(value) != FL_VALUE_TYPE_FLOAT) {
-    return fallback;
-  }
-  return fl_value_get_float(value);
+  if (value == nullptr) return fallback;
+  double result = fallback;
+  if (fl_value_get_type(value) == FL_VALUE_TYPE_FLOAT) result = fl_value_get_float(value);
+  if (fl_value_get_type(value) == FL_VALUE_TYPE_INT) result = fl_value_get_int(value);
+  return std::isfinite(result) ? result : fallback;
 }
 
 uint32_t GetColor(FlValue* map, const gchar* key, uint32_t fallback) {
@@ -82,95 +87,6 @@ std::vector<std::string> GetStringList(FlValue* map, const gchar* key) {
   return result;
 }
 
-struct Rgba {
-  double r;
-  double g;
-  double b;
-  double a;
-};
-
-Rgba ToRgba(uint32_t argb, double opacity) {
-  return Rgba{
-      ((argb >> 16) & 0xFF) / 255.0,
-      ((argb >> 8) & 0xFF) / 255.0,
-      (argb & 0xFF) / 255.0,
-      (((argb >> 24) & 0xFF) / 255.0) * opacity,
-  };
-}
-
-PangoAlignment ResolveAlignment(const std::string& align) {
-  if (align == "left") {
-    return PANGO_ALIGN_LEFT;
-  }
-  if (align == "right") {
-    return PANGO_ALIGN_RIGHT;
-  }
-  return PANGO_ALIGN_CENTER;
-}
-
-struct LineLayout {
-  PangoLayout* layout;
-  double height;
-};
-
-LineLayout CreateLineLayout(cairo_t* cr, const std::string& text,
-                            double font_size, bool bold,
-                            const std::string& align, double max_width) {
-  PangoLayout* layout = pango_cairo_create_layout(cr);
-  PangoFontDescription* desc = pango_font_description_new();
-  pango_font_description_set_family(
-      desc, "Noto Sans CJK SC, WenQuanYi Micro Hei, Microsoft YaHei, sans-serif");
-  pango_font_description_set_absolute_size(desc, font_size * PANGO_SCALE);
-  pango_font_description_set_weight(
-      desc, bold ? PANGO_WEIGHT_BOLD : PANGO_WEIGHT_NORMAL);
-  pango_layout_set_font_description(layout, desc);
-  pango_font_description_free(desc);
-  pango_layout_set_alignment(layout, ResolveAlignment(align));
-  pango_layout_set_width(layout, static_cast<int>(max_width * PANGO_SCALE));
-  pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
-  pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
-  pango_layout_set_text(layout, text.c_str(), -1);
-
-  int width = 0;
-  int height = 0;
-  pango_layout_get_pixel_size(layout, &width, &height);
-  return LineLayout{layout, static_cast<double>(std::max(1, height))};
-}
-
-void DrawLineWithShadow(cairo_t* cr, PangoLayout* layout, double x, double y,
-                        const Rgba& color, const Rgba& shadow,
-                        bool shadow_enabled) {
-  if (shadow_enabled && shadow.a > 0.01) {
-    cairo_save(cr);
-    cairo_move_to(cr, x + 1.5, y + 1.5);
-    cairo_set_source_rgba(cr, shadow.r, shadow.g, shadow.b, shadow.a);
-    pango_cairo_show_layout(cr, layout);
-    cairo_restore(cr);
-  }
-  cairo_save(cr);
-  cairo_move_to(cr, x, y);
-  cairo_set_source_rgba(cr, color.r, color.g, color.b, color.a);
-  pango_cairo_show_layout(cr, layout);
-  cairo_restore(cr);
-}
-
-// Fills the "played" portion of the active line by clipping to a horizontal
-// percentage of the layout width.
-void DrawProgressLine(cairo_t* cr, PangoLayout* layout, double x, double y,
-                      double width, double progress, const Rgba& played,
-                      const Rgba& unplayed, const Rgba& shadow,
-                      bool shadow_enabled) {
-  DrawLineWithShadow(cr, layout, x, y, unplayed, shadow, shadow_enabled);
-  if (progress <= 0.0) {
-    return;
-  }
-  cairo_save(cr);
-  cairo_rectangle(cr, x, y - 4, width * std::clamp(progress, 0.0, 1.0),
-                  100000);
-  cairo_clip(cr);
-  DrawLineWithShadow(cr, layout, x, y, played, shadow, shadow_enabled);
-  cairo_restore(cr);
-}
 
 }  // namespace
 
@@ -192,18 +108,19 @@ void FloatingLyricWindow::Show() {
   if (!gtk_widget_get_visible(window_)) {
     gtk_widget_show_all(window_);
   }
-  if (style_.always_on_top) {
-    gtk_window_set_keep_above(GTK_WINDOW(window_), TRUE);
-  }
+  ApplyStacking();
 }
 
 void FloatingLyricWindow::Hide() {
   if (window_ != nullptr) {
+    EndDrag();
     gtk_widget_hide(window_);
   }
 }
 
 void FloatingLyricWindow::UpdateStyle(FlValue* payload) {
+  const double previous_x = style_.window_x, previous_y = style_.window_y;
+  const double previous_width = style_.window_width, previous_height = style_.window_height;
   style_.locked = GetBool(payload, "locked", style_.locked);
   style_.always_on_top = GetBool(payload, "alwaysOnTop", style_.always_on_top);
   style_.show_translation =
@@ -218,28 +135,29 @@ void FloatingLyricWindow::UpdateStyle(FlValue* payload) {
   style_.text_shadow_enabled =
       GetBool(payload, "textShadowEnabled", style_.text_shadow_enabled);
   style_.align = GetString(payload, "align", style_.align);
-  style_.font_size = GetDouble(payload, "fontSize", style_.font_size);
-  style_.line_gap = GetDouble(payload, "lineGap", style_.line_gap);
-  style_.opacity = GetDouble(payload, "opacity", style_.opacity);
+  style_.font_size = std::clamp(GetDouble(payload, "fontSize", style_.font_size), 8.0, 72.0);
+  style_.line_gap = std::clamp(GetDouble(payload, "lineGap", style_.line_gap), 0.0, 32.0);
+  style_.opacity = std::clamp(GetDouble(payload, "opacity", style_.opacity), 0.0, 1.0);
   style_.unplayed_color = GetColor(payload, "unplayedColor", style_.unplayed_color);
   style_.played_color = GetColor(payload, "playedColor", style_.played_color);
   style_.shadow_color = GetColor(payload, "shadowColor", style_.shadow_color);
-  style_.window_x = GetDouble(payload, "windowX", style_.window_x);
-  style_.window_y = GetDouble(payload, "windowY", style_.window_y);
-  style_.window_width = GetDouble(payload, "windowWidth", style_.window_width);
-  style_.window_height = GetDouble(payload, "windowHeight", style_.window_height);
+  style_.window_x = std::clamp(GetDouble(payload, "windowX", style_.window_x), -1000000.0, 1000000.0);
+  style_.window_y = std::clamp(GetDouble(payload, "windowY", style_.window_y), -1000000.0, 1000000.0);
+  style_.window_width = std::clamp(GetDouble(payload, "windowWidth", style_.window_width), 120.0, 1800.0);
+  style_.window_height = std::clamp(GetDouble(payload, "windowHeight", style_.window_height), 36.0, 420.0);
 
   if (window_ == nullptr) {
     return;
   }
-  // Prevent configure-event feedback when we programmatically resize.
-  g_signal_handlers_block_by_func(window_, reinterpret_cast<gpointer>(OnConfigure), this);
-  ApplyWindowGeometry();
-  gtk_window_set_keep_above(GTK_WINDOW(window_), style_.always_on_top ? TRUE : FALSE);
-  gtk_window_set_accept_focus(GTK_WINDOW(window_), style_.locked ? FALSE : TRUE);
+  if (style_.window_x != previous_x || style_.window_y != previous_y ||
+      style_.window_width != previous_width || style_.window_height != previous_height) {
+    ApplyWindowGeometry();
+  }
+  if (style_.locked) EndDrag();
+  ApplyStacking();
+  gtk_window_set_accept_focus(GTK_WINDOW(window_), FALSE);
   gtk_widget_set_app_paintable(window_, TRUE);
   ApplyInputPassthrough();
-  g_signal_handlers_unblock_by_func(window_, reinterpret_cast<gpointer>(OnConfigure), this);
   QueueDraw();
 }
 
@@ -266,6 +184,17 @@ void FloatingLyricWindow::EnsureWindow() {
   }
 
   window_ = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+  layer_shell_ = gtk_layer_is_supported();
+  if (layer_shell_) {
+    gtk_layer_init_for_window(GTK_WINDOW(window_));
+    gtk_layer_set_namespace(GTK_WINDOW(window_), "aetheria-lyrics");
+    gtk_layer_set_keyboard_mode(GTK_WINDOW(window_), GTK_LAYER_SHELL_KEYBOARD_MODE_NONE);
+    gtk_layer_set_anchor(GTK_WINDOW(window_), GTK_LAYER_SHELL_EDGE_LEFT, TRUE);
+    gtk_layer_set_anchor(GTK_WINDOW(window_), GTK_LAYER_SHELL_EDGE_TOP, TRUE);
+    // No panel reservation. Margins use the output's full logical geometry.
+    gtk_layer_set_exclusive_zone(GTK_WINDOW(window_), -1);
+    ApplyStacking();
+  }
   gtk_window_set_title(GTK_WINDOW(window_), "Aetheria Lyrics");
   gtk_window_set_decorated(GTK_WINDOW(window_), FALSE);
   gtk_window_set_type_hint(GTK_WINDOW(window_), GDK_WINDOW_TYPE_HINT_UTILITY);
@@ -273,6 +202,15 @@ void FloatingLyricWindow::EnsureWindow() {
   gtk_window_set_skip_pager_hint(GTK_WINDOW(window_), TRUE);
   gtk_window_set_accept_focus(GTK_WINDOW(window_), FALSE);
   gtk_widget_set_app_paintable(window_, TRUE);
+  gtk_window_set_focus_on_map(GTK_WINDOW(window_), FALSE);
+  gtk_widget_set_name(window_, "aetheria-lyrics");
+  // Remove theme-provided CSD shadows/borders as well as the window-manager frame.
+  g_autoptr(GtkCssProvider) css = gtk_css_provider_new();
+  gtk_css_provider_load_from_data(css,
+      "#aetheria-lyrics, #aetheria-lyrics decoration { background: transparent;"
+      " border: none; box-shadow: none; margin: 0; padding: 0; }", -1, nullptr);
+  gtk_style_context_add_provider(gtk_widget_get_style_context(window_),
+      GTK_STYLE_PROVIDER(css), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
   gtk_widget_add_events(window_, GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK |
                                      GDK_POINTER_MOTION_MASK);
   gtk_widget_set_size_request(window_, kMinWindowWidth, kMinWindowHeight);
@@ -291,14 +229,18 @@ void FloatingLyricWindow::EnsureWindow() {
   g_signal_connect(window_, "configure-event", G_CALLBACK(OnConfigure), this);
   g_signal_connect(window_, "destroy", G_CALLBACK(OnWindowDestroy), this);
 
-  ApplyInputPassthrough();
-  // Set the position before the window is first shown; KWin Wayland ignores
-  // gtk_window_move() after the surface exists.
+  g_signal_connect(window_, "realize", G_CALLBACK(+[](GtkWidget*, gpointer data) {
+    static_cast<FloatingLyricWindow*>(data)->ApplyInputPassthrough();
+  }), this);
+  g_signal_connect_after(window_, "size-allocate", G_CALLBACK(+[](GtkWidget*, GtkAllocation*, gpointer data) {
+    static_cast<FloatingLyricWindow*>(data)->ApplyInputPassthrough();
+  }), this);
   ApplyWindowGeometry();
 }
 
 void FloatingLyricWindow::DestroyWindowHandle() {
   if (window_ != nullptr) {
+    EndDrag();
     gtk_widget_destroy(window_);
     window_ = nullptr;
   }
@@ -308,39 +250,68 @@ void FloatingLyricWindow::ApplyWindowGeometry() {
   if (window_ == nullptr) {
     return;
   }
-  const int width = std::clamp(static_cast<int>(std::lround(style_.window_width)),
-                               kMinWindowWidth, kMaxWindowWidth);
-  const int height = std::clamp(
-      static_cast<int>(std::lround(style_.window_height)), kMinWindowHeight,
-      kMaxWindowHeight);
+  int width = std::clamp(static_cast<int>(std::lround(style_.window_width)), kMinWindowWidth, kMaxWindowWidth);
+  int height = std::clamp(static_cast<int>(std::lround(style_.window_height)), kMinWindowHeight, kMaxWindowHeight);
+  const bool saved = style_.window_x > -9000.0 && style_.window_y > -9000.0 &&
+      !(style_.window_x == -1.0 && style_.window_y == -1.0);
+  GdkDisplay* display = gtk_widget_get_display(window_);
+  GdkMonitor* monitor = saved ? gdk_display_get_monitor_at_point(display,
+      static_cast<int>(style_.window_x), static_cast<int>(style_.window_y)) :
+      gdk_display_get_primary_monitor(display);
+  if (!monitor) monitor = gdk_display_get_monitor(display, 0);
+  GdkRectangle area{0, 0, 1920, 1080};
+  if (monitor) gdk_monitor_get_workarea(monitor, &area);
+  width = std::min(width, std::max(kMinWindowWidth, area.width));
+  height = std::min(height, std::max(kMinWindowHeight, area.height));
+  const int requested_x = saved ? static_cast<int>(std::lround(style_.window_x)) : area.x + (area.width - width) / 2;
+  const int requested_y = saved ? static_cast<int>(std::lround(style_.window_y)) : area.y + area.height - height - 120;
+  const int x = std::clamp(requested_x, area.x, area.x + std::max(0, area.width - width));
+  const int y = std::clamp(requested_y, area.y, area.y + std::max(0, area.height - height));
+  if (layer_shell_) {
+    GdkRectangle output = area;
+    if (monitor) {
+      gdk_monitor_get_geometry(monitor, &output);
+      gtk_layer_set_monitor(GTK_WINDOW(window_), monitor);
+    }
+    style_.window_x = x;
+    style_.window_y = y;
+    style_.window_width = width;
+    style_.window_height = height;
+    gtk_layer_set_margin(GTK_WINDOW(window_), GTK_LAYER_SHELL_EDGE_LEFT, x - output.x);
+    gtk_layer_set_margin(GTK_WINDOW(window_), GTK_LAYER_SHELL_EDGE_TOP, y - output.y);
+    gtk_widget_set_size_request(window_, width, height);
+    gtk_window_resize(GTK_WINDOW(window_), 1, 1);
+    return;
+  }
   gtk_window_set_default_size(GTK_WINDOW(window_), width, height);
   gtk_window_resize(GTK_WINDOW(window_), width, height);
+#ifdef GDK_WINDOWING_X11
+  if (GDK_IS_X11_DISPLAY(display)) {
+    gtk_window_move(GTK_WINDOW(window_), x, y);
+  }
+#endif
+  // xdg-shell does not offer absolute positioning. Do not send ignored moves or
+  // overwrite a saved X11 position with fabricated Wayland root coordinates.
+}
 
-  if (style_.window_x > -9000.0 && style_.window_y > -9000.0 &&
-      !(style_.window_x == -1.0 && style_.window_y == -1.0)) {
-    gtk_window_move(GTK_WINDOW(window_),
-                    static_cast<int>(std::lround(style_.window_x)),
-                    static_cast<int>(std::lround(style_.window_y)));
-    return;
+void FloatingLyricWindow::ApplyStacking() {
+  if (!window_) return;
+  if (layer_shell_) {
+    // TOP is above ordinary windows but below active fullscreen windows in
+    // KWin. OVERLAY keeps lyrics visible over games without taking focus.
+    gtk_layer_set_layer(GTK_WINDOW(window_), style_.always_on_top ?
+        GTK_LAYER_SHELL_LAYER_OVERLAY : GTK_LAYER_SHELL_LAYER_BOTTOM);
+  } else {
+    gtk_window_set_keep_above(GTK_WINDOW(window_), style_.always_on_top);
   }
+}
 
-  // Default: horizontally centered near the bottom of the primary monitor.
-  GdkDisplay* display = gdk_display_get_default();
-  if (display == nullptr) {
-    return;
-  }
-  GdkMonitor* monitor = gdk_display_get_primary_monitor(display);
-  if (monitor == nullptr) {
-    monitor = gdk_display_get_monitor(display, 0);
-  }
-  if (monitor == nullptr) {
-    return;
-  }
-  GdkRectangle workarea{};
-  gdk_monitor_get_workarea(monitor, &workarea);
-  const int x = workarea.x + (workarea.width - width) / 2;
-  const int y = workarea.y + workarea.height - height - 120;
-  gtk_window_move(GTK_WINDOW(window_), x, y);
+void FloatingLyricWindow::EndDrag() {
+  if (!dragging_) return;
+  dragging_ = false;
+  if (window_ && gtk_widget_has_grab(window_)) gtk_grab_remove(window_);
+  NotifyBoundsChanged();
+  QueueDraw();
 }
 
 void FloatingLyricWindow::QueueDraw() {
@@ -350,38 +321,33 @@ void FloatingLyricWindow::QueueDraw() {
 }
 
 void FloatingLyricWindow::ApplyInputPassthrough() {
-#ifdef GDK_WINDOWING_X11
-  if (window_ == nullptr) {
-    return;
-  }
-  GdkWindow* gdk_window = gtk_widget_get_window(window_);
-  if (gdk_window == nullptr || !GDK_IS_X11_WINDOW(gdk_window)) {
-    return;
-  }
-  GdkDisplay* display = gdk_window_get_display(gdk_window);
-  if (display == nullptr || !GDK_IS_X11_DISPLAY(display)) {
-    return;
-  }
-  if (style_.locked) {
-    cairo_region_t* empty = cairo_region_create();
-    gdk_window_input_shape_combine_region(gdk_window, empty, 0, 0);
-    cairo_region_destroy(empty);
-  } else {
-    gdk_window_input_shape_combine_region(gdk_window, nullptr, 0, 0);
-  }
-#endif
+  if (window_ == nullptr) return;
+  GdkWindow* native = gtk_widget_get_window(window_);
+  if (native == nullptr) return;
+  cairo_region_t* region = style_.locked ? cairo_region_create() : nullptr;
+  // GDK translates the input region on both X11 and Wayland. Apply after realize
+  // as well, otherwise an initially locked window still intercepts clicks.
+  gtk_widget_input_shape_combine_region(window_, region);
+  if (region) cairo_region_destroy(region);
 }
 
 void FloatingLyricWindow::NotifyBoundsChanged() {
-  if (window_ == nullptr || bounds_callback_ == nullptr) {
+  if (window_ == nullptr || bounds_callback_ == nullptr || dragging_) {
     return;
   }
   int x = 0;
   int y = 0;
   int width = 0;
   int height = 0;
-  gtk_window_get_position(GTK_WINDOW(window_), &x, &y);
-  gtk_window_get_size(GTK_WINDOW(window_), &width, &height);
+  x = static_cast<int>(style_.window_x);
+  y = static_cast<int>(style_.window_y);
+  if (layer_shell_) {
+    // Persist the final request even if the compositor has not acknowledged it.
+    width = static_cast<int>(style_.window_width);
+    height = static_cast<int>(style_.window_height);
+  } else {
+    gtk_window_get_size(GTK_WINDOW(window_), &width, &height);
+  }
   bounds_callback_(x, y, width, height);
 }
 
@@ -400,60 +366,120 @@ gboolean FloatingLyricWindow::OnButtonPress(GtkWidget* widget,
       event->type != GDK_BUTTON_PRESS) {
     return FALSE;
   }
-  self->dragging_ = true;
-  int window_x = 0;
-  int window_y = 0;
-  gtk_window_get_position(GTK_WINDOW(widget), &window_x, &window_y);
-  self->drag_offset_x_ = event->x_root - window_x;
-  self->drag_offset_y_ = event->y_root - window_y;
-  return TRUE;
-}
-
-gboolean FloatingLyricWindow::OnMotion(GtkWidget* widget, GdkEventMotion* event,
-                                       gpointer user_data) {
-  auto* self = static_cast<FloatingLyricWindow*>(user_data);
-  if (!self->dragging_ || self->style_.locked) {
-    return FALSE;
+  // Compositor-managed move/resize works without global coordinates on Wayland.
+  const int width = gtk_widget_get_allocated_width(widget);
+  const int height = gtk_widget_get_allocated_height(widget);
+  const bool left = event->x < 8, right = event->x > width - 8;
+  const bool top = event->y < 8, bottom = event->y > height - 8;
+  if (self->layer_shell_) {
+    // Layer surfaces have no xdg_toplevel move/resize operation. The pointer's
+    // local position plus our output margins supplies the drag coordinates.
+    self->dragging_ = true;
+    self->resize_x_ = left ? -1 : right ? 1 : 0;
+    self->resize_y_ = top ? -1 : bottom ? 1 : 0;
+    self->drag_x_ = event->x;
+    self->drag_y_ = event->y;
+    self->resize_padding_x_ = width - event->x;
+    self->resize_padding_y_ = height - event->y;
+    gtk_grab_add(widget);
+    self->QueueDraw();
+    return TRUE;
   }
-  const int target_x = static_cast<int>(std::lround(event->x_root - self->drag_offset_x_));
-  const int target_y = static_cast<int>(std::lround(event->y_root - self->drag_offset_y_));
-  gtk_window_move(GTK_WINDOW(widget), target_x, target_y);
-  return TRUE;
-}
-
-gboolean FloatingLyricWindow::OnButtonRelease(GtkWidget* /*widget*/,
-                                              GdkEventButton* event,
-                                              gpointer user_data) {
-  auto* self = static_cast<FloatingLyricWindow*>(user_data);
-  if (!self->dragging_ || event->button != 1) {
-    return FALSE;
+  if (left || right || top || bottom) {
+    GdkWindowEdge edge = top ? (left ? GDK_WINDOW_EDGE_NORTH_WEST :
+        right ? GDK_WINDOW_EDGE_NORTH_EAST : GDK_WINDOW_EDGE_NORTH) :
+        bottom ? (left ? GDK_WINDOW_EDGE_SOUTH_WEST :
+        right ? GDK_WINDOW_EDGE_SOUTH_EAST : GDK_WINDOW_EDGE_SOUTH) :
+        left ? GDK_WINDOW_EDGE_WEST : GDK_WINDOW_EDGE_EAST;
+    gtk_window_begin_resize_drag(GTK_WINDOW(widget), edge, event->button,
+        event->x_root, event->y_root, event->time);
+  } else {
+    gtk_window_begin_move_drag(GTK_WINDOW(widget), event->button,
+        event->x_root, event->y_root, event->time);
   }
-  self->dragging_ = false;
-  self->NotifyBoundsChanged();
   return TRUE;
 }
 
-void FloatingLyricWindow::OnConfigure(GtkWidget* widget,
+gboolean FloatingLyricWindow::OnMotion(GtkWidget*, GdkEventMotion* event, gpointer data) {
+  auto* self = static_cast<FloatingLyricWindow*>(data);
+  if (!self->dragging_ || self->style_.locked) return FALSE;
+  auto& s = self->style_;
+  if (!self->resize_x_ && !self->resize_y_) {
+    s.window_x += event->x - self->drag_x_;
+    s.window_y += event->y - self->drag_y_;
+  } else {
+    if (self->resize_x_ < 0) {
+      const double width = std::clamp(s.window_width - event->x + self->drag_x_,
+          double(kMinWindowWidth), double(kMaxWindowWidth));
+      s.window_x += s.window_width - width;
+      s.window_width = width;
+    } else if (self->resize_x_ > 0) {
+      s.window_width = event->x + self->resize_padding_x_;
+    }
+    if (self->resize_y_ < 0) {
+      const double height = std::clamp(s.window_height - event->y + self->drag_y_,
+          double(kMinWindowHeight), double(kMaxWindowHeight));
+      s.window_y += s.window_height - height;
+      s.window_height = height;
+    } else if (self->resize_y_ > 0) {
+      s.window_height = event->y + self->resize_padding_y_;
+    }
+  }
+  self->ApplyWindowGeometry();
+  return TRUE;
+}
+
+gboolean FloatingLyricWindow::OnButtonRelease(GtkWidget*, GdkEventButton* event, gpointer data) {
+  auto* self = static_cast<FloatingLyricWindow*>(data);
+  if (!self->dragging_ || event->button != 1) return FALSE;
+  self->EndDrag();
+  return TRUE;
+}
+
+gboolean FloatingLyricWindow::OnConfigure(GtkWidget* widget,
                                       GdkEventConfigure* event,
                                       gpointer user_data) {
   auto* self = static_cast<FloatingLyricWindow*>(user_data);
-  const int width = std::clamp(event->width, kMinWindowWidth, kMaxWindowWidth);
-  const int height = std::clamp(event->height, kMinWindowHeight, kMaxWindowHeight);
-  // Only notify when the size actually changed to avoid Wayland configure
-  // feedback loops.
-  const int current_w = static_cast<int>(self->style_.window_width);
-  const int current_h = static_cast<int>(self->style_.window_height);
-  if (!self->dragging_ && (width != current_w || height != current_h)) {
-    self->style_.window_width = width;
-    self->style_.window_height = height;
-    self->NotifyBoundsChanged();
+  int x = static_cast<int>(self->style_.window_x);
+  int y = static_cast<int>(self->style_.window_y);
+#ifdef GDK_WINDOWING_X11
+  if (GDK_IS_X11_DISPLAY(gtk_widget_get_display(widget))) {
+    gtk_window_get_position(GTK_WINDOW(widget), &x, &y);
   }
+#endif
+  const bool changed = event->width != self->style_.window_width ||
+      event->height != self->style_.window_height || x != self->style_.window_x ||
+      y != self->style_.window_y;
+  // Layer configure events may acknowledge an earlier resize. The requested
+  // geometry remains authoritative while requests are in flight.
+  if (!self->layer_shell_) {
+    self->style_.window_width = event->width;
+    self->style_.window_height = event->height;
+  }
+  self->style_.window_x = x;
+  self->style_.window_y = y;
+  if (changed) {
+    if (self->bounds_notify_timer_) g_source_remove(self->bounds_notify_timer_);
+    self->bounds_notify_timer_ = g_timeout_add(150, [](gpointer data) -> gboolean {
+      auto* self = static_cast<FloatingLyricWindow*>(data);
+      self->bounds_notify_timer_ = 0;
+      self->NotifyBoundsChanged();
+      return G_SOURCE_REMOVE;
+    }, self);
+  }
+  return FALSE;
 }
 
 void FloatingLyricWindow::OnWindowDestroy(GtkWidget* /*widget*/,
                                           gpointer user_data) {
   auto* self = static_cast<FloatingLyricWindow*>(user_data);
+  self->EndDrag();
+  if (self->bounds_notify_timer_) {
+    g_source_remove(self->bounds_notify_timer_);
+    self->bounds_notify_timer_ = 0;
+  }
   self->window_ = nullptr;
+  self->layer_shell_ = false;
 }
 
 void FloatingLyricWindow::Draw(cairo_t* cr) {
@@ -543,18 +569,11 @@ void FloatingLyricWindow::Draw(cairo_t* cr) {
     }
   }
 
-  double top = (height - total_height) / 2.0;
-  double x = kMargin;
-  if (style_.align == "left") {
-    x = kMargin;
-  } else if (style_.align == "right") {
-    int text_width = 0;
-    int text_height = 0;
-    pango_layout_get_pixel_size(active.layout, &text_width, &text_height);
-    x = std::max(kMargin, width - kMargin - text_width);
-  }
+  double top = std::max(0.0, (height - total_height) / 2.0);
+  // Pango handles alignment inside max_width. Moving x again double-aligns text.
+  const double x = kMargin;
 
-  DrawProgressLine(cr, active.layout, x, top, max_width, frame_.progress,
+  DrawProgressLine(cr, active.layout, x, top, frame_.progress,
                    played, unplayed, shadow, style_.text_shadow_enabled);
   top += active.height;
 

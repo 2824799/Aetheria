@@ -60,6 +60,8 @@ class FloatingLyricWindow {
   void EnsureWindow();
   void DestroyWindowHandle();
   void ApplyWindowGeometry();
+  void ApplyStacking();
+  void EndDrag();
   void ApplyInputPassthrough();
   void QueueDraw();
   void NotifyBoundsChanged();
@@ -71,7 +73,7 @@ class FloatingLyricWindow {
                            gpointer user_data);
   static gboolean OnButtonRelease(GtkWidget* widget, GdkEventButton* event,
                                   gpointer user_data);
-  static void OnConfigure(GtkWidget* widget, GdkEventConfigure* event,
+  static gboolean OnConfigure(GtkWidget* widget, GdkEventConfigure* event,
                           gpointer user_data);
   static void OnWindowDestroy(GtkWidget* widget, gpointer user_data);
 
@@ -81,8 +83,14 @@ class FloatingLyricWindow {
   Style style_;
   Frame frame_;
   bool dragging_ = false;
-  double drag_offset_x_ = 0;
-  double drag_offset_y_ = 0;
+  bool layer_shell_ = false;
+  int resize_x_ = 0;
+  int resize_y_ = 0;
+  double drag_x_ = 0;
+  double drag_y_ = 0;
+  double resize_padding_x_ = 0;
+  double resize_padding_y_ = 0;
+  guint bounds_notify_timer_ = 0;
   std::function<void(int, int, int, int)> bounds_callback_;
 };
 

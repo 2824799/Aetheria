@@ -37,6 +37,25 @@ class SettingsFloatingLyricsTab extends StatelessWidget {
           value: provider.enabled,
           onChanged: provider.setEnabled,
         ),
+        if (Platform.isLinux)
+          FutureBuilder<Map<String, dynamic>>(
+            future: NativeAudioHelper.desktopWindowInfo,
+            builder: (context, snapshot) {
+              final backend = snapshot.data?['backend'];
+              if (backend == null) return const SizedBox.shrink();
+              return Padding(
+                padding: const EdgeInsets.only(top: AetherSpace.sm),
+                child: Text(
+                  backend == 'wayland'
+                      ? (snapshot.data?['layerShell'] == true)
+                            ? '当前为原生 Wayland：支持无边框、置顶、拖动和锁定穿透。拖动边缘可调整大小；关闭置顶后歌词显示在应用窗口下方。'
+                            : '当前桌面未提供 Wayland 图层协议，固定位置和置顶受限。可使用 GDK_BACKEND=x11 启动兼容模式。'
+                      : '当前为 X11 / XWayland 兼容模式。未锁定时可拖动歌词，拖动边缘可调整窗口大小。',
+                  style: AetherType.captionStyle(cfg.textSecondary),
+                ),
+              );
+            },
+          ),
         if (Platform.isAndroid) ...[
           const SizedBox(height: AetherSpace.md),
           FutureBuilder<bool>(
@@ -203,6 +222,7 @@ class SettingsFloatingLyricsTab extends StatelessWidget {
               selected: provider.unplayedColor,
               colors: AetherLyricPalettes.unplayed,
               onChanged: provider.setUnplayedColor,
+              onPreview: (color) => provider.previewColors(unplayed: color),
             ),
             SettingsColorGroup(
               cfg: cfg,
@@ -210,6 +230,7 @@ class SettingsFloatingLyricsTab extends StatelessWidget {
               selected: provider.playedColor,
               colors: AetherLyricPalettes.played,
               onChanged: provider.setPlayedColor,
+              onPreview: (color) => provider.previewColors(played: color),
             ),
             SettingsColorGroup(
               cfg: cfg,
@@ -217,6 +238,7 @@ class SettingsFloatingLyricsTab extends StatelessWidget {
               selected: provider.shadowColor,
               colors: AetherLyricPalettes.shadow,
               onChanged: provider.setShadowColor,
+              onPreview: (color) => provider.previewColors(shadow: color),
             ),
           ],
         ),

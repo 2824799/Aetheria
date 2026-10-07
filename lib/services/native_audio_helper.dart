@@ -63,6 +63,17 @@ class NativeAudioHelper {
     _ensureMethodCallHandlerBound();
   }
 
+  static final Future<Map<String, dynamic>> desktopWindowInfo = () async {
+    try {
+      final result = await _channel.invokeMapMethod<String, dynamic>(
+        'getDesktopWindowInfo',
+      );
+      return result ?? <String, dynamic>{};
+    } catch (_) {
+      return <String, dynamic>{};
+    }
+  }();
+
   static Future<void> showNotification(Map<String, dynamic> payload) async {
     try {
       await _channel.invokeMethod('showNotification', payload);

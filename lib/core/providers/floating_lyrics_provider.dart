@@ -225,6 +225,14 @@ class FloatingLyricsProvider extends ChangeNotifier {
     );
   }
 
+  // Color-dialog scrubbing is transient; only confirmation writes preferences.
+  void previewColors({Color? unplayed, Color? played, Color? shadow}) {
+    if (unplayed != null) unplayedColor = unplayed;
+    if (played != null) playedColor = played;
+    if (shadow != null) shadowColor = shadow;
+    notifyListeners();
+  }
+
   Future<void> setUnplayedColor(Color value) async {
     unplayedColor = value;
     notifyListeners();

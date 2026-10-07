@@ -7,6 +7,8 @@
 
 #include "flutter/generated_plugin_registrant.h"
 #include "floating_lyric_window.h"
+#include "window_state.h"
+#include <gtk-layer-shell.h>
 
 namespace {
 
@@ -15,10 +17,24 @@ FlMethodChannel* g_native_channel = nullptr;
 
 void handle_native_method_call(FlMethodChannel* channel,
                                FlMethodCall* method_call,
-                               gpointer /*user_data*/) {
+                               gpointer user_data) {
   const gchar* method = fl_method_call_get_name(method_call);
   FlValue* args = fl_method_call_get_args(method_call);
 
+  if (g_strcmp0(method, "getDesktopWindowInfo") == 0) {
+    auto* view = GTK_WIDGET(user_data);
+    GdkDisplay* display = gtk_widget_get_display(view);
+    const char* backend = "wayland";
+#ifdef GDK_WINDOWING_X11
+    if (GDK_IS_X11_DISPLAY(display)) backend = "x11";
+#endif
+    g_autoptr(FlValue) result = fl_value_new_map();
+    fl_value_set_string_take(result, "backend", fl_value_new_string(backend));
+    fl_value_set_string_take(result, "layerShell", fl_value_new_bool(gtk_layer_is_supported()));
+    fl_value_set_string_take(result, "scale", fl_value_new_int(gtk_widget_get_scale_factor(view)));
+    fl_method_call_respond_success(method_call, result, nullptr);
+    return;
+  }
   if (g_strcmp0(method, "canDrawOverlays") == 0) {
     fl_method_call_respond_success(method_call, fl_value_new_bool(TRUE), nullptr);
     return;
@@ -65,7 +81,7 @@ void setup_native_channel(FlView* view) {
   g_native_channel =
       fl_method_channel_new(messenger, kNativeChannelName, FL_METHOD_CODEC(codec));
   fl_method_channel_set_method_call_handler(
-      g_native_channel, handle_native_method_call, nullptr, nullptr);
+      g_native_channel, handle_native_method_call, view, nullptr);
 
   FloatingLyricWindow::GetInstance().SetBoundsCallback(
       [](int x, int y, int width, int height) {
@@ -122,6 +138,13 @@ static void set_application_icon(GtkWindow* window) {
 // Called when first Flutter frame received.
 static void first_frame_cb(MyApplication* self, FlView* view) {
   gtk_widget_show(gtk_widget_get_toplevel(GTK_WIDGET(view)));
+  if (g_getenv("AETHERIA_DESKTOP_DIAGNOSTICS") != nullptr) {
+    const auto* display = gtk_widget_get_display(GTK_WIDGET(view));
+    int width = 0, height = 0;
+    gtk_window_get_size(GTK_WINDOW(gtk_widget_get_toplevel(GTK_WIDGET(view))), &width, &height);
+    g_message("Aetheria desktop: backend=%s scale=%d size=%dx%d",
+        G_OBJECT_TYPE_NAME(display), gtk_widget_get_scale_factor(GTK_WIDGET(view)), width, height);
+  }
 }
 
 // Called when the main window is being destroyed; tear down the overlay while
@@ -164,7 +187,7 @@ static void my_application_activate(GApplication* application) {
     gtk_window_set_title(window, "aetheria");
   }
 
-  gtk_window_set_default_size(window, 1280, 720);
+  RestoreAndTrackWindowState(window);
 
   g_autoptr(FlDartProject) project = fl_dart_project_new();
   fl_dart_project_set_dart_entrypoint_arguments(

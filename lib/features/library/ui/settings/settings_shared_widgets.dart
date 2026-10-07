@@ -161,93 +161,142 @@ class SettingsInfoPill extends StatelessWidget {
   }
 }
 
-class SettingsFloatingLyricPreview extends StatelessWidget {
+class SettingsFloatingLyricPreview extends StatefulWidget {
   const SettingsFloatingLyricPreview({
     super.key,
     required this.cfg,
     required this.provider,
   });
-
   final AppThemeConfig cfg;
   final FloatingLyricsProvider provider;
+  @override
+  State<SettingsFloatingLyricPreview> createState() =>
+      _SettingsFloatingLyricPreviewState();
+}
 
+class _SettingsFloatingLyricPreviewState
+    extends State<SettingsFloatingLyricPreview> {
+  double _progress = 0.5;
   @override
   Widget build(BuildContext context) {
-    final textAlign = switch (provider.align) {
-      FloatingLyricAlign.left => TextAlign.left,
-      FloatingLyricAlign.right => TextAlign.right,
-      FloatingLyricAlign.center => TextAlign.center,
+    final cfg = widget.cfg;
+    final provider = widget.provider;
+    final alignment = switch (provider.align) {
+      FloatingLyricAlign.left => Alignment.centerLeft,
+      FloatingLyricAlign.right => Alignment.centerRight,
+      FloatingLyricAlign.center => Alignment.center,
     };
-    final fontSize = provider.fontSize.clamp(8, 38).toDouble();
-    final shadows = provider.textShadowEnabled
-        ? <Shadow>[
-            Shadow(
-              color: provider.shadowColor,
-              blurRadius: 8,
-              offset: const Offset(0, 1),
-            ),
-          ]
-        : null;
-
+    final fontSize =
+        provider.fontSize.clamp(8, 38).toDouble() *
+        (provider.zoomCurrentLine ? 1.08 : 1);
+    final style = TextStyle(
+      fontSize: fontSize,
+      fontWeight: provider.boldCurrentLine
+          ? FontWeight.w700
+          : FontWeight.normal,
+    );
+    const line = '让每一句歌词，都有自己的颜色';
     return AetherSurface(
       level: AetherSurfaceLevel.flat,
       color: cfg.bgHover,
       borderRadius: BorderRadius.circular(AetherRadius.md),
-      padding: const EdgeInsets.symmetric(
-        horizontal: 18,
-        vertical: AetherSpace.xl,
-      ),
-      child: AnimatedDefaultTextStyle(
-        duration: AetherMotion.duration(context, AetherMotion.fast),
-        curve: AetherMotion.curve(context),
-        style: TextStyle(
-          color: provider.unplayedColor,
-          fontSize: fontSize,
-          fontWeight: provider.boldCurrentLine
-              ? FontWeight.w700
-              : FontWeight.w600,
-          height: 1.25,
-          shadows: shadows,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text('当前歌词 · 未播放样式', textAlign: textAlign),
-            SizedBox(height: provider.lineGap.clamp(0, 24).toDouble()),
-            Text(
-              '当前歌词 · 已播放样式',
-              textAlign: textAlign,
-              style: TextStyle(
-                color: provider.playedColor,
-                fontSize: provider.zoomCurrentLine ? fontSize * 1.06 : fontSize,
-              ),
+      padding: const EdgeInsets.all(18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text('播放状态预览', style: AetherType.captionStyle(cfg.textSecondary)),
+          const SizedBox(height: 12),
+          Opacity(
+            opacity: provider.opacity,
+            child: Column(
+              children: [
+                Align(
+                  alignment: alignment,
+                  child: Stack(
+                    children: [
+                      if (provider.textShadowEnabled)
+                        Text(
+                          line,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: style.copyWith(
+                            color: Colors.transparent,
+                            shadows: [
+                              Shadow(
+                                color: provider.shadowColor,
+                                offset: const Offset(1.5, 1.5),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ShaderMask(
+                        blendMode: BlendMode.srcIn,
+                        shaderCallback: (bounds) => LinearGradient(
+                          colors: [
+                            provider.playedColor,
+                            provider.playedColor,
+                            provider.unplayedColor,
+                            provider.unplayedColor,
+                          ],
+                          stops: [0, _progress, _progress, 1],
+                        ).createShader(bounds),
+                        child: Text(
+                          line,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: style.copyWith(color: Colors.white),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (provider.showTranslation) ...[
+                  SizedBox(height: provider.lineGap * 0.55),
+                  Align(
+                    alignment: alignment,
+                    child: Text(
+                      '翻译行预览',
+                      style: TextStyle(
+                        color: provider.unplayedColor.withValues(
+                          alpha: provider.unplayedColor.a * 0.76,
+                        ),
+                        fontSize: fontSize * 0.42,
+                      ),
+                    ),
+                  ),
+                ],
+                if (provider.showNextLine) ...[
+                  SizedBox(height: provider.lineGap),
+                  Align(
+                    alignment: alignment,
+                    child: Text(
+                      '下一行歌词',
+                      style: TextStyle(
+                        color: provider.unplayedColor.withValues(
+                          alpha: provider.unplayedColor.a * 0.66,
+                        ),
+                        fontSize: fontSize * 0.55,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
             ),
-            if (provider.showTranslation) ...[
-              const SizedBox(height: AetherSpace.xs),
-              Text(
-                '翻译行预览',
-                textAlign: textAlign,
-                style: TextStyle(
-                  color: provider.unplayedColor.withValues(alpha: 0.75),
-                  fontSize: fontSize * 0.46,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ],
-            if (provider.showNextLine) ...[
-              const SizedBox(height: AetherSpace.md),
-              Text(
-                '下一行歌词',
-                textAlign: textAlign,
-                style: TextStyle(
-                  color: provider.unplayedColor.withValues(alpha: 0.55),
-                  fontSize: fontSize * 0.58,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ],
-          ],
-        ),
+          ),
+          const SizedBox(height: 12),
+          SettingsSliderRow(
+            cfg: cfg,
+            label: '预览进度',
+            valueText: '${(_progress * 100).round()}%',
+            value: _progress,
+            onChanged: (value) => setState(() => _progress = value),
+          ),
+          if (provider.pauseFade)
+            Text(
+              '开启暂停淡出时，桌面歌词在暂停后会变淡。',
+              style: AetherType.captionStyle(cfg.textSecondary),
+            ),
+        ],
       ),
     );
   }
@@ -352,6 +401,7 @@ class SettingsColorGroup extends StatelessWidget {
     required this.selected,
     required this.colors,
     required this.onChanged,
+    this.onPreview,
   });
 
   final AppThemeConfig cfg;
@@ -359,6 +409,7 @@ class SettingsColorGroup extends StatelessWidget {
   final Color selected;
   final List<Color> colors;
   final ValueChanged<Color> onChanged;
+  final ValueChanged<Color>? onPreview;
 
   @override
   Widget build(BuildContext context) {
@@ -379,8 +430,8 @@ class SettingsColorGroup extends StatelessWidget {
                 borderRadius: BorderRadius.circular(AetherRadius.full),
                 pressScale: AetherMotion.pressScaleSubtle,
                 child: Container(
-                  width: 22,
-                  height: 22,
+                  width: 32,
+                  height: 32,
                   decoration: BoxDecoration(
                     color: color,
                     shape: BoxShape.circle,
@@ -395,7 +446,13 @@ class SettingsColorGroup extends StatelessWidget {
               ),
             ColorPickerField(
               cfg: cfg,
-              value: settingsColorToHex(selected),
+              value: pickerColorHex(selected, includeAlpha: true),
+              showPresets: false,
+              enableAlpha: true,
+              livePreview: true,
+              onPreview: onPreview == null
+                  ? null
+                  : (hex) => onPreview!(settingsColorFromHex(hex)),
               onChanged: (hex) {
                 final alpha = (selected.toARGB32() >> 24) & 0xFF;
                 onChanged(settingsColorFromHex(hex, alpha: alpha));
