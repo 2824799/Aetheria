@@ -1,5 +1,8 @@
 #include "lyric_renderer.h"
 #include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <vector>
 
 namespace aetheria {
 Rgba ToRgba(uint32_t argb, double opacity) {
@@ -43,18 +46,102 @@ LineLayout CreateLineLayout(cairo_t* cr, const std::string& text,
   int width = 0;
   int height = 0;
   pango_layout_get_pixel_size(layout, &width, &height);
-  return LineLayout{layout, static_cast<double>(std::max(1, height))};
+  return LineLayout{layout, static_cast<double>(std::max(1, height)), font_size};
 }
+
+namespace {
+
+void BlurAlpha(cairo_surface_t* surface, int radius) {
+  if (radius <= 0) return;
+  cairo_surface_flush(surface);
+  const int width = cairo_image_surface_get_width(surface);
+  const int height = cairo_image_surface_get_height(surface);
+  const int stride = cairo_image_surface_get_stride(surface);
+  auto* data = cairo_image_surface_get_data(surface);
+  std::vector<uint8_t> source(static_cast<size_t>(width) * height);
+  std::vector<uint8_t> horizontal(source.size());
+  for (int y = 0; y < height; ++y) {
+    for (int x = 0; x < width; ++x) {
+      source[static_cast<size_t>(y) * width + x] = data[y * stride + x];
+    }
+  }
+  const int diameter = radius * 2 + 1;
+  for (int y = 0; y < height; ++y) {
+    int sum = 0;
+    for (int i = -radius; i <= radius; ++i) {
+      const int x = std::clamp(i, 0, width - 1);
+      sum += source[static_cast<size_t>(y) * width + x];
+    }
+    for (int x = 0; x < width; ++x) {
+      horizontal[static_cast<size_t>(y) * width + x] =
+          static_cast<uint8_t>(sum / diameter);
+      const int remove_x = std::clamp(x - radius, 0, width - 1);
+      const int add_x = std::clamp(x + radius + 1, 0, width - 1);
+      sum += source[static_cast<size_t>(y) * width + add_x] -
+             source[static_cast<size_t>(y) * width + remove_x];
+    }
+  }
+  for (int x = 0; x < width; ++x) {
+    int sum = 0;
+    for (int i = -radius; i <= radius; ++i) {
+      const int y = std::clamp(i, 0, height - 1);
+      sum += horizontal[static_cast<size_t>(y) * width + x];
+    }
+    for (int y = 0; y < height; ++y) {
+      data[y * stride + x] = static_cast<uint8_t>(sum / diameter);
+      const int remove_y = std::clamp(y - radius, 0, height - 1);
+      const int add_y = std::clamp(y + radius + 1, 0, height - 1);
+      sum += horizontal[static_cast<size_t>(add_y) * width + x] -
+             horizontal[static_cast<size_t>(remove_y) * width + x];
+    }
+  }
+  cairo_surface_mark_dirty(surface);
+}
+
+void DrawSoftShadow(cairo_t* cr, PangoLayout* layout, double x, double y,
+                    const Rgba& shadow, double font_size) {
+  if (shadow.a <= 0.01) return;
+  PangoRectangle ink{};
+  pango_layout_get_pixel_extents(layout, &ink, nullptr);
+  if (ink.width <= 0 || ink.height <= 0) return;
+
+  // A proportional sub-pixel offset and a small alpha blur keep small text
+  // readable. A hard fixed offset renders the shadow as a second glyph.
+  double device_scale_x = 1.0;
+  double device_scale_y = 1.0;
+  cairo_surface_get_device_scale(cairo_get_target(cr), &device_scale_x,
+                                 &device_scale_y);
+  const double scale = std::max(1.0, device_scale_x);
+  const double offset = std::clamp(font_size * 0.018, 0.35, 0.85);
+  const double blur = std::clamp(font_size * 0.035, 0.8, 1.8);
+  const int padding = static_cast<int>(std::ceil((blur * 3.0 + offset + 1.0) * scale));
+  const int mask_width = std::max(1, static_cast<int>(std::ceil(ink.width * scale)) + padding * 2);
+  const int mask_height = std::max(1, static_cast<int>(std::ceil(ink.height * scale)) + padding * 2);
+  cairo_surface_t* mask = cairo_image_surface_create(CAIRO_FORMAT_A8, mask_width, mask_height);
+  cairo_surface_set_device_scale(mask, scale, scale);
+  cairo_t* mask_cr = cairo_create(mask);
+  cairo_set_source_rgba(mask_cr, 1, 1, 1, 1);
+  cairo_move_to(mask_cr, padding / scale - ink.x + offset,
+               padding / scale - ink.y + offset);
+  pango_cairo_show_layout(mask_cr, layout);
+  cairo_destroy(mask_cr);
+
+  BlurAlpha(mask, std::max(1, static_cast<int>(std::lround(blur * scale))));
+  cairo_save(cr);
+  cairo_set_source_rgba(cr, shadow.r, shadow.g, shadow.b, shadow.a);
+  cairo_mask_surface(cr, mask, x + ink.x - padding / scale,
+                     y + ink.y - padding / scale);
+  cairo_restore(cr);
+  cairo_surface_destroy(mask);
+}
+
+}  // namespace
 
 void DrawLineWithShadow(cairo_t* cr, PangoLayout* layout, double x, double y,
                         const Rgba& color, const Rgba& shadow,
-                        bool shadow_enabled) {
+                        double font_size, bool shadow_enabled) {
   if (shadow_enabled && shadow.a > 0.01) {
-    cairo_save(cr);
-    cairo_move_to(cr, x + 1.5, y + 1.5);
-    cairo_set_source_rgba(cr, shadow.r, shadow.g, shadow.b, shadow.a);
-    pango_cairo_show_layout(cr, layout);
-    cairo_restore(cr);
+    DrawSoftShadow(cr, layout, x, y, shadow, font_size);
   }
   cairo_save(cr);
   cairo_move_to(cr, x, y);
@@ -68,13 +155,9 @@ void DrawLineWithShadow(cairo_t* cr, PangoLayout* layout, double x, double y,
 void DrawProgressLine(cairo_t* cr, PangoLayout* layout, double x, double y,
                       double progress, const Rgba& played,
                       const Rgba& unplayed, const Rgba& shadow,
-                      bool shadow_enabled) {
+                      double font_size, bool shadow_enabled) {
   if (shadow_enabled && shadow.a > 0.0) {
-    cairo_save(cr);
-    cairo_move_to(cr, x + 1.5, y + 1.5);
-    cairo_set_source_rgba(cr, shadow.r, shadow.g, shadow.b, shadow.a);
-    pango_cairo_show_layout(cr, layout);
-    cairo_restore(cr);
+    DrawSoftShadow(cr, layout, x, y, shadow, font_size);
   }
   PangoRectangle ink{};
   pango_layout_get_pixel_extents(layout, &ink, nullptr);

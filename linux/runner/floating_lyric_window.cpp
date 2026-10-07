@@ -574,27 +574,28 @@ void FloatingLyricWindow::Draw(cairo_t* cr) {
   const double x = kMargin;
 
   DrawProgressLine(cr, active.layout, x, top, frame_.progress,
-                   played, unplayed, shadow, style_.text_shadow_enabled);
+                   played, unplayed, shadow, active.font_size,
+                   style_.text_shadow_enabled);
   top += active.height;
 
   if (translation.layout != nullptr) {
     top += gap * 0.55;
     DrawLineWithShadow(cr, translation.layout, x, top, translation_color, shadow,
-                       style_.text_shadow_enabled);
+                       translation.font_size, style_.text_shadow_enabled);
     top += translation.height;
   }
 
   if (next.layout != nullptr) {
     top += gap;
     DrawLineWithShadow(cr, next.layout, x, top, next_color, shadow,
-                       style_.text_shadow_enabled);
+                       next.font_size, style_.text_shadow_enabled);
     top += next.height;
   }
 
   for (const auto& extra : extras) {
     top += gap * 0.28;
     DrawLineWithShadow(cr, extra.layout, x, top, compact_color, shadow,
-                       style_.text_shadow_enabled);
+                       extra.font_size, style_.text_shadow_enabled);
     top += extra.height;
   }
 

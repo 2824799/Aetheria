@@ -122,20 +122,50 @@ class _AetherSeekBarState extends State<AetherSeekBar> {
           },
           onHorizontalDragCancel: () => setState(() => _preview = null),
           onTapUp: (d) => _commit(_progressAt(d.globalPosition)),
-          child: Center(
-            child: SizedBox(
-              height: widget.height,
-              width: double.infinity,
-              child: Stack(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final diameter = constraints.maxWidth.clamp(0.0, 10.0);
+              final left = (constraints.maxWidth * p - diameter / 2).clamp(
+                0.0,
+                constraints.maxWidth - diameter,
+              );
+              return Stack(
+                alignment: Alignment.center,
                 children: [
-                  Container(color: cfg.sliderTrack),
-                  FractionallySizedBox(
-                    widthFactor: p,
-                    child: ColoredBox(color: cfg.accent),
+                  Center(
+                    child: SizedBox(
+                      height: widget.height,
+                      width: double.infinity,
+                      child: Stack(
+                        children: [
+                          Container(color: cfg.sliderTrack),
+                          FractionallySizedBox(
+                            widthFactor: p,
+                            // ColoredBox needs an explicit track height.
+                            heightFactor: 1,
+                            child: ColoredBox(color: cfg.accent),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    left: left,
+                    width: diameter,
+                    height: diameter,
+                    child: IgnorePointer(
+                      child: DecoratedBox(
+                        key: const ValueKey('aether-seek-thumb'),
+                        decoration: BoxDecoration(
+                          color: cfg.accent,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
                   ),
                 ],
-              ),
-            ),
+              );
+            },
           ),
         ),
       ),

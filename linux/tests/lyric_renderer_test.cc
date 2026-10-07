@@ -14,8 +14,10 @@ std::vector<uint32_t> Render(const std::string& alignment, double progress,
   cairo_t* cr = cairo_create(surface);
   const auto line = CreateLineLayout(cr, text, 34, true, alignment, width - 44);
   Rgba played{1, 0.1, 0, 0.45}, unplayed{0.1, 0.4, 1, 0.45}, shade{0, 0, 0, 0.4};
-  if (reference) DrawLineWithShadow(cr, line.layout, 22, 12, played, shade, shadow);
-  else DrawProgressLine(cr, line.layout, 22, 12, progress, played, unplayed, shade, shadow);
+  if (reference) DrawLineWithShadow(cr, line.layout, 22, 12, played, shade,
+                                    line.font_size, shadow);
+  else DrawProgressLine(cr, line.layout, 22, 12, progress, played, unplayed,
+                        shade, line.font_size, shadow);
   cairo_surface_flush(surface);
   const uint32_t* data = reinterpret_cast<uint32_t*>(cairo_image_surface_get_data(surface));
   std::vector<uint32_t> pixels(data, data + width * height * scale * scale);

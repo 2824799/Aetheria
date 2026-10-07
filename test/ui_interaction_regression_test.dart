@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'support/ui_test_fakes.dart';
 import 'package:aetheria/core/providers/audio_player_provider.dart';
 import 'package:aetheria/core/providers/library_provider.dart';
@@ -10,6 +12,7 @@ import 'package:aetheria/features/layout/mobile_layout.dart';
 import 'package:aetheria/features/player/ui/play_bar.dart';
 import 'package:aetheria/features/player/ui/playback_progress.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -81,11 +84,102 @@ void main() {
           .widthFactor,
       greaterThan(0.4),
     );
+    final fill = find.descendant(
+      of: find.byType(FractionallySizedBox),
+      matching: find.byType(ColoredBox),
+    );
+    expect(tester.getSize(fill).height, 4);
+    expect(tester.getSize(fill).width, greaterThan(160));
+    final thumb = find.byKey(const ValueKey('aether-seek-thumb'));
+    expect(
+      tester.getCenter(thumb).dx,
+      closeTo(rect.left + tester.getSize(fill).width, 0.01),
+    );
     await gesture.up();
     await tester.pumpAndSettle();
     expect(seeks, hasLength(1));
     expect(seeks.single, closeTo(0.525, 0.02));
   });
+
+  for (final config in [
+    AppThemeConfig.dark,
+    AppThemeConfig.light,
+    AppThemeConfig.pink,
+  ]) {
+    testWidgets('seek bar paints progress and thumb in ${config.accent}', (
+      tester,
+    ) async {
+      final boundaryKey = GlobalKey();
+      for (final progress in [0.0, 0.25, 0.5, 1.0]) {
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: buildAetheriaThemeData(config),
+            home: Scaffold(
+              body: Center(
+                child: RepaintBoundary(
+                  key: boundaryKey,
+                  child: SizedBox(
+                    width: 400,
+                    child: AetherSeekBar(progress: progress, onSeek: (_) {}),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final barRect = tester.getRect(find.byType(AetherSeekBar));
+        final thumbRect = tester.getRect(
+          find.byKey(const ValueKey('aether-seek-thumb')),
+        );
+        expect(thumbRect.size, const Size(10, 10));
+        expect(thumbRect.left, greaterThanOrEqualTo(barRect.left));
+        expect(thumbRect.right, lessThanOrEqualTo(barRect.right));
+        expect(
+          thumbRect.center.dx - barRect.left,
+          closeTo((400 * progress).clamp(5.0, 395.0), 0.01),
+        );
+        final boundary =
+            boundaryKey.currentContext!.findRenderObject()
+                as RenderRepaintBoundary;
+        final pixels = await tester.runAsync(() async {
+          final image = await boundary.toImage(pixelRatio: 1);
+          try {
+            return (await image.toByteData(
+              format: ui.ImageByteFormat.rawRgba,
+            ))!.buffer.asUint8List();
+          } finally {
+            image.dispose();
+          }
+        });
+        final thumbLeft = thumbRect.left - barRect.left;
+        final thumbRight = thumbRect.right - barRect.left;
+        bool isActivePixel(int x, int y) {
+          final offset = (y * 400 + x) * 4;
+          final rgba = pixels!.sublist(offset, offset + 4);
+          return rgba[0] == (config.accent.r * 255).round() &&
+              rgba[1] == (config.accent.g * 255).round() &&
+              rgba[2] == (config.accent.b * 255).round() &&
+              rgba[3] == 255;
+        }
+
+        for (var x = 0; x < 400; x++) {
+          // Exclude the circle where it extends past the played track.
+          if (x >= thumbLeft - 1 && x <= thumbRight + 1) continue;
+          expect(
+            isActivePixel(x, 8),
+            x < 400 * progress,
+            reason: 'Visible track at x=$x must match progress $progress',
+          );
+        }
+        expect(
+          isActivePixel((thumbRect.center.dx - barRect.left).floor(), 4),
+          isTrue,
+          reason: 'The thumb must be visible above the thin track',
+        );
+      }
+    });
+  }
 
   testWidgets('playback clock leaves transport untouched and updates time', (
     tester,
@@ -115,6 +209,26 @@ void main() {
     await tester.pump();
     expect(find.text('00:35 / 02:00'), findsOneWidget);
     expect(identical(transportBefore, tester.widget(buttonFinder)), isTrue);
+    final fill = find.descendant(
+      of: find.byType(FractionallySizedBox),
+      matching: find.byType(ColoredBox),
+    );
+    final rect = tester.getRect(find.byType(AetherSeekBar));
+    expect(tester.getSize(fill).height, 4);
+    expect(tester.getSize(fill).width, closeTo(rect.width * 35 / 120, 0.01));
+    final thumb = find.byKey(const ValueKey('aether-seek-thumb'));
+    expect(
+      tester.getCenter(thumb).dx,
+      closeTo(rect.left + rect.width * 35 / 120, 0.01),
+    );
+    await tester.tapAt(Offset(rect.left + rect.width * 0.75, rect.center.dy));
+    await tester.pumpAndSettle();
+    expect(audio.seeks, [const Duration(seconds: 90)]);
+    expect(tester.getSize(fill).width, closeTo(rect.width * 0.75, 0.01));
+    expect(
+      tester.getCenter(thumb).dx,
+      closeTo(rect.left + rect.width * 0.75, 0.01),
+    );
     await tester.pumpWidget(const SizedBox.shrink());
     audio.dispose();
     library.dispose();
