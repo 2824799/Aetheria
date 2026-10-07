@@ -38,6 +38,7 @@ void showAetherToast(
   }
 
   _activeToastEntry?.remove();
+  _activeToastEntry?.dispose();
   _activeToastEntry = null;
 
   late final OverlayEntry entry;
@@ -49,10 +50,10 @@ void showAetherToast(
         cfg: cfg,
         duration: duration,
         onDone: () {
+          if (!identical(_activeToastEntry, entry)) return;
+          _activeToastEntry = null;
           entry.remove();
-          if (identical(_activeToastEntry, entry)) {
-            _activeToastEntry = null;
-          }
+          entry.dispose();
         },
       );
     },
@@ -101,16 +102,14 @@ class _AetherToastHostState extends State<_AetherToastHost>
       curve: AetherMotion.out,
       reverseCurve: AetherMotion.out,
     );
-    _offset = Tween<Offset>(
-      begin: const Offset(0, 0.18),
-      end: Offset.zero,
-    ).animate(
-      CurvedAnimation(
-        parent: _controller,
-        curve: AetherMotion.out,
-        reverseCurve: AetherMotion.out,
-      ),
-    );
+    _offset = Tween<Offset>(begin: const Offset(0, 0.18), end: Offset.zero)
+        .animate(
+          CurvedAnimation(
+            parent: _controller,
+            curve: AetherMotion.out,
+            reverseCurve: AetherMotion.out,
+          ),
+        );
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;

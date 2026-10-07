@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:aetheria/core/theme/app_theme_config.dart';
 import 'package:aetheria/core/theme/aetheria_theme.dart';
@@ -31,14 +32,14 @@ class AetherMenuItem<T> {
   }) : isDivider = false;
 
   const AetherMenuItem.divider()
-      : value = null,
-        label = '',
-        icon = null,
-        destructive = false,
-        warning = false,
-        enabled = false,
-        isDivider = true,
-        shortcut = null;
+    : value = null,
+      label = '',
+      icon = null,
+      destructive = false,
+      warning = false,
+      enabled = false,
+      isDivider = true,
+      shortcut = null;
 }
 
 /// Desktop/context popup menu with design-system motion and colors.
@@ -50,9 +51,17 @@ Future<T?> showAetherMenu<T>({
   double maxWidth = 320,
   bool useRootNavigator = true,
 }) {
-  assert(items.any((item) => !item.isDivider), 'Menu needs at least one action');
+  assert(
+    items.any((item) => !item.isDivider),
+    'Menu needs at least one action',
+  );
 
-  final overlay = Overlay.of(context, rootOverlay: useRootNavigator).context.findRenderObject() as RenderBox;
+  final overlay =
+      Overlay.of(
+            context,
+            rootOverlay: useRootNavigator,
+          ).context.findRenderObject()
+          as RenderBox;
   final overlaySize = overlay.size;
   final local = overlay.globalToLocal(globalPosition);
   final position = RelativeRect.fromLTRB(
@@ -65,7 +74,10 @@ Future<T?> showAetherMenu<T>({
   final cfg = context.tokens;
   final enter = AetherMotion.duration(context, AetherMotion.fast);
   final leave = AetherMotion.exitOf(context, AetherMotion.fast);
-  final fromScale = AetherMotion.fromScale(context, AetherMotion.popoverFromScale);
+  final fromScale = AetherMotion.fromScale(
+    context,
+    AetherMotion.popoverFromScale,
+  );
 
   return Navigator.of(context, rootNavigator: useRootNavigator).push<T>(
     _AetherMenuRoute<T>(
@@ -142,8 +154,17 @@ class _AetherMenuRoute<T> extends PopupRoute<T> {
     Animation<double> animation,
     Animation<double> secondaryAnimation,
   ) {
+    final media = MediaQuery.of(context);
     return CustomSingleChildLayout(
-      delegate: _AetherMenuLayout(position),
+      delegate: _AetherMenuLayout(
+        position,
+        EdgeInsets.fromLTRB(
+          media.padding.left + 8,
+          media.padding.top + 8,
+          media.padding.right + 8,
+          math.max(media.padding.bottom, media.viewInsets.bottom) + 8,
+        ),
+      ),
       child: _AetherMenuPanel<T>(
         items: items,
         minWidth: minWidth,
@@ -164,11 +185,7 @@ class _AetherMenuRoute<T> extends PopupRoute<T> {
     if (enterDuration == Duration.zero && exitDuration == Duration.zero) {
       return child;
     }
-    final curved = CurvedAnimation(
-      parent: animation,
-      curve: AetherMotion.out,
-      reverseCurve: AetherMotion.out,
-    );
+    final curved = animation.drive(CurveTween(curve: AetherMotion.out));
     return FadeTransition(
       opacity: curved,
       child: ScaleTransition(
@@ -181,34 +198,40 @@ class _AetherMenuRoute<T> extends PopupRoute<T> {
 }
 
 class _AetherMenuLayout extends SingleChildLayoutDelegate {
-  _AetherMenuLayout(this.position);
+  _AetherMenuLayout(this.position, this.insets);
 
   final RelativeRect position;
+  final EdgeInsets insets;
 
   @override
   BoxConstraints getConstraintsForChild(BoxConstraints constraints) {
-    return BoxConstraints.loose(constraints.biggest);
+    return BoxConstraints.loose(
+      Size(
+        math.max(0, constraints.maxWidth - insets.horizontal),
+        math.max(0, constraints.maxHeight - insets.vertical),
+      ),
+    );
   }
 
   @override
   Offset getPositionForChild(Size size, Size childSize) {
-    var x = position.left;
-    var y = position.top;
-
-    if (x + childSize.width > size.width - 8) {
-      x = size.width - childSize.width - 8;
-    }
-    if (y + childSize.height > size.height - 8) {
-      y = size.height - childSize.height - 8;
-    }
-    x = x.clamp(8.0, size.width - childSize.width - 8);
-    y = y.clamp(8.0, size.height - childSize.height - 8);
-    return Offset(x, y);
+    final minX = math.min(insets.left, size.width - childSize.width);
+    final minY = math.min(insets.top, size.height - childSize.height);
+    return Offset(
+      position.left.clamp(
+        minX,
+        math.max(minX, size.width - childSize.width - insets.right),
+      ),
+      position.top.clamp(
+        minY,
+        math.max(minY, size.height - childSize.height - insets.bottom),
+      ),
+    );
   }
 
   @override
   bool shouldRelayout(covariant _AetherMenuLayout oldDelegate) {
-    return position != oldDelegate.position;
+    return position != oldDelegate.position || insets != oldDelegate.insets;
   }
 }
 
@@ -232,32 +255,33 @@ class _AetherMenuPanel<T> extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: ConstrainedBox(
-        constraints: BoxConstraints(
-          minWidth: minWidth,
-          maxWidth: maxWidth,
-        ),
+        constraints: BoxConstraints(minWidth: minWidth, maxWidth: maxWidth),
         child: AetherSurface(
           level: AetherSurfaceLevel.overlay,
           borderRadius: BorderRadius.circular(AetherRadius.md),
           padding: const EdgeInsets.symmetric(vertical: AetherSpace.xs),
-          child: IntrinsicWidth(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                for (final item in items)
-                  if (item.isDivider)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: AetherSpace.xs),
-                      child: Divider(height: 1, color: cfg.borderSubtle),
-                    )
-                  else
-                    _AetherMenuRow<T>(
-                      item: item,
-                      cfg: cfg,
-                      onSelect: onSelect,
-                    ),
-              ],
+          child: SingleChildScrollView(
+            child: IntrinsicWidth(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (final item in items)
+                    if (item.isDivider)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          vertical: AetherSpace.xs,
+                        ),
+                        child: Divider(height: 1, color: cfg.borderSubtle),
+                      )
+                    else
+                      _AetherMenuRow<T>(
+                        item: item,
+                        cfg: cfg,
+                        onSelect: onSelect,
+                      ),
+                ],
+              ),
             ),
           ),
         ),
@@ -282,10 +306,10 @@ class _AetherMenuRow<T> extends StatelessWidget {
     final color = !item.enabled
         ? cfg.textTertiary
         : item.destructive
-            ? cfg.danger
-            : item.warning
-                ? cfg.warning
-                : cfg.textPrimary;
+        ? cfg.danger
+        : item.warning
+        ? cfg.warning
+        : cfg.textPrimary;
 
     return AetherPressable(
       enabled: item.enabled && item.value != null,
@@ -312,9 +336,9 @@ class _AetherMenuRow<T> extends StatelessWidget {
                 item.label,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: AetherType.bodyStyle(color).copyWith(
-                  fontWeight: FontWeight.w500,
-                ),
+                style: AetherType.bodyStyle(
+                  color,
+                ).copyWith(fontWeight: FontWeight.w500),
               ),
             ),
             if (item.shortcut != null) ...[
@@ -330,4 +354,3 @@ class _AetherMenuRow<T> extends StatelessWidget {
     );
   }
 }
-

@@ -53,7 +53,11 @@ class _TagFilterState extends State<TagFilter> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: AetherSpace.md,
+            runSpacing: AetherSpace.sm,
             children: [
               Container(
                 decoration: BoxDecoration(
@@ -79,7 +83,6 @@ class _TagFilterState extends State<TagFilter> {
                   ],
                 ),
               ),
-              const Spacer(),
               AetherPressable(
                 onTap: () {
                   setState(() {
@@ -108,14 +111,17 @@ class _TagFilterState extends State<TagFilter> {
                       const SizedBox(width: AetherSpace.md),
                       Text(
                         '标签过滤器',
-                        style: AetherType.bodyStyle(cfg.textSecondary).copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
+                        style: AetherType.bodyStyle(
+                          cfg.textSecondary,
+                        ).copyWith(fontWeight: FontWeight.w600),
                       ),
                       const SizedBox(width: AetherSpace.xs),
                       AnimatedRotation(
                         turns: _isExpanded ? 0.25 : 0,
-                        duration: AetherMotion.duration(context, AetherMotion.fast),
+                        duration: AetherMotion.duration(
+                          context,
+                          AetherMotion.fast,
+                        ),
                         curve: AetherMotion.out,
                         child: Icon(
                           Icons.chevron_right_rounded,
@@ -128,7 +134,6 @@ class _TagFilterState extends State<TagFilter> {
                 ),
               ),
               if (MediaQuery.sizeOf(context).width >= 768) ...[
-                const SizedBox(width: AetherSpace.md),
                 AetherButton.secondary(
                   label: '标签管理',
                   icon: Icons.sell_outlined,
@@ -138,14 +143,14 @@ class _TagFilterState extends State<TagFilter> {
               ],
             ],
           ),
-          AnimatedSize(
-            duration: AetherMotion.duration(context, AetherMotion.fast),
-            curve: AetherMotion.out,
-            alignment: Alignment.topCenter,
-            child: ClipRect(
-              child: Align(
-                alignment: Alignment.topCenter,
-                heightFactor: contentHeightFactor,
+          // Scrolling supplies the height directly; a second layout animation
+          // trails the gesture and repeatedly resizes the list viewport.
+          ClipRect(
+            child: Align(
+              alignment: Alignment.topCenter,
+              heightFactor: contentHeightFactor,
+              child: ExcludeFocus(
+                excluding: contentHeightFactor == 0,
                 child: _buildTagPool(libraryProvider, cfg),
               ),
             ),
@@ -168,7 +173,10 @@ class _TagFilterState extends State<TagFilter> {
       child: AnimatedContainer(
         duration: AetherMotion.duration(context, AetherMotion.fast),
         curve: AetherMotion.out,
-        padding: const EdgeInsets.symmetric(horizontal: AetherSpace.md, vertical: AetherSpace.xs),
+        padding: const EdgeInsets.symmetric(
+          horizontal: AetherSpace.md,
+          vertical: AetherSpace.xs,
+        ),
         decoration: BoxDecoration(
           color: isActive ? cfg.accent : Colors.transparent,
           borderRadius: BorderRadius.circular(AetherRadius.xs),
@@ -201,10 +209,8 @@ class _TagFilterState extends State<TagFilter> {
             spacing: AetherSpace.md,
             runSpacing: AetherSpace.md,
             children: libraryProvider.tags.map((tag) {
-              final isSelected =
-                  libraryProvider.selectedTags.contains(tag.id);
-              final isExcluded =
-                  libraryProvider.excludedTags.contains(tag.id);
+              final isSelected = libraryProvider.selectedTags.contains(tag.id);
+              final isExcluded = libraryProvider.excludedTags.contains(tag.id);
 
               Color tagColor = tag.color != null
                   ? _parseHexColor(tag.color!, cfg.textSecondary)
@@ -227,9 +233,7 @@ class _TagFilterState extends State<TagFilter> {
                     vertical: 5,
                   ),
                   decoration: BoxDecoration(
-                    color: active
-                        ? tagColor.withValues(alpha: 0.14)
-                        : cfg.bg1,
+                    color: active ? tagColor.withValues(alpha: 0.14) : cfg.bg1,
                     borderRadius: BorderRadius.circular(AetherRadius.full),
                     border: Border.all(
                       color: active ? tagColor : cfg.borderSubtle,
@@ -239,11 +243,7 @@ class _TagFilterState extends State<TagFilter> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       if (isExcluded) ...[
-                        Icon(
-                          Icons.remove_rounded,
-                          size: 12,
-                          color: tagColor,
-                        ),
+                        Icon(Icons.remove_rounded, size: 12, color: tagColor),
                         const SizedBox(width: AetherSpace.xs),
                       ] else ...[
                         Container(
@@ -258,16 +258,17 @@ class _TagFilterState extends State<TagFilter> {
                       ],
                       Text(
                         tag.name,
-                        style: AetherType.bodySmStyle(
-                          active ? cfg.textPrimary : tagColor,
-                        ).copyWith(
-                          fontWeight: FontWeight.w600,
-                          decoration: isExcluded
-                              ? TextDecoration.lineThrough
-                              : null,
-                          decorationColor: cfg.danger,
-                          decorationThickness: 2,
-                        ),
+                        style:
+                            AetherType.bodySmStyle(
+                              active ? cfg.textPrimary : tagColor,
+                            ).copyWith(
+                              fontWeight: FontWeight.w600,
+                              decoration: isExcluded
+                                  ? TextDecoration.lineThrough
+                                  : null,
+                              decorationColor: cfg.danger,
+                              decorationThickness: 2,
+                            ),
                       ),
                     ],
                   ),

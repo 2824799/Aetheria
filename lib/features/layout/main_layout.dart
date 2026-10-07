@@ -129,16 +129,19 @@ class _MainLayoutState extends State<MainLayout>
   Widget build(BuildContext context) {
     final media = MediaQuery.of(context);
     final isMobile = media.size.width < 768;
-    final libraryProvider = context.watch<LibraryProvider>();
+    final loadingEmptyLibrary = context.select<LibraryProvider, bool>(
+      (library) => library.isLoading && library.songs.isEmpty,
+    );
     final audioProvider = context.read<AudioPlayerProvider>();
     final isDetailOpen = context.select<AudioPlayerProvider, bool>(
       (provider) => provider.isDetailOpen,
     );
     context.watch<UIThemeProvider>();
-    final syncProvider = context.watch<SyncProvider>();
+    final incomingRequest = context.select<SyncProvider, IncomingSyncRequest?>(
+      (sync) => sync.incomingRequest,
+    );
     final cfg = context.tokens;
 
-    final incomingRequest = syncProvider.incomingRequest;
     if (incomingRequest != null &&
         incomingRequest.id != _handledSyncRequestId) {
       _handledSyncRequestId = incomingRequest.id;
@@ -179,7 +182,7 @@ class _MainLayoutState extends State<MainLayout>
       }
     }
 
-    if (libraryProvider.isLoading && libraryProvider.songs.isEmpty) {
+    if (loadingEmptyLibrary) {
       return Scaffold(
         backgroundColor: Colors.transparent,
         body: Container(
@@ -211,13 +214,12 @@ class _MainLayoutState extends State<MainLayout>
     AppThemeConfig cfg,
   ) {
     final size = MediaQuery.sizeOf(context);
-    final showDrawer =
-        _drawerController.value > 0.0 || audioProvider.isDetailOpen;
     // Large ambient glows force expensive off-screen blur every frame while
     // the drawer is animating on Linux. Hide them during the transition and
     // drop them entirely on Linux where the GPU cost is most noticeable.
     final showAmbientGlow =
-        !Platform.isLinux && _drawerController.status == AnimationStatus.dismissed;
+        !Platform.isLinux &&
+        _drawerController.status == AnimationStatus.dismissed;
 
     return Stack(
       children: [
@@ -225,8 +227,7 @@ class _MainLayoutState extends State<MainLayout>
           Positioned(
             top: size.height * 0.1,
             left: size.width * 0.2,
-            child:
-                AmbientGlow(color: cfg.accent, opacity: cfg.ambientOpacity),
+            child: AmbientGlow(color: cfg.accent, opacity: cfg.ambientOpacity),
           ),
         if (showAmbientGlow)
           Positioned(
@@ -247,57 +248,55 @@ class _MainLayoutState extends State<MainLayout>
                   Expanded(
                     child: Stack(
                       children: [
-                        MainContent(songTableController: _songTableController),
-                                        if (showDrawer)
-                                          Positioned.fill(
-                                            child: AnimatedBuilder(
-                                              animation: _drawerController,
-                                              builder: (context, _) {
-                                                // RepaintBoundary isolates the
-                                                // sliding drawer so the song
-                                                // list below isn't repainted
-                                                // every frame of the transition.
-                                                return RepaintBoundary(
-                                                  child: IgnorePointer(
-                                                    ignoring:
-                                                        _drawerController.status ==
-                                                        AnimationStatus.dismissed,
-                                                    child: Stack(
-                                                      children: [
-                                                        Positioned.fill(
-                                                          child: GestureDetector(
-                                                            behavior: HitTestBehavior.translucent,
-                                                            onTap: () {
-                                                              _dismissKeyboard();
-                                                              audioProvider.setDetailOpen(false);
-                                                            },
-                                                            child: FadeTransition(
-                                                              opacity: _scrimFade,
-                                                              child: ColoredBox(
-                                                                color: cfg.scrim.withValues(
-                                                                  alpha: 0.28,
-                                                                ),
-                                                              ),
-                                                            ),
-                                                          ),
-                                                        ),
-                                                        Positioned(
-                                                          right: 0,
-                                                          top: 0,
-                                                          bottom: 0,
-                                                          width: 380,
-                                                          child: SlideTransition(
-                                                            position: _drawerSlide,
-                                                            child: const DetailPane(),
-                                                          ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  ),
-                                                );
-                                              },
-                                            ),
-                                          ),
+                        RepaintBoundary(
+                          child: ExcludeFocus(
+                            excluding: audioProvider.isDetailOpen,
+                            child: MainContent(
+                              songTableController: _songTableController,
+                            ),
+                          ),
+                        ),
+                        Positioned.fill(
+                          child: AnimatedBuilder(
+                            animation: _drawerController,
+                            child: RepaintBoundary(
+                              child: Stack(
+                                children: [
+                                  Positioned.fill(
+                                    child: FadeTransition(
+                                      opacity: _scrimFade,
+                                      child: ModalBarrier(
+                                        color: cfg.scrim.withValues(
+                                          alpha: 0.28,
+                                        ),
+                                        onDismiss: () {
+                                          _dismissKeyboard();
+                                          audioProvider.setDetailOpen(false);
+                                        },
+                                      ),
+                                    ),
+                                  ),
+                                  Positioned(
+                                    right: 0,
+                                    top: 0,
+                                    bottom: 0,
+                                    width: 380,
+                                    child: SlideTransition(
+                                      position: _drawerSlide,
+                                      child: const RepaintBoundary(
+                                        child: DetailPane(),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            builder: (context, child) =>
+                                _drawerController.isDismissed
+                                ? const SizedBox.shrink()
+                                : child!,
+                          ),
+                        ),
                       ],
                     ),
                   ),

@@ -1,3 +1,4 @@
+import 'package:aetheria/features/player/ui/playback_progress.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:aetheria/core/providers/audio_player_provider.dart';
@@ -170,19 +171,6 @@ class _MobileSongDetailSheetState extends State<MobileSongDetailSheet> {
     );
 
     final isPlayingThisSong = audioProvider.playingSong?.id == song.id;
-    final durationMin = (audioProvider.totalDuration.inSeconds / 60).floor();
-    final durationSec = (audioProvider.totalDuration.inSeconds % 60)
-        .toString()
-        .padLeft(2, '0');
-    final curMin = (audioProvider.currentPosition.inSeconds / 60).floor();
-    final curSec = (audioProvider.currentPosition.inSeconds % 60)
-        .toString()
-        .padLeft(2, '0');
-
-    final curMs = audioProvider.currentPosition.inMilliseconds.toDouble();
-    final totMs = audioProvider.totalDuration.inMilliseconds.toDouble();
-    final progress = totMs > 0 ? (curMs / totMs).clamp(0.0, 1.0) : 0.0;
-
     return Container(
       height: MediaQuery.of(context).size.height * 0.95,
       decoration: BoxDecoration(
@@ -215,9 +203,9 @@ class _MobileSongDetailSheetState extends State<MobileSongDetailSheet> {
                   ),
                   Text(
                     isPlayingThisSong ? '正在播放' : '歌曲详情',
-                    style: AetherType.labelStyle(cfg.textSecondary).copyWith(
-                      letterSpacing: 1,
-                    ),
+                    style: AetherType.labelStyle(
+                      cfg.textSecondary,
+                    ).copyWith(letterSpacing: 1),
                   ),
                   const SizedBox(width: AetherSpace.giant - 4),
                 ],
@@ -247,10 +235,7 @@ class _MobileSongDetailSheetState extends State<MobileSongDetailSheet> {
               tabs: [
                 const AetherTabItem(id: 'lyrics', label: '滚动歌词'),
                 const AetherTabItem(id: 'lyric_manager', label: '歌词管理'),
-                AetherTabItem(
-                  id: 'tags',
-                  label: '关联标签 (${song.tags.length})',
-                ),
+                AetherTabItem(id: 'tags', label: '关联标签 (${song.tags.length})'),
                 AetherTabItem(
                   id: 'versions',
                   label: '音频源 (${song.versions.length})',
@@ -263,32 +248,7 @@ class _MobileSongDetailSheetState extends State<MobileSongDetailSheet> {
                   horizontal: AetherSpace.xxxl,
                   vertical: AetherSpace.md,
                 ),
-                child: Column(
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          '$curMin:$curSec',
-                          style: AetherType.captionStyle(cfg.textSecondary),
-                        ),
-                        Text(
-                          '$durationMin:$durationSec',
-                          style: AetherType.captionStyle(cfg.textSecondary),
-                        ),
-                      ],
-                    ),
-                    AetherSlider(
-                      value: progress,
-                      onChanged: (val) {
-                        final targetMs =
-                            (audioProvider.totalDuration.inMilliseconds * val)
-                                .toInt();
-                        audioProvider.seek(Duration(milliseconds: targetMs));
-                      },
-                    ),
-                  ],
-                ),
+                child: PlaybackProgress(audio: audioProvider, showTime: true),
               ),
               if (showVolumeSlider)
                 Padding(

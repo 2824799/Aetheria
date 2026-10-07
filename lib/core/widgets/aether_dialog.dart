@@ -35,7 +35,6 @@ Future<T?> showAetherDialog<T>({
   );
 }
 
-
 /// Large page-style modal (Settings / Tag Manager). Same motion contract as dialogs.
 Future<T?> showAetherModalPage<T>({
   required BuildContext context,
@@ -108,11 +107,7 @@ class _AetherDialogRoute<T> extends PopupRoute<T> {
     if (enterDuration == Duration.zero && exitDuration == Duration.zero) {
       return child;
     }
-    final curved = CurvedAnimation(
-      parent: animation,
-      curve: AetherMotion.out,
-      reverseCurve: AetherMotion.out,
-    );
+    final curved = animation.drive(CurveTween(curve: AetherMotion.out));
     return FadeTransition(
       opacity: curved,
       child: ScaleTransition(
@@ -155,10 +150,7 @@ class AetherDialog extends StatelessWidget {
 
     return Center(
       child: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxWidth: maxWidth,
-          maxHeight: maxHeight,
-        ),
+        constraints: BoxConstraints(maxWidth: maxWidth, maxHeight: maxHeight),
         child: Material(
           color: Colors.transparent,
           child: AetherSurface(
@@ -181,7 +173,8 @@ class AetherDialog extends StatelessWidget {
                       child: Row(
                         children: [
                           Expanded(
-                            child: titleWidget ??
+                            child:
+                                titleWidget ??
                                 Text(
                                   title ?? '',
                                   style: AetherType.titleStyle(cfg.textPrimary),
@@ -193,8 +186,7 @@ class AetherDialog extends StatelessWidget {
                               tooltip: '关闭',
                               size: 32,
                               iconSize: AetherIconSize.lg,
-                              onPressed: () =>
-                                  Navigator.of(context).maybePop(),
+                              onPressed: () => Navigator.of(context).maybePop(),
                             ),
                         ],
                       ),

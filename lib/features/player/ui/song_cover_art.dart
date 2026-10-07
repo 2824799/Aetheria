@@ -31,7 +31,7 @@ class SongCoverArt extends StatefulWidget {
 
 class _SongCoverArtState extends State<SongCoverArt> {
   String? _coverPath;
-  bool _loading = false;
+  int _request = 0;
 
   @override
   void initState() {
@@ -45,33 +45,36 @@ class _SongCoverArtState extends State<SongCoverArt> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.song.id != widget.song.id ||
         oldWidget.song.coverPath != widget.song.coverPath) {
+      _request++;
       _coverPath = widget.song.coverPath;
       WidgetsBinding.instance.addPostFrameCallback((_) => _ensureCover());
     }
   }
 
   Future<void> _ensureCover() async {
-    if (!mounted || _loading || widget.song.id.isEmpty) {
+    if (!mounted || widget.song.id.isEmpty) {
       return;
     }
+    final request = ++_request;
+    final song = widget.song;
+    final library = context.read<LibraryProvider>();
     final currentPath = _absoluteCoverPath(_coverPath);
-    if (currentPath != null && File(currentPath).existsSync()) {
-      return;
-    }
-
-    _loading = true;
     try {
-      final path = await context.read<LibraryProvider>().ensureSongCover(
-        widget.song,
-      );
-      if (!mounted || path == null || path.trim().isEmpty) {
+      if (currentPath != null && await File(currentPath).exists()) return;
+      if (!mounted || request != _request || song.id != widget.song.id) return;
+      final path = await library.ensureSongCover(song);
+      if (!mounted ||
+          request != _request ||
+          song.id != widget.song.id ||
+          path == null ||
+          path.trim().isEmpty) {
         return;
       }
       setState(() {
         _coverPath = path;
       });
-    } finally {
-      _loading = false;
+    } catch (_) {
+      // Missing or corrupt covers retain the placeholder.
     }
   }
 
@@ -91,7 +94,7 @@ class _SongCoverArtState extends State<SongCoverArt> {
   Widget build(BuildContext context) {
     final cfg = widget.cfg;
     final absolutePath = _absoluteCoverPath(_coverPath);
-    final hasCover = absolutePath != null && File(absolutePath).existsSync();
+    final hasCover = absolutePath != null;
 
     final decoration = BoxDecoration(
       borderRadius: BorderRadius.circular(widget.borderRadius),
@@ -127,6 +130,9 @@ class _SongCoverArtState extends State<SongCoverArt> {
             ? Image.file(
                 File(absolutePath),
                 fit: BoxFit.cover,
+                cacheWidth:
+                    (widget.size * MediaQuery.devicePixelRatioOf(context))
+                        .ceil(),
                 errorBuilder: (context, error, stackTrace) =>
                     _PlaceholderCover(cfg: cfg, iconSize: widget.iconSize),
               )

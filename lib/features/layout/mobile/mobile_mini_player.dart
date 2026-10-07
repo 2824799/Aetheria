@@ -1,11 +1,9 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:aetheria/core/providers/audio_player_provider.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
 import 'package:aetheria/core/widgets/aether_icon_button.dart';
 import 'package:aetheria/core/widgets/aether_pressable.dart';
-import 'package:aetheria/core/widgets/aether_slider.dart';
+import 'package:aetheria/features/player/ui/playback_progress.dart';
 import 'package:aetheria/core/widgets/aether_surface.dart';
 import 'package:aetheria/features/player/ui/song_cover_art.dart';
 import 'package:aetheria/src/rust/models/song.dart';
@@ -32,25 +30,6 @@ class MobileMiniPlayer extends StatefulWidget {
 }
 
 class _MobileMiniPlayerState extends State<MobileMiniPlayer> {
-  double? _dragProgress;
-
-  @override
-  void didUpdateWidget(covariant MobileMiniPlayer oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.playingSong.id != widget.playingSong.id) {
-      _dragProgress = null;
-    }
-  }
-
-  void _seekTo(double progress) {
-    final durationMs = widget.audioProvider.totalDuration.inMilliseconds;
-    if (durationMs <= 0) {
-      return;
-    }
-    final targetMs = (durationMs * progress.clamp(0.0, 1.0)).round();
-    unawaited(widget.audioProvider.seek(Duration(milliseconds: targetMs)));
-  }
-
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
@@ -60,12 +39,6 @@ class _MobileMiniPlayerState extends State<MobileMiniPlayer> {
   }
 
   Widget _buildPlayer(BuildContext context) {
-    final curMs = widget.audioProvider.currentPosition.inMilliseconds
-        .toDouble();
-    final totMs = widget.audioProvider.totalDuration.inMilliseconds.toDouble();
-    final actualProgress = totMs > 0 ? (curMs / totMs).clamp(0.0, 1.0) : 0.0;
-    final progress = _dragProgress ?? actualProgress;
-
     return Material(
       type: MaterialType.transparency,
       child: AetherSurface(
@@ -137,29 +110,7 @@ class _MobileMiniPlayerState extends State<MobileMiniPlayer> {
                 ],
               ),
             ),
-            SizedBox(
-              height: 22,
-              child: AetherSlider(
-                value: progress,
-                onChanged: totMs <= 0
-                    ? null
-                    : (value) {
-                        setState(() {
-                          _dragProgress = value;
-                        });
-                      },
-                onChangeEnd: totMs <= 0
-                    ? null
-                    : (value) {
-                        setState(() {
-                          _dragProgress = null;
-                        });
-                        _seekTo(value);
-                      },
-                trackHeight: 3,
-                thumbRadius: 5,
-              ),
-            ),
+            PlaybackProgress(audio: widget.audioProvider),
           ],
         ),
       ),

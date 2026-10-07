@@ -20,6 +20,8 @@ class FloatingLyricsBridge extends StatefulWidget {
 
 class _FloatingLyricsBridgeState extends State<FloatingLyricsBridge> {
   Timer? _timer;
+  FloatingLyricsProvider? _settings;
+  AudioPlayerProvider? _audio;
   String? _loadedSongId;
   String? _loadedVersionId;
   String _content = '';
@@ -27,6 +29,7 @@ class _FloatingLyricsBridgeState extends State<FloatingLyricsBridge> {
   int _offsetMs = 0;
   LyricTimeline? _timeline;
   bool _loading = false;
+  bool _ticking = false;
   bool _visible = false;
   bool _requestedOverlayPermission = false;
   String _lastStyleSignature = '';
@@ -42,14 +45,31 @@ class _FloatingLyricsBridgeState extends State<FloatingLyricsBridge> {
   void initState() {
     super.initState();
     NativeAudioHelper.setFloatingLyricEventHandler(_handleNativeEvent);
-    _timer = Timer.periodic(const Duration(milliseconds: 16), (_) {
-      unawaited(_tick());
-    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final settings = context.read<FloatingLyricsProvider>();
+    final audio = context.read<AudioPlayerProvider>();
+    if (identical(settings, _settings) && identical(audio, _audio)) return;
+    _settings?.removeListener(_requestTick);
+    _audio?.removeListener(_requestTick);
+    _settings = settings..addListener(_requestTick);
+    _audio = audio..addListener(_requestTick);
+    _requestTick();
+  }
+
+  void _requestTick() {
+    _timer?.cancel();
+    unawaited(_tick());
   }
 
   @override
   void dispose() {
     _timer?.cancel();
+    _settings?.removeListener(_requestTick);
+    _audio?.removeListener(_requestTick);
     unawaited(NativeAudioHelper.hideFloatingLyrics());
     super.dispose();
   }
@@ -80,6 +100,23 @@ class _FloatingLyricsBridgeState extends State<FloatingLyricsBridge> {
   }
 
   Future<void> _tick() async {
+    if (!mounted || _ticking) return;
+    _ticking = true;
+    try {
+      await _sendFrame();
+    } finally {
+      _ticking = false;
+      final settings = _settings;
+      if (mounted && settings != null && settings.enabled) {
+        final interval = _audio!.isPlaying
+            ? (1000 / settings.refreshFps.clamp(10, 60)).ceil()
+            : 500;
+        _timer = Timer(Duration(milliseconds: interval), _requestTick);
+      }
+    }
+  }
+
+  Future<void> _sendFrame() async {
     if (!mounted) {
       return;
     }
@@ -117,6 +154,7 @@ class _FloatingLyricsBridgeState extends State<FloatingLyricsBridge> {
     }
 
     await _ensureLyricLoaded(audio);
+    if (!mounted || !settings.enabled) return;
 
     final styleSignature = settings.styleSignature;
     if (styleSignature != _lastStyleSignature) {

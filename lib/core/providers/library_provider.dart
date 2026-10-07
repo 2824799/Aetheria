@@ -582,6 +582,7 @@ class LibraryProvider extends ChangeNotifier {
   }
 
   void setSearchQuery(String query) {
+    if (searchQuery == query) return;
     searchQuery = query;
     notifyListeners();
   }
@@ -603,32 +604,42 @@ class LibraryProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  void setActivePlaylist(String? playlistId) async {
+  int _playlistRequest = 0;
+
+  Future<void> setActivePlaylist(String? playlistId) async {
+    final request = ++_playlistRequest;
     activePlaylistId = playlistId;
-    if (playlistId != null) {
-      try {
-        playlistSongIds = await music.getPlaylistSongs(playlistId: playlistId);
-      } catch (e) {
-        playlistSongIds = [];
-      }
-    } else {
-      playlistSongIds = [];
+    playlistSongIds = [];
+    notifyListeners();
+    if (playlistId == null) return;
+    List<String> ids;
+    try {
+      ids = await music.getPlaylistSongs(playlistId: playlistId);
+    } catch (_) {
+      ids = [];
     }
+    if (request != _playlistRequest) return;
+    playlistSongIds = ids;
     notifyListeners();
   }
 
+  List<Song>? _displaySongsCache;
+
+  @override
+  void notifyListeners() {
+    _displaySongsCache = null;
+    super.notifyListeners();
+  }
+
   List<Song> get displaySongs {
+    final cached = _displaySongsCache;
+    if (cached != null) return cached;
     var list = List<Song>.from(songs);
 
     // Filter by playlist
     if (activePlaylistId != null) {
-      list = list.where((song) => playlistSongIds.contains(song.id)).toList();
-      // Sort list according to playlistSongIds ordering
-      list.sort((a, b) {
-        final idxA = playlistSongIds.indexOf(a.id);
-        final idxB = playlistSongIds.indexOf(b.id);
-        return idxA.compareTo(idxB);
-      });
+      final byId = {for (final song in songs) song.id: song};
+      list = [for (final id in playlistSongIds) ?byId[id]];
     }
 
     // Filter by search
@@ -672,7 +683,7 @@ class LibraryProvider extends ChangeNotifier {
       list.sort(_compareSongsLikeExplorer);
     }
 
-    return list;
+    return _displaySongsCache = List<Song>.unmodifiable(list);
   }
 
   void setClipboard(

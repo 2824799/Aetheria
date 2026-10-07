@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:aetheria/core/widgets/aether_icon_button.dart';
 import 'package:provider/provider.dart';
 
@@ -39,6 +40,7 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
   int _lastActiveIndex = -1;
   bool _guideVisible = false;
   bool _autoScrolling = false;
+  ValueListenable<Duration>? _position;
 
   double get _lineExtent => widget.compact ? 72 : 84;
 
@@ -58,6 +60,27 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
     }
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final position = context.read<AudioPlayerProvider>().positionListenable;
+    if (!identical(position, _position)) {
+      _position?.removeListener(_onPositionChanged);
+      _position = position..addListener(_onPositionChanged);
+    }
+  }
+
+  int get _activeIndex => _timeline.hasTimedLines
+      ? LyricTimeline.activeLineIndex(
+          _timeline.lines,
+          (_position?.value.inMilliseconds ?? 0) + widget.offsetMs,
+        )
+      : -1;
+
+  void _onPositionChanged() {
+    if (mounted && _activeIndex != _lastActiveIndex) setState(() {});
+  }
+
   void _parseTimeline() {
     _timeline = LyricTimeline.parse(
       content: widget.content,
@@ -68,13 +91,13 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
   @override
   void dispose() {
     _guideTimer?.cancel();
+    _position?.removeListener(_onPositionChanged);
     _controller.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final audio = context.watch<AudioPlayerProvider>();
     final timeline = _timeline;
     final lines = timeline.lines;
     final timed = timeline.hasTimedLines;
@@ -87,14 +110,10 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
       );
     }
 
-    final activeIndex = timed
-        ? LyricTimeline.activeLineIndex(
-            lines,
-            audio.currentPosition.inMilliseconds + widget.offsetMs,
-          )
-        : -1;
-    if (activeIndex != _lastActiveIndex && !_guideVisible) {
-      _lastActiveIndex = activeIndex;
+    final activeIndex = _activeIndex;
+    final activeChanged = activeIndex != _lastActiveIndex;
+    _lastActiveIndex = activeIndex;
+    if (activeChanged && !_guideVisible) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted || !_controller.hasClients || activeIndex < 0) {
           return;
@@ -191,6 +210,7 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
       }
       setState(() {
         _guideVisible = false;
+        _lastActiveIndex = -1;
       });
     });
   }

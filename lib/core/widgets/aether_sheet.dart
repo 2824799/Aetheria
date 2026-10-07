@@ -24,6 +24,7 @@ Future<T?> showAetherSheet<T>({
     context: context,
     isScrollControlled: isScrollControlled,
     enableDrag: enableDrag,
+    useSafeArea: true,
     backgroundColor: Colors.transparent,
     barrierColor: cfg.scrim,
     sheetAnimationStyle: AnimationStyle(
@@ -42,6 +43,7 @@ Future<T?> showAetherSheet<T>({
         ),
         child: Align(
           alignment: Alignment.bottomCenter,
+          heightFactor: 1,
           child: ConstrainedBox(
             constraints: BoxConstraints(maxHeight: maxHeight),
             child: decorate ? AetherSheet(child: child) : child,
@@ -56,11 +58,7 @@ class AetherSheet extends StatelessWidget {
   final Widget child;
   final bool showGrabber;
 
-  const AetherSheet({
-    super.key,
-    required this.child,
-    this.showGrabber = true,
-  });
+  const AetherSheet({super.key, required this.child, this.showGrabber = true});
 
   @override
   Widget build(BuildContext context) {
@@ -85,7 +83,7 @@ class AetherSheet extends StatelessWidget {
             ),
             const SizedBox(height: AetherSpace.sm),
           ],
-          child,
+          Flexible(child: child),
         ],
       ),
     );

@@ -1,6 +1,6 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:aetheria/core/theme/aetheria_theme.dart';
-import 'package:aetheria/core/theme/tokens/motion.dart';
 
 /// Shared slider look for transport, volume, offsets, settings.
 class AetherSlider extends StatelessWidget {
@@ -57,9 +57,9 @@ class AetherSlider extends StatelessWidget {
 }
 
 /// Thin top-edge progress used by PlayBar. 1:1 drag, no fancy animation.
-class AetherSeekBar extends StatelessWidget {
+class AetherSeekBar extends StatefulWidget {
   final double progress;
-  final ValueChanged<double> onSeek;
+  final FutureOr<void> Function(double) onSeek;
   final double height;
 
   const AetherSeekBar({
@@ -69,41 +69,69 @@ class AetherSeekBar extends StatelessWidget {
     this.height = 4,
   });
 
-  void _handle(BuildContext context, Offset globalPosition) {
-    final box = context.findRenderObject() as RenderBox?;
-    if (box == null) return;
-    final local = box.globalToLocal(globalPosition);
-    final pct = (local.dx / box.size.width).clamp(0.0, 1.0);
-    onSeek(pct);
+  @override
+  State<AetherSeekBar> createState() => _AetherSeekBarState();
+}
+
+class _AetherSeekBarState extends State<AetherSeekBar> {
+  double? _preview;
+  int _seekRequest = 0;
+
+  void _updatePreview(Offset position) {
+    _seekRequest++;
+    setState(() => _preview = _progressAt(position));
+  }
+
+  Future<void> _commit(double progress) async {
+    final request = ++_seekRequest;
+    setState(() => _preview = progress);
+    try {
+      await widget.onSeek(progress);
+    } finally {
+      if (mounted && request == _seekRequest) {
+        setState(() => _preview = null);
+      }
+    }
+  }
+
+  double _progressAt(Offset globalPosition) {
+    final box = context.findRenderObject() as RenderBox;
+    if (box.size.width <= 0) return 0;
+    return (box.globalToLocal(globalPosition).dx / box.size.width).clamp(
+      0.0,
+      1.0,
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final cfg = context.tokens;
-    final p = progress.clamp(0.0, 1.0);
+    final p = (_preview ?? widget.progress).clamp(0.0, 1.0);
 
     return SizedBox(
-      height: height + 12,
+      height: widget.height + 12,
       child: MouseRegion(
         cursor: SystemMouseCursors.click,
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onHorizontalDragUpdate: (d) => _handle(context, d.globalPosition),
-          onTapDown: (d) => _handle(context, d.globalPosition),
+          onHorizontalDragStart: (d) => _updatePreview(d.globalPosition),
+          onHorizontalDragUpdate: (d) => _updatePreview(d.globalPosition),
+          onHorizontalDragEnd: (_) {
+            final target = _preview;
+            if (target != null) _commit(target);
+          },
+          onHorizontalDragCancel: () => setState(() => _preview = null),
+          onTapUp: (d) => _commit(_progressAt(d.globalPosition)),
           child: Center(
             child: SizedBox(
-              height: height,
+              height: widget.height,
               width: double.infinity,
               child: Stack(
                 children: [
                   Container(color: cfg.sliderTrack),
                   FractionallySizedBox(
                     widthFactor: p,
-                    child: AnimatedContainer(
-                      duration: AetherMotion.duration(context, AetherMotion.press),
-                      curve: AetherMotion.curve(context),
-                      color: cfg.accent,
-                    ),
+                    child: ColoredBox(color: cfg.accent),
                   ),
                 ],
               ),

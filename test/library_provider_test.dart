@@ -37,6 +37,33 @@ void main() {
     ]);
   });
 
+  test('reuses filtered results and invalidates them when filters change', () {
+    final provider = LibraryProvider()
+      ..songs = [_song('1', 'Track 1'), _song('2', 'Track 2')];
+    final first = provider.displaySongs;
+    expect(identical(provider.displaySongs, first), isTrue);
+    expect(() => first.clear(), throwsUnsupportedError);
+    provider.setSearchQuery('2');
+    expect(provider.displaySongs.map((song) => song.id), ['2']);
+    final filtered = provider.displaySongs;
+    provider.setSearchQuery('2');
+    expect(identical(filtered, provider.displaySongs), isTrue);
+    provider.setSearchQuery('');
+    expect(provider.displaySongs.map((song) => song.id), ['1', '2']);
+    provider.dispose();
+  });
+
+  test('playlist filtering skips stale ids while preserving order', () {
+    final provider = LibraryProvider()
+      ..songs = [_song('1', 'Track 1'), _song('2', 'Track 2')]
+      ..activePlaylistId = 'playlist'
+      ..playlistSongIds = ['2', 'missing', '1'];
+    expect(provider.displaySongs.map((song) => song.id), ['2', '1']);
+    provider.setSearchQuery('1');
+    expect(provider.displaySongs.map((song) => song.id), ['1']);
+    provider.dispose();
+  });
+
   test('preserves manually arranged playlist order', () {
     final provider = LibraryProvider()
       ..songs = [_song('1', 'Track 10'), _song('2', 'Track 2')]

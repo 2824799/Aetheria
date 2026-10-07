@@ -89,7 +89,7 @@ class _MobileLayoutState extends State<MobileLayout>
   final ScrollController _songListController = ScrollController();
   final Map<String, BuildContext> _mountedSongContexts =
       <String, BuildContext>{};
-  double _tagCollapseFactor = 0;
+  final ValueNotifier<double> _tagCollapseFactor = ValueNotifier(0);
   bool _imeDismissedInBackground = false;
   bool _revealingPlayingSong = false;
 
@@ -123,6 +123,7 @@ class _MobileLayoutState extends State<MobileLayout>
     WidgetsBinding.instance.removeObserver(this);
     _searchController.dispose();
     _songListController.dispose();
+    _tagCollapseFactor.dispose();
     _mountedSongContexts.clear();
     super.dispose();
   }
@@ -330,57 +331,54 @@ class _MobileLayoutState extends State<MobileLayout>
     final bottomInset = MediaQuery.paddingOf(context).bottom;
     final miniPlayerReserve = playingSong != null ? 88.0 : 0.0;
 
-    return Stack(
-      children: [
-        Scaffold(
-          key: _scaffoldKey,
-          backgroundColor: Colors.transparent,
-          drawer: MobilePlaylistDrawer(
-            libraryProvider: libraryProvider,
-            cfg: cfg,
+    return Scaffold(
+      key: _scaffoldKey,
+      backgroundColor: Colors.transparent,
+      drawer: MobilePlaylistDrawer(libraryProvider: libraryProvider, cfg: cfg),
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        titleSpacing: 0,
+        leading: AetherIconButton(
+          icon: Icons.menu_rounded,
+          tooltip: '歌单',
+          onPressed: () {
+            _dismissKeyboard();
+            _scaffoldKey.currentState?.openDrawer();
+          },
+        ),
+        title: Padding(
+          padding: const EdgeInsets.only(right: AetherSpace.sm),
+          child: AetherSearchField(
+            controller: _searchController,
+            hintText: '搜索歌曲、歌手…',
+            onChanged: libraryProvider.setSearchQuery,
           ),
-          appBar: AppBar(
-            backgroundColor: Colors.transparent,
-            elevation: 0,
-            scrolledUnderElevation: 0,
-            titleSpacing: 0,
-            leading: AetherIconButton(
-              icon: Icons.menu_rounded,
-              tooltip: '歌单',
-              onPressed: () {
-                _dismissKeyboard();
-                _scaffoldKey.currentState?.openDrawer();
-              },
-            ),
-            title: Padding(
-              padding: const EdgeInsets.only(right: AetherSpace.sm),
-              child: AetherSearchField(
-                controller: _searchController,
-                hintText: '搜索歌曲、歌手…',
-                onChanged: libraryProvider.setSearchQuery,
-              ),
-            ),
-            actions: [
-              AetherIconButton(
-                icon: Icons.label_outline,
-                tooltip: '标签管理',
-                onPressed: () {
-                  _dismissKeyboard();
-                  TagManagerModal.show(context);
-                },
-              ),
-              AetherIconButton(
-                icon: Icons.settings_outlined,
-                tooltip: '系统设置',
-                onPressed: () {
-                  _dismissKeyboard();
-                  SettingsModal.show(context);
-                },
-              ),
-              const SizedBox(width: AetherSpace.xs),
-            ],
+        ),
+        actions: [
+          AetherIconButton(
+            icon: Icons.label_outline,
+            tooltip: '标签管理',
+            onPressed: () {
+              _dismissKeyboard();
+              TagManagerModal.show(context);
+            },
           ),
-          body: Column(
+          AetherIconButton(
+            icon: Icons.settings_outlined,
+            tooltip: '系统设置',
+            onPressed: () {
+              _dismissKeyboard();
+              SettingsModal.show(context);
+            },
+          ),
+          const SizedBox(width: AetherSpace.xs),
+        ],
+      ),
+      body: Stack(
+        children: [
+          Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Padding(
@@ -388,11 +386,12 @@ class _MobileLayoutState extends State<MobileLayout>
                   horizontal: AetherSpace.xl,
                   vertical: AetherSpace.md,
                 ),
-                child: TagFilter(
-                  scrollCollapseFactor: _tagCollapseFactor,
-                  onExpandRequested: () {
-                    setState(() => _tagCollapseFactor = 0);
-                  },
+                child: ValueListenableBuilder<double>(
+                  valueListenable: _tagCollapseFactor,
+                  builder: (context, factor, _) => TagFilter(
+                    scrollCollapseFactor: factor,
+                    onExpandRequested: () => _tagCollapseFactor.value = 0,
+                  ),
                 ),
               ),
               Padding(
@@ -429,13 +428,12 @@ class _MobileLayoutState extends State<MobileLayout>
                           final delta = notification.scrollDelta ?? 0;
                           if (notification.metrics.axis == Axis.vertical &&
                               delta > 0 &&
-                              _tagCollapseFactor < 1) {
-                            setState(() {
-                              _tagCollapseFactor = math.min(
-                                1,
-                                _tagCollapseFactor + delta / 140,
-                              );
-                            });
+                              notification.depth == 0 &&
+                              _tagCollapseFactor.value < 1) {
+                            _tagCollapseFactor.value = math.min(
+                              1,
+                              _tagCollapseFactor.value + delta / 140,
+                            );
                           }
                           return false;
                         },
@@ -487,21 +485,21 @@ class _MobileLayoutState extends State<MobileLayout>
               ),
             ],
           ),
-        ),
-        if (playingSong != null)
-          Positioned(
-            left: AetherSpace.lg,
-            right: AetherSpace.lg,
-            bottom: bottomInset + AetherSpace.lg,
-            child: MobileMiniPlayer(
-              playingSong: playingSong,
-              cfg: cfg,
-              audioProvider: audioProvider,
-              onOpenDetail: () => _openSongDetail(context, playingSong),
-              onPlayingSongLongPress: _revealPlayingSong,
+          if (playingSong != null)
+            Positioned(
+              left: AetherSpace.lg,
+              right: AetherSpace.lg,
+              bottom: bottomInset + AetherSpace.lg,
+              child: MobileMiniPlayer(
+                playingSong: playingSong,
+                cfg: cfg,
+                audioProvider: audioProvider,
+                onOpenDetail: () => _openSongDetail(context, playingSong),
+                onPlayingSongLongPress: _revealPlayingSong,
+              ),
             ),
-          ),
-      ],
+        ],
+      ),
     );
   }
 }

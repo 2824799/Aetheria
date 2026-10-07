@@ -60,6 +60,31 @@ void main() {
     });
   }
 
+  testWidgets('ticks within one lyric line do not rebuild its tiles', (
+    tester,
+  ) async {
+    final audio = _TestAudioPlayer();
+    addTearDown(audio.dispose);
+    await tester.pumpWidget(_view(audio, content: _original));
+    await tester.pumpAndSettle();
+    final tile = tester.widget<LyricLineTile>(find.byType(LyricLineTile).first);
+    audio.setPosition(const Duration(milliseconds: 1750));
+    await tester.pump();
+    expect(
+      identical(
+        tile,
+        tester.widget<LyricLineTile>(find.byType(LyricLineTile).first),
+      ),
+      isTrue,
+    );
+    audio.setPosition(const Duration(milliseconds: 2250));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<LyricLineTile>(find.byType(LyricLineTile).last).active,
+      isTrue,
+    );
+  });
+
   testWidgets('replacing lyric content refreshes the cached timeline', (
     tester,
   ) async {
@@ -118,11 +143,21 @@ Widget _view(
 
 class _TestAudioPlayer extends ChangeNotifier implements AudioPlayerProvider {
   @override
-  Duration currentPosition = const Duration(milliseconds: 1500);
+  final ValueNotifier<Duration> positionListenable = ValueNotifier(
+    const Duration(milliseconds: 1500),
+  );
+
+  @override
+  Duration get currentPosition => positionListenable.value;
 
   void setPosition(Duration position) {
-    currentPosition = position;
-    notifyListeners();
+    positionListenable.value = position;
+  }
+
+  @override
+  void dispose() {
+    positionListenable.dispose();
+    super.dispose();
   }
 
   @override

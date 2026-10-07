@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:aetheria/src/rust/audio/player.dart' show AudioOutputInfo;
 import 'package:aetheria/src/rust/models/song.dart';
@@ -34,7 +35,10 @@ class AudioPlayerProvider extends ChangeNotifier {
   List<Song> currentQueue = [];
 
   bool isPlaying = false;
-  Duration currentPosition = Duration.zero;
+  final ValueNotifier<Duration> _position = ValueNotifier(Duration.zero);
+  ValueListenable<Duration> get positionListenable => _position;
+  Duration get currentPosition => _position.value;
+  set currentPosition(Duration value) => _position.value = value;
   Duration totalDuration = Duration.zero;
 
   double volume = 0.8;
@@ -69,6 +73,7 @@ class AudioPlayerProvider extends ChangeNotifier {
   int _lastPersistedSecond = -1;
   int _stallTicks = 0;
   bool _isHandlingPlaybackEnd = false;
+  bool _pollingPosition = false;
   bool _hasPreparedPlayback = false;
   Duration? _pendingRestorePosition;
   String? _lastDefaultOutputDeviceName;
@@ -89,41 +94,46 @@ class AudioPlayerProvider extends ChangeNotifier {
     _positionTimer = Timer.periodic(const Duration(milliseconds: 250), (
       timer,
     ) async {
-      if (!isPlaying || _isHandlingPlaybackEnd) return;
-      final posSec = await music.getRustPlaybackPosition();
-      final streamFinished = await music.isRustPlaybackFinished();
-      currentPosition = Duration(milliseconds: (posSec * 1000).round());
+      if (!isPlaying || _isHandlingPlaybackEnd || _pollingPosition) return;
+      _pollingPosition = true;
+      try {
+        final posSec = await music.getRustPlaybackPosition();
+        final streamFinished = await music.isRustPlaybackFinished();
+        if (!timer.isActive || !isPlaying) return;
+        currentPosition = Duration(milliseconds: (posSec * 1000).round());
 
-      final reachedEnd =
-          currentPosition >= totalDuration && totalDuration > Duration.zero;
+        final reachedEnd =
+            currentPosition >= totalDuration && totalDuration > Duration.zero;
 
-      // Fallback for EOF: the Rust position is derived from samples the hardware
-      // actually consumed, so if the stored duration is slightly overestimated the
-      // position will plateau just below totalDuration once the stream ends. Detect
-      // that stall and advance as well.
-      final posMs = currentPosition.inMilliseconds;
-      if (posMs == _lastPositionMs) {
-        _stallTicks += 1;
-      } else {
-        _stallTicks = 0;
-        _lastPositionMs = posMs;
-      }
-      final nearEnd =
-          totalDuration > Duration.zero &&
-          currentPosition >= totalDuration - const Duration(seconds: 2);
-      final stalledAtEnd =
-          _stallTicks >= 6 && currentPosition > Duration.zero && nearEnd;
+        // Fallback for EOF: the Rust position is derived from samples the hardware
+        // actually consumed, so if the stored duration is slightly overestimated the
+        // position will plateau just below totalDuration once the stream ends. Detect
+        // that stall and advance as well.
+        final posMs = currentPosition.inMilliseconds;
+        if (posMs == _lastPositionMs) {
+          _stallTicks += 1;
+        } else {
+          _stallTicks = 0;
+          _lastPositionMs = posMs;
+        }
+        final nearEnd =
+            totalDuration > Duration.zero &&
+            currentPosition >= totalDuration - const Duration(seconds: 2);
+        final stalledAtEnd =
+            _stallTicks >= 6 && currentPosition > Duration.zero && nearEnd;
 
-      if (streamFinished || reachedEnd || stalledAtEnd) {
-        await _handlePlaybackEnded();
-        return;
+        if (streamFinished || reachedEnd || stalledAtEnd) {
+          await _handlePlaybackEnded();
+          return;
+        }
+        if (currentPosition.inSeconds != _lastPersistedSecond) {
+          _lastPersistedSecond = currentPosition.inSeconds;
+          unawaited(_persistPlaybackPosition());
+          _updateNotification();
+        }
+      } finally {
+        _pollingPosition = false;
       }
-      if (currentPosition.inSeconds != _lastPersistedSecond) {
-        _lastPersistedSecond = currentPosition.inSeconds;
-        unawaited(_persistPlaybackState());
-        _updateNotification();
-      }
-      notifyListeners();
     });
   }
 
@@ -525,6 +535,16 @@ class AudioPlayerProvider extends ChangeNotifier {
     await prefs.remove(_playbackVersionIdKey);
     await prefs.remove(_playbackPositionMsKey);
     await prefs.remove(_playbackQueueIdsKey);
+  }
+
+  Future<void> _persistPlaybackPosition() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(
+        _playbackPositionMsKey,
+        currentPosition.inMilliseconds,
+      );
+    } catch (_) {}
   }
 
   Future<void> _persistPlaybackState() async {
@@ -1092,6 +1112,7 @@ class AudioPlayerProvider extends ChangeNotifier {
       NativeAudioHelper.hideNotification();
     }
     music.stopRustPlayback();
+    _position.dispose();
     super.dispose();
   }
 }

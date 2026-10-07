@@ -53,10 +53,6 @@ class PlayBar extends StatelessWidget {
     final cfg = context.tokens;
     final playingSong = audioProvider.playingSong;
 
-    final curMs = audioProvider.currentPosition.inMilliseconds.toDouble();
-    final totMs = audioProvider.totalDuration.inMilliseconds.toDouble();
-    final progress = totMs > 0 ? curMs / totMs : 0.0;
-
     return Material(
       color: Colors.transparent,
       child: Container(
@@ -67,22 +63,6 @@ class PlayBar extends StatelessWidget {
         ),
         child: Stack(
           children: [
-            // Top-edge seek bar: 1:1 drag, no decorative motion.
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: AetherSeekBar(
-                progress: progress,
-                height: 4,
-                onSeek: (pct) {
-                  final targetMs =
-                      (audioProvider.totalDuration.inMilliseconds * pct)
-                          .toInt();
-                  audioProvider.seek(Duration(milliseconds: targetMs));
-                },
-              ),
-            ),
             Padding(
               padding: const EdgeInsets.fromLTRB(
                 AetherSpace.xxxl,
@@ -270,9 +250,12 @@ class PlayBar extends StatelessWidget {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.end,
                       children: [
-                        Text(
-                          '${_formatDuration(audioProvider.currentPosition)} / ${_formatDuration(audioProvider.totalDuration)}',
-                          style: AetherType.captionStyle(cfg.textSecondary),
+                        ValueListenableBuilder<Duration>(
+                          valueListenable: audioProvider.positionListenable,
+                          builder: (context, position, _) => Text(
+                            '${_formatDuration(position)} / ${_formatDuration(audioProvider.totalDuration)}',
+                            style: AetherType.captionStyle(cfg.textSecondary),
+                          ),
                         ),
                         const SizedBox(width: AetherSpace.lg),
                         Icon(
@@ -299,6 +282,29 @@ class PlayBar extends StatelessWidget {
                     ),
                   ),
                 ],
+              ),
+            ),
+            // Top-edge seek bar: 1:1 drag, no decorative motion.
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: ValueListenableBuilder<Duration>(
+                valueListenable: audioProvider.positionListenable,
+                builder: (context, position, _) => AetherSeekBar(
+                  progress: audioProvider.totalDuration.inMilliseconds > 0
+                      ? position.inMilliseconds /
+                            audioProvider.totalDuration.inMilliseconds
+                      : 0,
+                  height: 4,
+                  onSeek: (pct) => audioProvider.seek(
+                    Duration(
+                      milliseconds:
+                          (audioProvider.totalDuration.inMilliseconds * pct)
+                              .round(),
+                    ),
+                  ),
+                ),
               ),
             ),
           ],

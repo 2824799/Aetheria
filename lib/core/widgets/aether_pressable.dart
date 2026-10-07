@@ -1,4 +1,5 @@
 import 'dart:ui' show PointerDeviceKind;
+import 'package:flutter/gestures.dart' show kPrimaryButton, computeHitSlop;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:aetheria/core/theme/aetheria_theme.dart';
@@ -57,6 +58,8 @@ class _AetherPressableState extends State<AetherPressable> {
   bool _pressed = false;
   bool _focused = false;
   bool _finePointer = false;
+  int? _pressedPointer;
+  Offset? _pressOrigin;
 
   bool get _canInteract =>
       widget.enabled &&
@@ -73,6 +76,16 @@ class _AetherPressableState extends State<AetherPressable> {
   void _setPressed(bool value) {
     if (_pressed == value) return;
     setState(() => _pressed = value);
+  }
+
+  @override
+  void didUpdateWidget(covariant AetherPressable oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_canInteract) {
+      _pressed = false;
+      _hovered = false;
+      _pressedPointer = null;
+    }
   }
 
   @override
@@ -98,7 +111,7 @@ class _AetherPressableState extends State<AetherPressable> {
       child: AnimatedContainer(
         duration: AetherMotion.duration(context, AetherMotion.fast),
         curve: AetherMotion.curve(context),
-        decoration: BoxDecoration(
+        foregroundDecoration: BoxDecoration(
           color: _pressed && widget.pressedColor != null
               ? widget.pressedColor
               : (showHover ? widget.hoverColor : null),
@@ -129,7 +142,7 @@ class _AetherPressableState extends State<AetherPressable> {
           : <Type, Action<Intent>>{
               ActivateIntent: CallbackAction<ActivateIntent>(
                 onInvoke: (_) {
-                  widget.onTap?.call();
+                  if (_canInteract) widget.onTap?.call();
                   return null;
                 },
               ),
@@ -145,17 +158,19 @@ class _AetherPressableState extends State<AetherPressable> {
               event.kind == PointerDeviceKind.mouse ||
               event.kind == PointerDeviceKind.trackpad;
           if (_finePointer != fine) {
-            setState(() => _finePointer = fine);
+            _finePointer = fine;
           }
           if (!widget.enableHover || !_canInteract || !fine) return;
           _setHovered(true);
         },
         onExit: (_) {
           if (!mounted) return;
-          setState(() {
-            _hovered = false;
-            _pressed = false;
-          });
+          if (_hovered || _pressed) {
+            setState(() {
+              _hovered = false;
+              _pressed = false;
+            });
+          }
         },
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
@@ -163,20 +178,6 @@ class _AetherPressableState extends State<AetherPressable> {
           onLongPress: _canInteract ? widget.onLongPress : null,
           onLongPressStart: _canInteract ? widget.onLongPressStart : null,
           onSecondaryTap: _canInteract ? widget.onSecondaryTap : null,
-          onTapDown: (details) {
-            if (!_canInteract) return;
-            final fine =
-                details.kind == PointerDeviceKind.mouse ||
-                details.kind == PointerDeviceKind.trackpad;
-            if (_finePointer != fine) {
-              setState(() {
-                _finePointer = fine;
-                _pressed = true;
-              });
-            } else {
-              _setPressed(true);
-            }
-          },
           onTapUp: (_) {
             if (!mounted) return;
             _setPressed(false);
@@ -185,7 +186,37 @@ class _AetherPressableState extends State<AetherPressable> {
             if (!mounted) return;
             _setPressed(false);
           },
-          child: child,
+          child: Listener(
+            onPointerDown: (event) {
+              if (!_canInteract ||
+                  event.buttons != kPrimaryButton ||
+                  _pressedPointer != null) {
+                return;
+              }
+              _pressedPointer = event.pointer;
+              _pressOrigin = event.position;
+              _setPressed(true);
+            },
+            onPointerMove: (event) {
+              if (event.pointer == _pressedPointer &&
+                  _pressed &&
+                  (event.position - _pressOrigin!).distance >
+                      computeHitSlop(event.kind, null)) {
+                _setPressed(false);
+              }
+            },
+            onPointerUp: (event) {
+              if (event.pointer != _pressedPointer) return;
+              _pressedPointer = null;
+              _setPressed(false);
+            },
+            onPointerCancel: (event) {
+              if (event.pointer != _pressedPointer) return;
+              _pressedPointer = null;
+              _setPressed(false);
+            },
+            child: child,
+          ),
         ),
       ),
     );

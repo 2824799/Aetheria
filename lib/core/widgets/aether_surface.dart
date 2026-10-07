@@ -1,4 +1,5 @@
 import 'dart:ui';
+import 'package:flutter/foundation.dart';
 
 import 'package:flutter/material.dart';
 import 'package:aetheria/core/theme/app_theme_config.dart';
@@ -43,30 +44,39 @@ class AetherSurface extends StatelessWidget {
     final cfg = context.tokens;
     final radius = borderRadius ?? BorderRadius.circular(AetherRadius.lg);
     final resolved = _resolve(cfg);
-    final effectiveBorder = border ??
+    final effectiveBorder =
+        border ??
         Border.all(color: resolved.borderColor, width: resolved.borderWidth);
 
+    final sigma = blur ?? cfg.glassBlurDefault;
+    final useBlur =
+        resolved.useBlur &&
+        sigma > 0 &&
+        defaultTargetPlatform != TargetPlatform.linux &&
+        !(MediaQuery.maybeDisableAnimationsOf(context) ?? false);
+    final background = color ?? resolved.color;
+    final shadows = boxShadow ?? resolved.shadows;
     Widget content = Container(
       width: width,
       height: height,
       padding: padding,
       decoration: BoxDecoration(
-        color: color ?? resolved.color,
+        color: resolved.useBlur && !useBlur
+            ? Color.alphaBlend(background, cfg.bgSolid)
+            : background,
         borderRadius: radius,
         border: effectiveBorder,
-        boxShadow: boxShadow ?? resolved.shadows,
       ),
       child: child,
     );
 
-    if (resolved.useBlur) {
-      final sigma = blur ?? cfg.glassBlurDefault;
+    if (useBlur) {
       content = ClipRRect(
         borderRadius: radius,
         clipBehavior: clipBehavior,
         child: BackdropFilter(
           filter: ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
-          child: content,
+          child: RepaintBoundary(child: content),
         ),
       );
     } else if (borderRadius != null || level != AetherSurfaceLevel.flat) {
@@ -77,6 +87,12 @@ class AetherSurface extends StatelessWidget {
       );
     }
 
+    if (shadows != null && shadows.isNotEmpty) {
+      content = DecoratedBox(
+        decoration: BoxDecoration(borderRadius: radius, boxShadow: shadows),
+        child: content,
+      );
+    }
     if (margin != null) {
       content = Padding(padding: margin!, child: content);
     }
@@ -107,7 +123,9 @@ class AetherSurface extends StatelessWidget {
           useBlur: false,
           shadows: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: cfg.brightness == Brightness.dark ? 0.28 : 0.08),
+              color: Colors.black.withValues(
+                alpha: cfg.brightness == Brightness.dark ? 0.28 : 0.08,
+              ),
               blurRadius: 18,
               offset: const Offset(0, 8),
             ),
@@ -121,7 +139,9 @@ class AetherSurface extends StatelessWidget {
           useBlur: false,
           shadows: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: cfg.brightness == Brightness.dark ? 0.4 : 0.12),
+              color: Colors.black.withValues(
+                alpha: cfg.brightness == Brightness.dark ? 0.4 : 0.12,
+              ),
               blurRadius: 28,
               offset: const Offset(0, 12),
             ),
