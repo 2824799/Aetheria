@@ -200,13 +200,13 @@ class SettingsPlaybackTab extends StatelessWidget {
         ),
         AetherSwitchTile(
           title: '峰值保护',
-          subtitle: 'DSP 后自动留出约 -1dB headroom，避免隐藏削波。',
+          subtitle: '仅在信号超过满刻度时降低电平，防止削波；触发时会改变音量。',
           value: audioProvider.peakProtectionEnabled,
           onChanged: audioProvider.setPeakProtectionEnabled,
         ),
         AetherSwitchTile(
           title: '整数输出抖动',
-          subtitle: '仅在设备不是 f32 输出时生效，降低量化失真。',
+          subtitle: '仅在整数输出需要量化时加入微弱抖动，降低量化失真。',
           value: audioProvider.ditherEnabled,
           onChanged: audioProvider.setDitherEnabled,
         ),

@@ -40,7 +40,7 @@ class SettingsAudioOutputInfoView extends StatelessWidget {
             SettingsInfoPill(cfg: cfg, label: '设备', value: deviceName),
             SettingsInfoPill(
               cfg: cfg,
-              label: '格式',
+              label: '应用输出',
               value: info == null
                   ? 'unknown'
                   : '${info.sampleRate} Hz / ${info.channels}ch / ${info.sampleFormat}',
@@ -71,10 +71,25 @@ class SettingsAudioOutputInfoView extends StatelessWidget {
             SettingsInfoPill(cfg: cfg, label: '欠载', value: underruns),
           ],
         ),
+        const SizedBox(height: AetherSpace.md),
+        Text(
+          '此处显示应用交给系统的音频格式。系统混音、设备音效和蓝牙编码仍可能改变信号，不能据此确认逐位无损。',
+          style: AetherType.captionStyle(cfg.textSecondary),
+        ),
+        if (audioProvider.volume != 1.0 ||
+            audioProvider.volumeBalanceEnabled ||
+            (audioProvider.pitchEnabled &&
+                audioProvider.pitchSemitones.abs() > 0.01)) ...[
+          const SizedBox(height: AetherSpace.sm),
+          Text(
+            '当前启用了音量调整、响度均衡或变调，输出波形会与原始音频不同。',
+            style: AetherType.captionStyle(cfg.textSecondary),
+          ),
+        ],
         if (hasUnderrun) ...[
           const SizedBox(height: AetherSpace.md),
           Text(
-            '检测到输出欠载，请提高处理缓冲或关闭高质量选项。',
+            '检测到输出欠载，请提高处理缓冲，或使用共享稳定模式。',
             style: AetherType.captionStyle(cfg.accent),
           ),
         ],

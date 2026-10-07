@@ -17,6 +17,7 @@ unsafe extern "C" {
     fn rubberband_live_reset(state: RubberBandLiveState);
     fn rubberband_live_set_pitch_scale(state: RubberBandLiveState, scale: f64);
     fn rubberband_live_set_formant_option(state: RubberBandLiveState, options: i32);
+    fn rubberband_live_get_start_delay(state: RubberBandLiveState) -> u32;
     fn rubberband_live_get_block_size(state: RubberBandLiveState) -> u32;
     fn rubberband_live_shift(
         state: RubberBandLiveState,
@@ -30,11 +31,20 @@ pub struct RubberBandPitchShifter {
     channels: usize,
     block_size: usize,
     pitch_scale: f64,
+    delay_remaining: usize,
+    input_frames: usize,
+    output_frames: usize,
     input_fifo: Vec<VecDeque<f32>>,
     output_fifo: Vec<VecDeque<f32>>,
     input_block: Vec<Vec<f32>>,
     output_block: Vec<Vec<f32>>,
 }
+
+// SAFETY: This wrapper uniquely owns the native state, exposes it through no
+// aliases, and requires &mut self for processing/configuration. The vendored
+// RubberBandLiveShifter.h thread-safety contract prohibits concurrent calls on
+// one instance, not transferring sole ownership between threads. Do not add Sync.
+unsafe impl Send for RubberBandPitchShifter {}
 
 impl RubberBandPitchShifter {
     pub fn new(
@@ -74,6 +84,9 @@ impl RubberBandPitchShifter {
             channels,
             block_size,
             pitch_scale,
+            delay_remaining: unsafe { rubberband_live_get_start_delay(state) } as usize,
+            input_frames: 0,
+            output_frames: 0,
             input_fifo: (0..channels).map(|_| VecDeque::new()).collect(),
             output_fifo: (0..channels).map(|_| VecDeque::new()).collect(),
             input_block: (0..channels).map(|_| vec![0.0; block_size]).collect(),
@@ -87,6 +100,9 @@ impl RubberBandPitchShifter {
             rubberband_live_reset(self.state);
             rubberband_live_set_pitch_scale(self.state, self.pitch_scale);
         }
+        self.delay_remaining = unsafe { rubberband_live_get_start_delay(self.state) } as usize;
+        self.input_frames = 0;
+        self.output_frames = 0;
         for fifo in &mut self.input_fifo {
             fifo.clear();
         }
@@ -111,6 +127,7 @@ impl RubberBandPitchShifter {
         }
 
         let frames = input.len() / self.channels;
+        self.input_frames += frames;
         self.push_interleaved(input);
         self.shift_ready_blocks();
         self.pop_interleaved(frames)
@@ -126,18 +143,16 @@ impl RubberBandPitchShifter {
 
     pub fn finish(&mut self) -> Vec<f32> {
         let _scope = profiler::scope("audio::rubberband::RubberBandPitchShifter::finish");
-        let pending = self.input_fifo.first().map_or(0, VecDeque::len);
-        if pending > 0 {
+        let remaining = self.input_frames.saturating_sub(self.output_frames);
+        // LiveShifter has fixed processing latency. Feed zero padding until every
+        // real input frame has a corresponding output; never expose the padding.
+        while self.output_fifo.first().map_or(0, VecDeque::len) < remaining {
             for channel_fifo in &mut self.input_fifo {
-                while channel_fifo.len() < self.block_size {
-                    channel_fifo.push_back(0.0);
-                }
+                channel_fifo.resize(self.block_size, 0.0);
             }
             self.shift_ready_blocks();
         }
-
-        let available = self.output_fifo.first().map_or(0, VecDeque::len);
-        self.pop_interleaved(available)
+        self.pop_interleaved(remaining)
     }
 
     fn push_interleaved(&mut self, input: &[f32]) {
@@ -180,8 +195,10 @@ impl RubberBandPitchShifter {
                 rubberband_live_shift(self.state, input_ptrs.as_ptr(), output_ptrs.as_mut_ptr());
             }
 
+            let skip = self.delay_remaining.min(self.block_size);
+            self.delay_remaining -= skip;
             for channel in 0..self.channels {
-                self.output_fifo[channel].extend(&self.output_block[channel]);
+                self.output_fifo[channel].extend(&self.output_block[channel][skip..]);
             }
         }
     }
@@ -189,7 +206,10 @@ impl RubberBandPitchShifter {
     fn pop_interleaved(&mut self, requested_frames: usize) -> Vec<f32> {
         let _scope = profiler::scope("audio::rubberband::RubberBandPitchShifter::pop_interleaved");
         let available = self.output_fifo.first().map_or(0, VecDeque::len);
-        let frames = requested_frames.min(available);
+        let frames = requested_frames
+            .min(available)
+            .min(self.input_frames.saturating_sub(self.output_frames));
+        self.output_frames += frames;
         let mut output = Vec::with_capacity(frames * self.channels);
 
         for _ in 0..frames {
@@ -232,5 +252,53 @@ fn formant_option(preserve_formant: bool) -> i32 {
         RUBBERBAND_LIVE_OPTION_FORMANT_PRESERVED
     } else {
         RUBBERBAND_LIVE_OPTION_FORMANT_SHIFTED
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pitch_delay_is_trimmed_and_tail_keeps_exact_duration() {
+        for frames in [1, 129, 2048, 12001] {
+            for window in ["latency", "quality"] {
+                let mut shifter =
+                    RubberBandPitchShifter::new(48000, 2, 1.12246, window, false).unwrap();
+                let input: Vec<f32> = (0..frames * 2)
+                    .map(|n| (n as f32 / 2.0 * 0.13).sin() * 0.1)
+                    .collect();
+                let mut output = Vec::new();
+                for block in input.chunks(258) {
+                    output.extend(shifter.process(block, 1.12246));
+                }
+                output.extend(shifter.finish());
+                assert_eq!(output.len(), input.len(), "{frames} frames/{window}");
+                assert!(output.iter().all(|s| s.is_finite()));
+                assert!(shifter.finish().is_empty());
+                shifter.reset();
+                assert!(shifter.finish().is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn prefilled_processor_can_move_without_losing_state() {
+        let input = vec![0.1; 16000];
+        let mut shifter = RubberBandPitchShifter::new(48000, 2, 1.0, "latency", false).unwrap();
+        let mut output = shifter.process(&input[..8000], 1.0);
+        let tail = std::thread::spawn(move || {
+            let mut tail = shifter.process(&input[8000..], 1.0);
+            tail.extend(shifter.finish());
+            tail
+        })
+        .join()
+        .unwrap();
+        output.extend(tail);
+        assert_eq!(output.len(), 16000);
+        // At unity pitch the sustained signal must be present at both ends of
+        // the compensated stream, not replaced with the processor's startup delay.
+        assert!(output[256..1024].iter().any(|s| s.abs() > 0.01));
+        assert!(output[15000..].iter().any(|s| s.abs() > 0.01));
     }
 }

@@ -56,7 +56,7 @@ class AudioPlayerProvider extends ChangeNotifier {
   String rubberbandWindow = 'latency';
   bool rubberbandFormantPreserved = false;
   bool rubberbandVocalOnlyPitch = false;
-  String resamplerQuality = 'standard';
+  String resamplerQuality = 'high';
   String outputLatencyMode = 'shared-default';
   AudioOutputInfo? audioOutputInfo;
   bool developerModeEnabled = false;
@@ -510,7 +510,7 @@ class AudioPlayerProvider extends ChangeNotifier {
   }
 
   String _normalizeResamplerQuality(String? value) {
-    return value == 'high' ? 'high' : 'standard';
+    return value == 'standard' ? 'standard' : 'high';
   }
 
   String _normalizeOutputLatencyMode(String? value) {
