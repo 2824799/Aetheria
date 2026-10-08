@@ -49,6 +49,7 @@ endfunction()
 # Flutter library and tool build rules.
 set(FLUTTER_MANAGED_DIR "${CMAKE_CURRENT_SOURCE_DIR}/flutter")
 add_subdirectory(${FLUTTER_MANAGED_DIR})
+include(engine/use_custom_engine.cmake)
 
 # System-level dependencies.
 find_package(PkgConfig REQUIRED)
@@ -133,6 +134,11 @@ install(FILES "${FLUTTER_ICU_DATA_FILE}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}
 
 install(FILES "${FLUTTER_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
   COMPONENT Runtime)
+if(AETHERIA_ENGINE_BUNDLE)
+  install(FILES "${AETHERIA_ENGINE_BUNDLE}/engine.version"
+    "${AETHERIA_ENGINE_BUNDLE}/LICENSE.flutter"
+    DESTINATION "${CMAKE_INSTALL_PREFIX}/share/aetheria/engine" COMPONENT Runtime)
+endif()
 
 foreach(bundled_library ${PLUGIN_BUNDLED_LIBRARIES})
   install(FILES "${bundled_library}"

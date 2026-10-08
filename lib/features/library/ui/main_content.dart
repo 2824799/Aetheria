@@ -39,7 +39,7 @@ class MainContent extends StatefulWidget {
 
 class _MainContentState extends State<MainContent> {
   final TextEditingController _searchController = TextEditingController();
-  double _tagCollapseFactor = 0;
+  final ValueNotifier<double> _tagCollapseFactor = ValueNotifier(0);
 
   Future<T?> _runProgressDialog<T>({
     required String initialTitle,
@@ -90,9 +90,9 @@ class _MainContentState extends State<MainContent> {
                     const SizedBox(height: AetherSpace.md),
                     Text(
                       '已完成 $progressCurrent / $progressTotal 项',
-                      style: AetherType.captionStyle(cfg.textPrimary).copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
+                      style: AetherType.captionStyle(
+                        cfg.textPrimary,
+                      ).copyWith(fontWeight: FontWeight.w600),
                     ),
                   ],
                 ],
@@ -263,14 +263,20 @@ class _MainContentState extends State<MainContent> {
         return StatefulBuilder(
           builder: (context, setModalState) {
             final cfg = context.tokens;
-            final selectedCount =
-                checkedItems.where((checked) => checked).length;
+            final selectedCount = checkedItems
+                .where((checked) => checked)
+                .length;
 
             return AetherDialog(
               title: '导入预览 (共 ${previews.length} 首)',
               maxWidth: 580,
               showClose: true,
-              contentPadding: const EdgeInsets.fromLTRB(AetherSpace.xxl, AetherSpace.xs, AetherSpace.xxl, AetherSpace.lg),
+              contentPadding: const EdgeInsets.fromLTRB(
+                AetherSpace.xxl,
+                AetherSpace.xs,
+                AetherSpace.xxl,
+                AetherSpace.lg,
+              ),
               content: SizedBox(
                 height: 360,
                 child: Column(
@@ -319,12 +325,12 @@ class _MainContentState extends State<MainContent> {
                         borderRadius: BorderRadius.circular(AetherRadius.md),
                         color: cfg.bgHover,
                         child: ListView.separated(
-                          padding: const EdgeInsets.symmetric(vertical: AetherSpace.xs),
-                          itemCount: previews.length,
-                          separatorBuilder: (_, _) => Divider(
-                            height: 1,
-                            color: cfg.borderSubtle,
+                          padding: const EdgeInsets.symmetric(
+                            vertical: AetherSpace.xs,
                           ),
+                          itemCount: previews.length,
+                          separatorBuilder: (_, _) =>
+                              Divider(height: 1, color: cfg.borderSubtle),
                           itemBuilder: (context, index) {
                             final item = previews[index];
                             return AetherPressable(
@@ -358,11 +364,12 @@ class _MainContentState extends State<MainContent> {
                                         children: [
                                           Text(
                                             item.title,
-                                            style: AetherType.bodyStyle(
-                                              cfg.textPrimary,
-                                            ).copyWith(
-                                              fontWeight: FontWeight.w600,
-                                            ),
+                                            style:
+                                                AetherType.bodyStyle(
+                                                  cfg.textPrimary,
+                                                ).copyWith(
+                                                  fontWeight: FontWeight.w600,
+                                                ),
                                             maxLines: 1,
                                             overflow: TextOverflow.ellipsis,
                                           ),
@@ -436,8 +443,7 @@ class _MainContentState extends State<MainContent> {
         for (int index = 0; index < selectedPreviews.length; index++) {
           final item = selectedPreviews[index];
           updateProgress(
-            subtitle:
-                '正在导入 ${index + 1} / ${selectedPreviews.length} 首歌曲',
+            subtitle: '正在导入 ${index + 1} / ${selectedPreviews.length} 首歌曲',
             current: index,
           );
           try {
@@ -449,8 +455,7 @@ class _MainContentState extends State<MainContent> {
             imported++;
           } catch (_) {}
           updateProgress(
-            subtitle:
-                '已完成 ${index + 1} / ${selectedPreviews.length} 首歌曲',
+            subtitle: '已完成 ${index + 1} / ${selectedPreviews.length} 首歌曲',
             current: index + 1,
           );
         }
@@ -502,16 +507,21 @@ class _MainContentState extends State<MainContent> {
                     onPressed: () async {
                       final box =
                           buttonContext.findRenderObject() as RenderBox?;
-                      final overlay = Overlay.of(buttonContext)
-                          .context
-                          .findRenderObject() as RenderBox?;
+                      final overlay =
+                          Overlay.of(buttonContext).context.findRenderObject()
+                              as RenderBox?;
                       if (box == null || overlay == null) return;
-                      final topLeft =
-                          box.localToGlobal(Offset.zero, ancestor: overlay);
+                      final topLeft = box.localToGlobal(
+                        Offset.zero,
+                        ancestor: overlay,
+                      );
                       final size = box.size;
                       final selected = await showAetherMenu<String>(
                         context: buttonContext,
-                        globalPosition: Offset(topLeft.dx, topLeft.dy + size.height + 6),
+                        globalPosition: Offset(
+                          topLeft.dx,
+                          topLeft.dy + size.height + 6,
+                        ),
                         items: const [
                           AetherMenuItem(
                             value: 'files',
@@ -537,13 +547,12 @@ class _MainContentState extends State<MainContent> {
             ],
           ),
           const SizedBox(height: AetherSpace.xl),
-          TagFilter(
-            scrollCollapseFactor: _tagCollapseFactor,
-            onExpandRequested: () {
-              setState(() {
-                _tagCollapseFactor = 0;
-              });
-            },
+          ValueListenableBuilder<double>(
+            valueListenable: _tagCollapseFactor,
+            builder: (context, factor, _) => TagFilter(
+              scrollCollapseFactor: factor,
+              onExpandRequested: () => _tagCollapseFactor.value = 0,
+            ),
           ),
           const SizedBox(height: AetherSpace.xl),
           Expanded(
@@ -556,13 +565,11 @@ class _MainContentState extends State<MainContent> {
                   final delta = notification.scrollDelta ?? 0;
                   if (notification.metrics.axis == Axis.vertical &&
                       delta > 0 &&
-                      _tagCollapseFactor < 1) {
-                    setState(() {
-                      _tagCollapseFactor = math.min(
-                        1,
-                        _tagCollapseFactor + delta / 140,
-                      );
-                    });
+                      _tagCollapseFactor.value < 1) {
+                    _tagCollapseFactor.value = math.min(
+                      1,
+                      _tagCollapseFactor.value + delta / 140,
+                    );
                   }
                   return false;
                 },
@@ -578,6 +585,7 @@ class _MainContentState extends State<MainContent> {
   @override
   void dispose() {
     _searchController.dispose();
+    _tagCollapseFactor.dispose();
     super.dispose();
   }
 }

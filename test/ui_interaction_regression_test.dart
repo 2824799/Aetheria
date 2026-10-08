@@ -240,8 +240,8 @@ void main() {
   ) async {
     await tester.binding.setSurfaceSize(const Size(1280, 800));
     addTearDown(() => tester.binding.setSurfaceSize(null));
-    final audio = TestAudio();
-    final library = TestLibrary();
+    final audio = TestAudio()..activeSong = testSong('0');
+    final library = TestLibrary()..songs = [testSong('0')];
     final theme = UIThemeProvider();
     final sync = TestSync();
     await tester.pumpWidget(
@@ -271,6 +271,7 @@ void main() {
       expect(find.byType(DetailPane), findsNothing);
       expect(drawerBarrier, findsNothing);
     }
+    expect(library.coverRequests, 1, reason: 'Reopening the same drawer must retain its cover state');
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
     audio.dispose();

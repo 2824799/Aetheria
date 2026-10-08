@@ -41,6 +41,7 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
   bool _guideVisible = false;
   bool _autoScrolling = false;
   ValueListenable<Duration>? _position;
+  bool _visible = true;
 
   double get _lineExtent => widget.compact ? 72 : 84;
 
@@ -63,6 +64,7 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _visible = TickerMode.valuesOf(context).enabled;
     final position = context.read<AudioPlayerProvider>().positionListenable;
     if (!identical(position, _position)) {
       _position?.removeListener(_onPositionChanged);
@@ -78,7 +80,7 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
       : -1;
 
   void _onPositionChanged() {
-    if (mounted && _activeIndex != _lastActiveIndex) setState(() {});
+    if (mounted && _visible && _activeIndex != _lastActiveIndex) setState(() {});
   }
 
   void _parseTimeline() {

@@ -11,7 +11,7 @@ import 'package:flutter/widgets.dart';
 class AetherMotion {
   AetherMotion._();
 
-  static const Duration press = Duration(milliseconds: 120);
+  static const Duration press = Duration(milliseconds: 80);
   static const Duration fast = Duration(milliseconds: 150);
   static const Duration normal = Duration(milliseconds: 200);
   static const Duration panel = Duration(milliseconds: 240);
@@ -67,7 +67,10 @@ class AetherMotion {
   static const double modalFromScale = 0.96;
 
   /// Enter scale when reduced motion is preferred (no zoom).
-  static double fromScale(BuildContext context, [double normal = modalFromScale]) {
+  static double fromScale(
+    BuildContext context, [
+    double normal = modalFromScale,
+  ]) {
     return reduce(context) ? 1.0 : normal;
   }
 }

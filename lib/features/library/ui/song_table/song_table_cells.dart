@@ -10,6 +10,7 @@ class SongTableCellBuilder {
     required this.columnWidths,
     required this.columnOrder,
     required this.onResize,
+    required this.onResizeEnd,
     required this.onReorder,
     this.headerHeight = 40,
   });
@@ -17,6 +18,7 @@ class SongTableCellBuilder {
   final Map<SongColumnKey, double> columnWidths;
   final List<SongColumnKey> columnOrder;
   final void Function(SongColumnKey column, double delta) onResize;
+  final VoidCallback onResizeEnd;
   final void Function(SongColumnKey dragged, SongColumnKey target) onReorder;
   final double headerHeight;
 
@@ -90,6 +92,8 @@ class SongTableCellBuilder {
                     behavior: HitTestBehavior.opaque,
                     onHorizontalDragUpdate: (details) =>
                         onResize(column, details.delta.dx),
+                    onHorizontalDragEnd: (_) => onResizeEnd(),
+                    onHorizontalDragCancel: onResizeEnd,
                     child: Container(
                       width: 12,
                       alignment: Alignment.center,

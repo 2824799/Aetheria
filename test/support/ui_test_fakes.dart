@@ -15,6 +15,14 @@ Song testSong(String id) => Song(
 
 class TestLibrary extends LibraryProvider {
   int displayReads = 0;
+  int lyricFlagReads = 0;
+  int coverRequests = 0;
+  @override
+  bool songHasLyrics(Song song) {
+    lyricFlagReads++;
+    return super.songHasLyrics(song);
+  }
+
   @override
   Future<void> loadLibrary() async {
     isLoading = false;
@@ -28,7 +36,10 @@ class TestLibrary extends LibraryProvider {
   }
 
   @override
-  Future<String?> ensureSongCover(Song song) async => null;
+  Future<String?> ensureSongCover(Song song) async {
+    coverRequests++;
+    return null;
+  }
 }
 
 class TestAudio extends ChangeNotifier implements AudioPlayerProvider {
@@ -44,6 +55,22 @@ class TestAudio extends ChangeNotifier implements AudioPlayerProvider {
   Song? playingSong;
   @override
   Song? activeSong;
+  @override
+  AudioVersion? playingVersion;
+  @override
+  String activeTab = 'versions';
+  @override
+  void setActiveSong(Song? song) {
+    activeSong = song;
+    notifyListeners();
+  }
+
+  @override
+  void setActiveTab(String tab) {
+    activeTab = tab;
+    notifyListeners();
+  }
+
   @override
   bool isPlaying = false;
   @override
@@ -65,6 +92,7 @@ class TestAudio extends ChangeNotifier implements AudioPlayerProvider {
     int? audioServerPort,
   }) async {}
   int nextCalls = 0;
+  int playCalls = 0;
   final seeks = <Duration>[];
   @override
   Future<void> seek(Duration value) async {
@@ -78,7 +106,24 @@ class TestAudio extends ChangeNotifier implements AudioPlayerProvider {
   }
 
   @override
-  Future<void> playPause() async {}
+  Future<void> playPause() async {
+    isPlaying = !isPlaying;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> playSong(
+    Song song,
+    List<Song> queue,
+    String libraryPath, {
+    int? audioServerPort,
+  }) async {
+    playCalls++;
+    playingSong = activeSong = song;
+    isPlaying = true;
+    notifyListeners();
+  }
+
   @override
   void playPrevious() {}
   @override

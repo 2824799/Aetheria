@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:aetheria/core/widgets/aether_icon_button.dart';
 import 'package:aetheria/core/theme/aetheria_theme.dart';
 import 'package:aetheria/core/theme/tokens/radius.dart';
 import 'package:aetheria/core/theme/tokens/space.dart';
@@ -137,12 +138,10 @@ class AetherTextField extends StatelessWidget {
         prefixIconConstraints: const BoxConstraints(minWidth: 0, minHeight: 0),
         suffixIcon: suffix == null
             ? null
-            : Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: suffix,
-              ),
+            : Padding(padding: const EdgeInsets.only(right: 8), child: suffix),
         suffixIconConstraints: const BoxConstraints(minWidth: 0, minHeight: 0),
-        contentPadding: contentPadding ??
+        contentPadding:
+            contentPadding ??
             (isPlain
                 ? const EdgeInsets.symmetric(vertical: AetherSpace.xxs)
                 : EdgeInsets.symmetric(
@@ -208,13 +207,15 @@ class AetherSearchField extends StatelessWidget {
         valueListenable: textController,
         builder: (context, value, _) {
           if (value.text.isEmpty) return const SizedBox.shrink();
-          return GestureDetector(
-            onTap: () {
+          return AetherIconButton.dense(
+            tooltip: '清空',
+            icon: Icons.close,
+            color: cfg.textTertiary,
+            onPressed: () {
               textController.clear();
               onChanged?.call('');
               onClear?.call();
             },
-            child: Icon(Icons.close, size: 14, color: cfg.textTertiary),
           );
         },
       );

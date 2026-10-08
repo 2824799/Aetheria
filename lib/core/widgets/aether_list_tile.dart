@@ -47,22 +47,27 @@ class AetherListTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cfg = context.tokens;
-    final canInteract = enabled && (onTap != null || onLongPress != null);
+    final canInteract =
+        enabled &&
+        (onTap != null || onLongPress != null || onSecondaryTap != null);
     final radius = BorderRadius.circular(AetherRadius.md);
     final titleColor = destructive
         ? cfg.danger
         : warning
-            ? cfg.warning
-            : (selected ? cfg.accent : (canInteract ? cfg.textPrimary : cfg.textTertiary));
+        ? cfg.warning
+        : (selected
+              ? cfg.accent
+              : (canInteract ? cfg.textPrimary : cfg.textTertiary));
     final iconColor = destructive
         ? cfg.danger
         : warning
-            ? cfg.warning
-            : (selected ? cfg.accent : cfg.textSecondary);
+        ? cfg.warning
+        : (selected ? cfg.accent : cfg.textSecondary);
     final vPad = dense ? AetherSpace.sm : AetherSpace.md;
     final hPad = dense ? AetherSpace.md : AetherSpace.lg;
 
-    final leadingWidget = leading ??
+    final leadingWidget =
+        leading ??
         (icon != null
             ? Icon(icon, size: AetherIconSize.lg, color: iconColor)
             : null);
@@ -80,8 +85,8 @@ class AetherListTile extends StatelessWidget {
       child: AnimatedContainer(
         duration: AetherMotion.duration(context, AetherMotion.fast),
         curve: AetherMotion.curve(context),
-        padding: padding ??
-            EdgeInsets.symmetric(horizontal: hPad, vertical: vPad),
+        padding:
+            padding ?? EdgeInsets.symmetric(horizontal: hPad, vertical: vPad),
         decoration: BoxDecoration(
           color: selected ? cfg.selection : Colors.transparent,
           borderRadius: radius,
@@ -102,9 +107,9 @@ class AetherListTile extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: dense
-                        ? AetherType.bodyStyle(titleColor).copyWith(
-                              fontWeight: FontWeight.w600,
-                            )
+                        ? AetherType.bodyStyle(
+                            titleColor,
+                          ).copyWith(fontWeight: FontWeight.w600)
                         : AetherType.titleSmStyle(titleColor),
                   ),
                   if (subtitle != null) ...[

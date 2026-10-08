@@ -268,7 +268,16 @@ class DetailPane extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final audioProvider = context.watch<AudioPlayerProvider>();
+    final audioProvider = context.read<AudioPlayerProvider>();
+    context.select<AudioPlayerProvider,
+        ({Song? activeSong, String? playingId, AudioVersion? version, String tab})>(
+      (audio) => (
+        activeSong: audio.activeSong,
+        playingId: audio.playingSong?.id,
+        version: audio.playingVersion,
+        tab: audio.activeTab,
+      ),
+    );
     final libraryProvider = context.watch<LibraryProvider>();
     context.watch<UIThemeProvider>();
     final cfg = context.tokens;
@@ -826,8 +835,8 @@ class _EditableMetadataTextState extends State<_EditableMetadataText> {
       onExit: (_) => setState(() {
         _isHovered = false;
       }),
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
+      child: AetherPressable(
+        pressScale: 1,
         onTap: _startEditing,
         child: AnimatedContainer(
           duration: AetherMotion.duration(context, AetherMotion.press),

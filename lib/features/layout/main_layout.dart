@@ -31,6 +31,9 @@ class _MainLayoutState extends State<MainLayout>
   late AnimationController _drawerController;
   late Animation<Offset> _drawerSlide;
   late Animation<double> _scrimFade;
+  late CurvedAnimation _drawerCurve;
+  late final Widget _desktopContent;
+  bool _hasOpenedDetail = false;
   final SongTableController _songTableController = SongTableController();
   String? _handledSyncRequestId;
   bool _imeDismissedInBackground = false;
@@ -44,7 +47,8 @@ class _MainLayoutState extends State<MainLayout>
       reverseDuration: AetherMotion.exit(AetherMotion.panel),
       vsync: this,
     );
-    final curved = CurvedAnimation(
+    _desktopContent = MainContent(songTableController: _songTableController);
+    final curved = _drawerCurve = CurvedAnimation(
       parent: _drawerController,
       curve: AetherMotion.outQuart,
       reverseCurve: AetherMotion.out,
@@ -75,6 +79,7 @@ class _MainLayoutState extends State<MainLayout>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _drawerCurve.dispose();
     _drawerController.dispose();
     super.dispose();
   }
@@ -163,6 +168,7 @@ class _MainLayoutState extends State<MainLayout>
     );
 
     if (isDetailOpen) {
+      _hasOpenedDetail = true;
       if (_drawerController.status != AnimationStatus.forward &&
           _drawerController.status != AnimationStatus.completed) {
         if (AetherMotion.reduce(context)) {
@@ -251,50 +257,51 @@ class _MainLayoutState extends State<MainLayout>
                         RepaintBoundary(
                           child: ExcludeFocus(
                             excluding: audioProvider.isDetailOpen,
-                            child: MainContent(
-                              songTableController: _songTableController,
-                            ),
+                            child: _desktopContent,
                           ),
                         ),
                         Positioned.fill(
                           child: AnimatedBuilder(
                             animation: _drawerController,
-                            child: RepaintBoundary(
-                              child: Stack(
-                                children: [
-                                  Positioned.fill(
-                                    child: FadeTransition(
-                                      opacity: _scrimFade,
-                                      child: ModalBarrier(
-                                        color: cfg.scrim.withValues(
-                                          alpha: 0.28,
+                            child: _hasOpenedDetail
+                                ? Stack(
+                                    children: [
+                                      Positioned.fill(
+                                        child: FadeTransition(
+                                          opacity: _scrimFade,
+                                          child: ModalBarrier(
+                                            color: cfg.scrim.withValues(
+                                              alpha: 0.28,
+                                            ),
+                                            onDismiss: () {
+                                              _dismissKeyboard();
+                                              audioProvider.setDetailOpen(
+                                                false,
+                                              );
+                                            },
+                                          ),
                                         ),
-                                        onDismiss: () {
-                                          _dismissKeyboard();
-                                          audioProvider.setDetailOpen(false);
-                                        },
                                       ),
-                                    ),
-                                  ),
-                                  Positioned(
-                                    right: 0,
-                                    top: 0,
-                                    bottom: 0,
-                                    width: 380,
-                                    child: SlideTransition(
-                                      position: _drawerSlide,
-                                      child: const RepaintBoundary(
-                                        child: DetailPane(),
+                                      Positioned(
+                                        right: 0,
+                                        top: 0,
+                                        bottom: 0,
+                                        width: 380,
+                                        child: SlideTransition(
+                                          position: _drawerSlide,
+                                          child: const RepaintBoundary(
+                                            child: DetailPane(),
+                                          ),
+                                        ),
                                       ),
-                                    ),
-                                  ),
-                                ],
-                              ),
+                                    ],
+                                  )
+                                : const SizedBox.shrink(),
+                            builder: (context, child) => Visibility(
+                              visible: !_drawerController.isDismissed,
+                              maintainState: true,
+                              child: child!,
                             ),
-                            builder: (context, child) =>
-                                _drawerController.isDismissed
-                                ? const SizedBox.shrink()
-                                : child!,
                           ),
                         ),
                       ],

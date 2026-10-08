@@ -60,6 +60,9 @@ class _AetherPressableState extends State<AetherPressable> {
   bool _finePointer = false;
   int? _pressedPointer;
   Offset? _pressOrigin;
+  bool _pressPainted = false;
+  bool _releasePending = false;
+  int _pressEpoch = 0;
 
   bool get _canInteract =>
       widget.enabled &&
@@ -75,7 +78,27 @@ class _AetherPressableState extends State<AetherPressable> {
 
   void _setPressed(bool value) {
     if (_pressed == value) return;
+    final epoch = ++_pressEpoch;
+    _releasePending = false;
     setState(() => _pressed = value);
+    if (value) {
+      _pressPainted = false;
+      // A fast down/up can arrive between frames. Show one pressed frame,
+      // without delaying the action, before starting the release animation.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || epoch != _pressEpoch) return;
+        _pressPainted = true;
+        if (_releasePending) _setPressed(false);
+      });
+    }
+  }
+
+  void _releasePressed() {
+    if (_pressed && !_pressPainted) {
+      _releasePending = true;
+    } else {
+      _setPressed(false);
+    }
   }
 
   @override
@@ -85,6 +108,7 @@ class _AetherPressableState extends State<AetherPressable> {
       _pressed = false;
       _hovered = false;
       _pressedPointer = null;
+      _pressEpoch++;
     }
   }
 
@@ -106,14 +130,14 @@ class _AetherPressableState extends State<AetherPressable> {
 
     Widget child = AnimatedScale(
       scale: scale,
-      duration: AetherMotion.duration(context, AetherMotion.press),
+      duration: _pressed
+          ? Duration.zero
+          : AetherMotion.duration(context, AetherMotion.press),
       curve: AetherMotion.curve(context),
-      child: AnimatedContainer(
-        duration: AetherMotion.duration(context, AetherMotion.fast),
-        curve: AetherMotion.curve(context),
+      child: Container(
         foregroundDecoration: BoxDecoration(
-          color: _pressed && widget.pressedColor != null
-              ? widget.pressedColor
+          color: _pressed
+              ? (widget.pressedColor ?? cfg.pressed)
               : (showHover ? widget.hoverColor : null),
           borderRadius: radius,
           border: showFocusRing
@@ -180,7 +204,7 @@ class _AetherPressableState extends State<AetherPressable> {
           onSecondaryTap: _canInteract ? widget.onSecondaryTap : null,
           onTapUp: (_) {
             if (!mounted) return;
-            _setPressed(false);
+            _releasePressed();
           },
           onTapCancel: () {
             if (!mounted) return;
@@ -208,7 +232,7 @@ class _AetherPressableState extends State<AetherPressable> {
             onPointerUp: (event) {
               if (event.pointer != _pressedPointer) return;
               _pressedPointer = null;
-              _setPressed(false);
+              _releasePressed();
             },
             onPointerCancel: (event) {
               if (event.pointer != _pressedPointer) return;

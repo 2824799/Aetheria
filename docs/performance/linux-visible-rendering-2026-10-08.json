@@ -1,0 +1,40 @@
+{
+  "source": "Wayland wp_presentation.presented",
+  "presented_frames": 1485,
+  "duration_seconds": 8.993794,
+  "presented_fps": 165.00266739487253,
+  "nominal_hz": 165.00302368040894,
+  "interval_p50_ms": 6.06,
+  "interval_p95_ms": 6.168,
+  "interval_p99_ms": 6.21,
+  "interval_max_ms": 6.289,
+  "intervals_over_1_5_refresh": 0,
+  "discarded_total_in_trace": 0,
+  "warmup_seconds": 3,
+  "valid_for_visible_rendering": true,
+  "validation": {
+    "egl_pixels": [
+      "8 nonempty Flutter frames match the actual EGL back buffer byte for byte.",
+      "Step 1: 164 frames presented in the following second",
+      "Step 2: 117 frames presented in the following second",
+      "Step 3: 163 frames presented in the following second",
+      "Step 5: 147 frames presented in the following second",
+      "Step 6: 164 frames presented in the following second",
+      "Step 8: 132 frames presented in the following second",
+      "Resize, maximize, hide/restore twice, and teardown completed."
+    ],
+    "window_screenshot": "linux-rendering-fixed-2026-10-08.png",
+    "benchmark_screenshot": "linux-visible-benchmark-2026-10-08.png",
+    "fontconfig_enabled": true,
+    "installed_wayland_screenshot_verified": true
+  },
+  "flutter": {
+    "display_hz": 165.003,
+    "frames": 1649,
+    "wall_fps": 164.8998963572132,
+    "interval_p50_us": 6042,
+    "interval_p95_us": 7166,
+    "raster_mean_us": 240.9748427672956
+  },
+  "installed_engine_sha256": "c52eae5e762ac0faf1e8824df57cb1e213ddd7c384550b9b239b28564ddfb3c6"
+}

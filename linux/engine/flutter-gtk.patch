@@ -1,0 +1,241 @@
+--- a/engine/src/flutter/shell/platform/linux/fl_engine.cc
++++ b/engine/src/flutter/shell/platform/linux/fl_engine.cc
+@@ -16,6 +16,9 @@
+ #include "flutter/shell/platform/linux/fl_binary_messenger_private.h"
+ #include "flutter/shell/platform/linux/fl_display_monitor.h"
+ #include "flutter/shell/platform/linux/fl_engine_private.h"
++#include "aetheria_vsync.h"
++#include "aetheria_wayland.h"
++#include <gdk/gdkwayland.h>
+ #include "flutter/shell/platform/linux/fl_framebuffer.h"
+ #include "flutter/shell/platform/linux/fl_keyboard_handler.h"
+ #include "flutter/shell/platform/linux/fl_opengl_manager.h"
+@@ -37,6 +40,7 @@
+ 
+ struct _FlEngine {
+   GObject parent_instance;
++  AetheriaVsync* vsync;
+ 
+   // Thread the GLib main loop is running on.
+   GThread* thread;
+@@ -178,6 +182,7 @@
+   g_autoptr(GMutexLocker) locker = g_mutex_locker_new(&self->renderables_mutex);
+   GWeakRef* ref = g_new(GWeakRef, 1);
+   g_weak_ref_init(ref, G_OBJECT(renderable));
++  if (view_id == 0 && self->vsync && GTK_IS_WIDGET(renderable)) self->vsync->SetWidget(GTK_WIDGET(renderable));
+   g_hash_table_insert(self->renderables_by_view_id, GINT_TO_POINTER(view_id),
+                       ref);
+ }
+@@ -589,6 +594,7 @@
+ 
+ static void fl_engine_dispose(GObject* object) {
+   FlEngine* self = FL_ENGINE(object);
++  if (self->vsync) self->vsync->Stop();
+ 
+   if (self->engine != nullptr) {
+     if (self->embedder_api.Shutdown(self->engine) != kSuccess) {
+@@ -596,6 +602,9 @@
+     }
+     self->engine = nullptr;
+   }
++
++  delete self->vsync;
++  self->vsync = nullptr;
+ 
+   if (self->aot_data != nullptr) {
+     if (self->embedder_api.CollectAOTData(self->aot_data) != kSuccess) {
+@@ -663,6 +672,15 @@
+   self->embedder_api.struct_size = sizeof(FlutterEngineProcTable);
+   if (FlutterEngineGetProcAddresses(&self->embedder_api) != kSuccess) {
+     g_warning("Failed get get engine function pointers");
++  }
++
++  if (GDK_IS_WAYLAND_DISPLAY(gdk_display_get_default()) &&
++      g_strcmp0(g_getenv("AETHERIA_DIRECT_WAYLAND"), "0") != 0) {
++    self->vsync = new AetheriaVsync(
++      [](void* data, intptr_t baton, uint64_t start, uint64_t target) {
++        auto* engine = FL_ENGINE(data);
++        if (engine->engine) engine->embedder_api.OnVsync(engine->engine, baton, start, target);
++      }, self->embedder_api.GetCurrentTime, self);
+   }
+ 
+   self->opengl_manager = fl_opengl_manager_new();
+@@ -842,6 +860,10 @@
+       fl_dart_project_get_dart_entrypoint_arguments(self->project);
+ 
+   FlutterProjectArgs args = {};
++  if (self->vsync) {
++    args.vsync_callback = [](void* data, intptr_t baton) { FL_ENGINE(data)->vsync->Request(baton); };
++  }
++
+   args.struct_size = sizeof(FlutterProjectArgs);
+   args.assets_path = fl_dart_project_get_assets_path(self->project);
+   args.icu_data_path = fl_dart_project_get_icu_data_path(self->project);
+@@ -1576,3 +1598,8 @@
+   g_return_val_if_fail(FL_IS_ENGINE(self), nullptr);
+   return self->mouse_cursor_handler;
+ }
++
++void aetheria_engine_frame(FlEngine* engine) { if (engine->vsync) engine->vsync->Frame(); }
++void aetheria_engine_direct(FlEngine* engine, bool enabled) { if (engine->vsync) engine->vsync->SetDirect(enabled); }
++
++void aetheria_engine_schedule(FlEngine* engine) { if (engine->engine) engine->embedder_api.ScheduleFrame(engine->engine); }
+--- a/engine/src/flutter/shell/platform/linux/fl_compositor_opengl.cc
++++ b/engine/src/flutter/shell/platform/linux/fl_compositor_opengl.cc
+@@ -348,3 +348,7 @@
+ 
+   return self;
+ }
++
++GLuint aetheria_compositor_framebuffer(FlCompositorOpenGL* self) {
++  return self->framebuffer ? fl_framebuffer_get_id(self->framebuffer) : 0;
++}
+--- a/engine/src/flutter/shell/platform/linux/fl_view_renderer.cc
++++ b/engine/src/flutter/shell/platform/linux/fl_view_renderer.cc
+@@ -5,15 +5,19 @@
+ #include "flutter/shell/platform/linux/fl_view_renderer.h"
+ 
+ #include <gdk/gdkwayland.h>
++#include "aetheria_wayland.h"
++
+ 
+ #include "flutter/shell/platform/linux/fl_compositor.h"
+ #include "flutter/shell/platform/linux/fl_compositor_opengl.h"
+ #include "flutter/shell/platform/linux/fl_compositor_software.h"
+ #include "flutter/shell/platform/linux/fl_engine_private.h"
+ #include "flutter/shell/platform/linux/fl_opengl_manager.h"
++GLuint aetheria_compositor_framebuffer(FlCompositorOpenGL* self);
+ 
+ struct _FlViewRenderer {
+   GtkDrawingArea parent_instance;
++  AetheriaWayland* direct;
+ 
+   // Engine this widget is rendering.
+   FlEngine* engine;
+@@ -76,12 +80,31 @@
+     return G_SOURCE_REMOVE;
+   }
+ 
+-  gtk_widget_queue_draw(render_widget);
++  if (!self->direct) gtk_widget_queue_draw(render_widget);
+ 
+   return G_SOURCE_REMOVE;
+ }
+ 
++// A child maps before GTK has recreated its toplevel Wayland surface.
++// Wait for the toplevel's completed map as well as the renderer's own map.
++static void aetheria_parent_map(GtkWidget*, FlViewRenderer* self) {
++  if (self->direct) self->direct->Map();
++}
++
+ static void setup_opengl(FlViewRenderer* self) {
++  if (!self->sized_to_content && GDK_IS_WAYLAND_DISPLAY(gtk_widget_get_display(GTK_WIDGET(self))) &&
++      g_strcmp0(g_getenv("AETHERIA_DIRECT_WAYLAND"), "0") != 0) {
++    self->direct = new AetheriaWayland(GTK_WIDGET(self), self->engine);
++    if (self->direct->Setup()) {
++      g_signal_connect_object(gtk_widget_get_toplevel(GTK_WIDGET(self)), "map",
++          G_CALLBACK(aetheria_parent_map), self, G_CONNECT_AFTER);
++      self->compositor = FL_COMPOSITOR(fl_compositor_opengl_new(
++          fl_engine_get_task_runner(self->engine), fl_engine_get_opengl_manager(self->engine), TRUE));
++      return;
++    }
++    delete self->direct; self->direct = nullptr;
++  }
++
+   g_autoptr(GError) error = nullptr;
+ 
+   self->render_context = gdk_window_create_gl_context(
+@@ -146,6 +169,7 @@
+   FlViewRenderer* self = FL_VIEW_RENDERER(widget);
+ 
+   paint_background(self, cr);
++  if (self->direct) return TRUE;
+ 
+   // The compositor is created when the widget is realized; if it is not yet
+   // available there is nothing to render beyond the background.
+@@ -171,6 +195,7 @@
+ static void fl_view_renderer_dispose(GObject* object) {
+   FlViewRenderer* self = FL_VIEW_RENDERER(object);
+ 
++  if (self->direct) self->direct->Destroy();
+   g_clear_object(&self->render_context);
+   g_clear_object(&self->engine);
+   g_clear_pointer(&self->background_color, gdk_rgba_free);
+@@ -181,6 +206,8 @@
+ static void fl_view_renderer_finalize(GObject* object) {
+   FlViewRenderer* self = FL_VIEW_RENDERER(object);
+ 
++  delete self->direct;
++  self->direct = nullptr;
+   // The compositor is released here rather than in dispose() so it outlives a
+   // forced dispose (e.g. gtk_widget_destroy()) and is only freed once the last
+   // reference is dropped. This keeps it alive for the raster thread, which
+@@ -191,11 +218,42 @@
+   G_OBJECT_CLASS(fl_view_renderer_parent_class)->finalize(object);
+ }
+ 
++static void aetheria_map(GtkWidget* widget) {
++  GTK_WIDGET_CLASS(fl_view_renderer_parent_class)->map(widget);
++  auto* self = FL_VIEW_RENDERER(widget);
++  if (self->direct) self->direct->Map();
++}
++static void aetheria_unmap(GtkWidget* widget) {
++  auto* self = FL_VIEW_RENDERER(widget);
++  if (self->direct) {
++    self->direct->Destroy();
++    aetheria_engine_direct(self->engine, false);
++  }
++  GTK_WIDGET_CLASS(fl_view_renderer_parent_class)->unmap(widget);
++}
++static void aetheria_unrealize(GtkWidget* widget) {
++  auto* self = FL_VIEW_RENDERER(widget);
++  if (self->direct) {
++    self->direct->Destroy();
++    aetheria_engine_direct(self->engine, false);
++  }
++  GTK_WIDGET_CLASS(fl_view_renderer_parent_class)->unrealize(widget);
++}
++static void aetheria_size_allocate(GtkWidget* widget, GtkAllocation* allocation) {
++  GTK_WIDGET_CLASS(fl_view_renderer_parent_class)->size_allocate(widget, allocation);
++  auto* self = FL_VIEW_RENDERER(widget);
++  if (self->direct) self->direct->Resize();
++}
++
+ static void fl_view_renderer_class_init(FlViewRendererClass* klass) {
+   G_OBJECT_CLASS(klass)->dispose = fl_view_renderer_dispose;
+   G_OBJECT_CLASS(klass)->finalize = fl_view_renderer_finalize;
+ 
+   GtkWidgetClass* widget_class = GTK_WIDGET_CLASS(klass);
++  widget_class->map = aetheria_map;
++  widget_class->unmap = aetheria_unmap;
++  widget_class->unrealize = aetheria_unrealize;
++  widget_class->size_allocate = aetheria_size_allocate;
+   widget_class->realize = fl_view_renderer_realize;
+   widget_class->draw = fl_view_renderer_draw;
+ 
+@@ -242,6 +300,11 @@
+   }
+ 
+   fl_compositor_present_layers(self->compositor, layers, layers_count);
++  if (self->direct) {
++    self->direct->Present(layers_count ? aetheria_compositor_framebuffer(FL_COMPOSITOR_OPENGL(self->compositor)) : 0,
++                          layers_count ? layers[0]->size.width : 0,
++                          layers_count ? layers[0]->size.height : 0);
++  }
+ 
+   // Perform the redraw in the GTK thread.
+   g_idle_add(redraw_cb, g_object_ref(self));
+--- a/engine/src/flutter/shell/platform/linux/BUILD.gn
++++ b/engine/src/flutter/shell/platform/linux/BUILD.gn
+@@ -107,7 +107,11 @@
+ 
+   public_configs = [ ":disable_warnings" ]
+ 
++  libs = [ "wayland-client", "wayland-egl" ]
+   sources = [
++    "aetheria_vsync.cc",
++    "aetheria_wayland.cc",
++    "presentation-time-protocol.c",
+     "fl_accessibility_channel.cc",
+     "fl_accessibility_handler.cc",
+     "fl_accessible_node.cc",
