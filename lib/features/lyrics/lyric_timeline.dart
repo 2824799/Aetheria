@@ -59,6 +59,27 @@ class LyricTimeline {
     return explicit.isNotEmpty ? explicit : line.translation?.trim() ?? '';
   }
 
+  List<LyricPreviewLine> previewLinesAfter(
+    int activeIndex, {
+    required int count,
+    required bool showTranslation,
+  }) {
+    if (activeIndex < 0 || activeIndex >= lines.length || count <= 0) {
+      return const [];
+    }
+    return lines
+        .skip(activeIndex + 1)
+        .where((line) => line.text.trim().isNotEmpty)
+        .take(count)
+        .map(
+          (line) => LyricPreviewLine(
+            text: line.text.trim(),
+            translation: showTranslation ? translationFor(line) : '',
+          ),
+        )
+        .toList(growable: false);
+  }
+
   static List<LyricLine> parseLines(String content) =>
       _parseLines(content, mergeEmbeddedTranslations: true);
 
@@ -406,6 +427,13 @@ class LyricTimeline {
         .replaceAll(RegExp(r'[\(<](\d{1,8}),(\d{1,8})[\)>]'), '')
         .trim();
   }
+}
+
+class LyricPreviewLine {
+  const LyricPreviewLine({required this.text, required this.translation});
+
+  final String text;
+  final String translation;
 }
 
 class LyricFrame {

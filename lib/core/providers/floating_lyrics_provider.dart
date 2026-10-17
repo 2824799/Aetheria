@@ -11,7 +11,7 @@ class FloatingLyricsProvider extends ChangeNotifier {
   bool superLyricEnabled = false;
   bool locked = false;
   bool alwaysOnTop = true;
-  bool pauseFade = true;
+  double pauseOpacity = 0.95 * 0.22;
   bool showTranslation = true;
   bool showNextLine = true;
   bool boldCurrentLine = true;
@@ -51,7 +51,6 @@ class FloatingLyricsProvider extends ChangeNotifier {
         prefs.getBool('$_prefix-super-lyric-enabled') ?? superLyricEnabled;
     locked = prefs.getBool('$_prefix-locked') ?? locked;
     alwaysOnTop = prefs.getBool('$_prefix-always-on-top') ?? alwaysOnTop;
-    pauseFade = prefs.getBool('$_prefix-pause-fade') ?? pauseFade;
     showTranslation =
         prefs.getBool('$_prefix-show-translation') ?? showTranslation;
     showNextLine = prefs.getBool('$_prefix-show-next-line') ?? showNextLine;
@@ -65,6 +64,19 @@ class FloatingLyricsProvider extends ChangeNotifier {
     fontSize = prefs.getDouble('$_prefix-font-size') ?? fontSize;
     lineGap = prefs.getDouble('$_prefix-line-gap') ?? lineGap;
     opacity = prefs.getDouble('$_prefix-opacity') ?? opacity;
+    final savedPauseOpacity = prefs.getDouble('$_prefix-pause-opacity');
+    // Preserve the old switch's visible opacity when migrating to a slider.
+    pauseOpacity =
+        (savedPauseOpacity ??
+                opacity *
+                    ((prefs.getBool('$_prefix-pause-fade') ?? true)
+                        ? 0.22
+                        : 1.0))
+            .clamp(0.0, 1.0)
+            .toDouble();
+    if (savedPauseOpacity == null) {
+      await prefs.setDouble('$_prefix-pause-opacity', pauseOpacity);
+    }
     refreshFps = prefs.getInt('$_prefix-refresh-fps') ?? refreshFps;
     unplayedColor =
         _colorFromPrefs(prefs, '$_prefix-unplayed-color') ?? unplayedColor;
@@ -83,7 +95,7 @@ class FloatingLyricsProvider extends ChangeNotifier {
     return <String, dynamic>{
       'locked': locked,
       'alwaysOnTop': alwaysOnTop,
-      'pauseFade': pauseFade,
+      'pauseOpacity': pauseOpacity,
       'showTranslation': showTranslation,
       'showNextLine': showNextLine,
       'boldCurrentLine': boldCurrentLine,
@@ -133,10 +145,10 @@ class FloatingLyricsProvider extends ChangeNotifier {
     await _setBool('always-on-top', value);
   }
 
-  Future<void> setPauseFade(bool value) async {
-    pauseFade = value;
+  Future<void> setPauseOpacity(double value) async {
+    pauseOpacity = value.clamp(0.0, 1.0).toDouble();
     notifyListeners();
-    await _setBool('pause-fade', value);
+    await _setDouble('pause-opacity', pauseOpacity);
   }
 
   Future<void> setShowTranslation(bool value) async {

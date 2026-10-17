@@ -167,15 +167,18 @@ class FloatingLyricService : Service() {
     private fun applyStyle(newStyle: FloatingLyricStyle) {
         style = newStyle
         ensureView()
-        lyricView?.style = newStyle
-        lyricView?.invalidate()
+        lyricView?.let { view ->
+            view.style = newStyle
+            view.alpha = if (view.frame.isPlaying) style.opacity else style.pauseOpacity
+            view.invalidate()
+        }
         updateLayoutParams()
     }
 
     private fun applyFrame(frame: FloatingLyricFrame) {
         ensureView()
         lyricView?.frame = frame
-        lyricView?.alpha = if (frame.fade) (style.opacity * 0.22f) else style.opacity
+        lyricView?.alpha = if (frame.isPlaying) style.opacity else style.pauseOpacity
         lyricView?.invalidate()
     }
 
@@ -301,6 +304,7 @@ private data class FloatingLyricStyle(
     val fontSize: Float = 30f,
     val lineGap: Float = 8f,
     val opacity: Float = 0.95f,
+    val pauseOpacity: Float = 0.95f * 0.22f,
     val unplayedColor: Int = Color.WHITE,
     val playedColor: Int = Color.rgb(34, 197, 94),
     val shadowColor: Int = 0x99000000.toInt(),
@@ -324,6 +328,7 @@ private data class FloatingLyricStyle(
                 fontSize = payload.float("fontSize") ?: fallback.fontSize,
                 lineGap = payload.float("lineGap") ?: fallback.lineGap,
                 opacity = payload.float("opacity") ?: fallback.opacity,
+                pauseOpacity = (payload.float("pauseOpacity") ?: fallback.pauseOpacity).coerceIn(0f, 1f),
                 unplayedColor = payload.int("unplayedColor") ?: fallback.unplayedColor,
                 playedColor = payload.int("playedColor") ?: fallback.playedColor,
                 shadowColor = payload.int("shadowColor") ?: fallback.shadowColor,
@@ -340,10 +345,11 @@ private data class FloatingLyricFrame(
     val line: String = "暂无歌词",
     val translation: String = "",
     val nextLine: String = "",
+    val nextTranslation: String = "",
     val contextLines: List<String> = emptyList(),
+    val contextTranslations: List<String> = emptyList(),
     val progress: Float = 0f,
     val isPlaying: Boolean = false,
-    val fade: Boolean = false,
 ) {
     companion object {
         fun fromPayload(payload: Map<String, Any?>): FloatingLyricFrame {
@@ -351,10 +357,11 @@ private data class FloatingLyricFrame(
                 line = payload.string("line") ?: "暂无歌词",
                 translation = payload.string("translation") ?: "",
                 nextLine = payload.string("nextLine") ?: "",
+                nextTranslation = payload.string("nextTranslation") ?: "",
                 contextLines = payload.stringList("contextLines"),
+                contextTranslations = payload.stringList("contextTranslations"),
                 progress = (payload.float("progress") ?: 0f).coerceIn(0f, 1f),
                 isPlaying = payload.bool("isPlaying") ?: false,
-                fade = payload.bool("fade") ?: false,
             )
         }
     }
@@ -421,19 +428,34 @@ private class FloatingLyricView(context: Context) : View(context) {
         val gap = style.lineGap * density
         val hasTranslation = style.showTranslation && frame.translation.isNotBlank()
         val compactLines = if (style.compactMultiline) {
-            frame.contextLines.filter { it.isNotBlank() }.take(3)
+            frame.contextLines.mapIndexed { index, text ->
+                text to if (style.showTranslation) frame.contextTranslations.getOrNull(index).orEmpty() else ""
+            }.filter { it.first.isNotBlank() }.take(3)
         } else {
             emptyList()
         }
         val hasNext = style.showNextLine && (frame.nextLine.isNotBlank() || compactLines.isNotEmpty())
+        val nextTranslation = if (hasNext && style.showTranslation) {
+            if (frame.nextLine.isBlank()) compactLines.first().second else frame.nextTranslation
+        } else ""
+        val extraLines = if (hasNext) {
+            if (frame.nextLine.isBlank()) compactLines.drop(1) else compactLines
+        } else emptyList()
+        val nextTranslationSize = nextSize * 0.76f
+        val contextSize = nextSize * 0.88f
+        val contextTranslationSize = contextSize * 0.76f
 
         var totalHeight = textHeight(currentSize)
         if (hasTranslation) totalHeight += gap * 0.55f + textHeight(subSize)
-        if (hasNext) totalHeight += gap + textHeight(nextSize)
-        if (compactLines.isNotEmpty()) {
-            totalHeight += compactLines.drop(1).size * (textHeight(nextSize * 0.88f) + gap * 0.28f)
+        if (hasNext) {
+            totalHeight += gap + textHeight(nextSize)
+            if (nextTranslation.isNotBlank()) totalHeight += gap * 0.28f + textHeight(nextTranslationSize)
         }
-        var baseline = h / 2f - totalHeight / 2f - paint.ascentFor(currentSize)
+        for ((_, translation) in extraLines) {
+            totalHeight += textHeight(contextSize) + gap * 0.28f
+            if (translation.isNotBlank()) totalHeight += textHeight(contextTranslationSize) + gap * 0.28f
+        }
+        var baseline = max(0f, (h - totalHeight) / 2f) - paint.ascentFor(currentSize)
 
         drawProgressText(
             canvas = canvas,
@@ -464,17 +486,27 @@ private class FloatingLyricView(context: Context) : View(context) {
             baseline += gap
             drawSingleText(
                 canvas = canvas,
-                text = frame.nextLine.ifBlank { compactLines.firstOrNull().orEmpty() },
+                text = frame.nextLine.ifBlank { compactLines.firstOrNull()?.first.orEmpty() },
                 y = baseline - paint.ascentFor(nextSize),
                 size = nextSize,
                 color = applyAlpha(style.unplayedColor, 0.68f),
                 bold = false,
             )
             var contextBaseline = baseline + textHeight(nextSize)
-            val extraLines = if (frame.nextLine.isBlank()) compactLines.drop(1) else compactLines
-            for (line in extraLines.take(3)) {
+            if (nextTranslation.isNotBlank()) {
                 contextBaseline += gap * 0.28f
-                val contextSize = nextSize * 0.88f
+                drawSingleText(
+                    canvas = canvas,
+                    text = nextTranslation,
+                    y = contextBaseline - paint.ascentFor(nextTranslationSize),
+                    size = nextTranslationSize,
+                    color = applyAlpha(style.unplayedColor, 0.68f * 0.76f),
+                    bold = false,
+                )
+                contextBaseline += textHeight(nextTranslationSize)
+            }
+            for ((line, translation) in extraLines) {
+                contextBaseline += gap * 0.28f
                 drawSingleText(
                     canvas = canvas,
                     text = line,
@@ -484,6 +516,18 @@ private class FloatingLyricView(context: Context) : View(context) {
                     bold = false,
                 )
                 contextBaseline += textHeight(contextSize)
+                if (translation.isNotBlank()) {
+                    contextBaseline += gap * 0.28f
+                    drawSingleText(
+                        canvas = canvas,
+                        text = translation,
+                        y = contextBaseline - paint.ascentFor(contextTranslationSize),
+                        size = contextTranslationSize,
+                        color = applyAlpha(style.unplayedColor, 0.52f * 0.76f),
+                        bold = false,
+                    )
+                    contextBaseline += textHeight(contextTranslationSize)
+                }
             }
         }
     }

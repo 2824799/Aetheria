@@ -61,4 +61,52 @@ void main() {
       isTrue,
     );
   });
+
+  test('paused opacity supports endpoints and survives reload', () async {
+    final provider = FloatingLyricsProvider();
+    await provider.load();
+    final signature = provider.styleSignature;
+
+    await provider.setPauseOpacity(0);
+    expect(provider.stylePayload()['pauseOpacity'], 0);
+    expect(provider.styleSignature, isNot(signature));
+    expect(provider.opacity, 0.95);
+    final restored = FloatingLyricsProvider();
+    await restored.load();
+    expect(restored.pauseOpacity, 0);
+
+    await provider.setPauseOpacity(0.47);
+    await restored.load();
+    expect(restored.pauseOpacity, 0.47);
+    await provider.setPauseOpacity(1);
+    await restored.load();
+    expect(restored.pauseOpacity, 1);
+    expect(restored.opacity, 0.95);
+
+    await provider.setPauseOpacity(-1);
+    expect(provider.pauseOpacity, 0);
+    await provider.setPauseOpacity(2);
+    expect(provider.pauseOpacity, 1);
+    provider.dispose();
+    restored.dispose();
+  });
+
+  for (final legacyFade in [true, false]) {
+    test('migrates the old pause fade switch ($legacyFade)', () async {
+      SharedPreferences.setMockInitialValues({
+        'aetheria-floating-lyrics-opacity': 0.8,
+        'aetheria-floating-lyrics-pause-fade': legacyFade,
+      });
+      final provider = FloatingLyricsProvider();
+      await provider.load();
+      final expected = legacyFade ? 0.8 * 0.22 : 0.8;
+      expect(provider.pauseOpacity, closeTo(expected, 0.000001));
+
+      // Once migrated, changing playback opacity cannot change pause opacity.
+      await provider.setOpacity(0.5);
+      await provider.load();
+      expect(provider.pauseOpacity, closeTo(expected, 0.000001));
+      provider.dispose();
+    });
+  }
 }

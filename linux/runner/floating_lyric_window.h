@@ -38,6 +38,7 @@ class FloatingLyricWindow {
     double font_size = 30.0;
     double line_gap = 8.0;
     double opacity = 0.95;
+    double pause_opacity = 0.95 * 0.22;
     uint32_t unplayed_color = 0xFFFFFFFF;
     uint32_t played_color = 0xFF22C55E;
     uint32_t shadow_color = 0x99000000;
@@ -51,10 +52,11 @@ class FloatingLyricWindow {
     std::string line;
     std::string translation;
     std::string next_line;
+    std::string next_translation;
     std::vector<std::string> context_lines;
+    std::vector<std::string> context_translations;
     double progress = 0.0;
     bool is_playing = false;
-    bool fade = false;
   };
 
   void EnsureWindow();

@@ -11,8 +11,8 @@ ${CXX:-c++} -std=c++17 -Wall -Wextra \
   $(pkg-config --cflags --libs pangocairo) -o "$test_dir/renderer"
 "$test_dir/renderer"
 
-if [[ "${1:-}" != "--windows" && "${1:-}" != "--kwin-fullscreen" ]]; then
-  echo 'Pass --windows for GTK windows, or --kwin-fullscreen to also test fullscreen stacking on KWin.'
+if [[ "${1:-}" != "--windows" && "${1:-}" != "--kwin-fullscreen" && "${1:-}" != "--lyrics-only" ]]; then
+  echo 'Pass --windows for GTK windows, --lyrics-only for overlays, or --kwin-fullscreen for fullscreen stacking on KWin.'
   exit 0
 fi
 if [[ ! -f linux/flutter/ephemeral/libflutter_linux_gtk.so ]]; then
@@ -36,6 +36,9 @@ for backend in x11 wayland; do
     continue
   fi
   mkdir -p "$test_dir/$backend"
+  XDG_CONFIG_HOME="$test_dir/$backend" GDK_BACKEND="$backend" "$test_dir/windows" opacity
+  XDG_CONFIG_HOME="$test_dir/$backend" GDK_BACKEND="$backend" "$test_dir/windows" preview
+  if [[ "${1:-}" == "--lyrics-only" ]]; then continue; fi
   XDG_CONFIG_HOME="$test_dir/$backend" GDK_BACKEND="$backend" "$test_dir/windows" write
   XDG_CONFIG_HOME="$test_dir/$backend" GDK_BACKEND="$backend" "$test_dir/windows" read
 done

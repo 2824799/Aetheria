@@ -291,11 +291,12 @@ class _SettingsFloatingLyricPreviewState
             value: _progress,
             onChanged: (value) => setState(() => _progress = value),
           ),
-          if (provider.pauseFade)
-            Text(
-              '开启暂停淡出时，桌面歌词在暂停后会变淡。',
-              style: AetherType.captionStyle(cfg.textSecondary),
-            ),
+          Text(
+            provider.pauseOpacity == 0
+                ? '暂停后歌词完全透明，继续播放时恢复播放透明度。'
+                : '暂停后按 ${(provider.pauseOpacity * 100).round()}% 透明度显示歌词。',
+            style: AetherType.captionStyle(cfg.textSecondary),
+          ),
         ],
       ),
     );

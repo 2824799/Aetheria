@@ -170,10 +170,13 @@ class _FloatingLyricsBridgeState extends State<FloatingLyricsBridge> {
     }
 
     final frameIntervalMs = (1000 / settings.refreshFps.clamp(10, 60)).round();
-    if (audio.isPlaying && now - _lastSentAtMs < frameIntervalMs) {
+    final playbackChanged = audio.isPlaying != _anchorWasPlaying;
+    if (!playbackChanged &&
+        audio.isPlaying &&
+        now - _lastSentAtMs < frameIntervalMs) {
       return;
     }
-    if (!audio.isPlaying && now - _lastSentAtMs < 500) {
+    if (!playbackChanged && !audio.isPlaying && now - _lastSentAtMs < 500) {
       return;
     }
     _lastSentAtMs = now;
@@ -182,20 +185,31 @@ class _FloatingLyricsBridgeState extends State<FloatingLyricsBridge> {
     final frame = _timeline?.frameAt(positionMs) ?? const LyricFrame.empty();
     final songTitle = audio.playingSong?.title.trim();
     final artist = audio.playingSong?.artist?.trim();
-    final contextLines = _contextLines(frame.activeIndex, settings);
+    final previews = settings.showNextLine
+        ? (_timeline?.previewLinesAfter(
+                frame.activeIndex,
+                count: settings.compactMultiline ? 4 : 1,
+                showTranslation: settings.showTranslation,
+              ) ??
+              const <LyricPreviewLine>[])
+        : const <LyricPreviewLine>[];
     await NativeAudioHelper.updateFloatingLyrics(<String, dynamic>{
       'line': frame.line.isEmpty
           ? (songTitle?.isNotEmpty == true ? songTitle : '暂无歌词')
           : frame.line,
       'translation': settings.showTranslation ? frame.translation : '',
-      'nextLine': settings.showNextLine ? frame.nextLine : '',
-      'contextLines': contextLines,
+      'nextLine': previews.isNotEmpty ? previews.first.text : '',
+      'nextTranslation': previews.isNotEmpty ? previews.first.translation : '',
+      'contextLines': previews.skip(1).map((line) => line.text).toList(),
+      'contextTranslations': previews
+          .skip(1)
+          .map((line) => line.translation)
+          .toList(),
       'progress': frame.progress,
       'activeIndex': frame.activeIndex,
       'isPlaying': audio.isPlaying,
       'songTitle': songTitle ?? '',
       'artist': artist ?? '',
-      'fade': settings.pauseFade && !audio.isPlaying,
     });
   }
 
@@ -216,22 +230,6 @@ class _FloatingLyricsBridgeState extends State<FloatingLyricsBridge> {
       return estimated.clamp(0, totalMs);
     }
     return estimated.clamp(0, 1 << 31);
-  }
-
-  List<String> _contextLines(int activeIndex, FloatingLyricsProvider settings) {
-    if (!settings.compactMultiline || !settings.showNextLine) {
-      return const <String>[];
-    }
-    final lines = _timeline?.lines;
-    if (lines == null || activeIndex < 0) {
-      return const <String>[];
-    }
-    return lines
-        .skip(activeIndex + 1)
-        .map((line) => line.text.trim())
-        .where((text) => text.isNotEmpty)
-        .take(3)
-        .toList(growable: false);
   }
 
   Future<void> _ensureLyricLoaded(AudioPlayerProvider audio) async {

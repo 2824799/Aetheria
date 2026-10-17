@@ -101,10 +101,15 @@ class SettingsFloatingLyricsTab extends StatelessWidget {
             value: provider.alwaysOnTop,
             onChanged: provider.setAlwaysOnTop,
           ),
-        AetherSwitchTile(
-          title: '暂停时降低透明度',
-          value: provider.pauseFade,
-          onChanged: provider.setPauseFade,
+        SettingsSliderRow(
+          cfg: cfg,
+          label: '暂停时透明度',
+          valueText: '${(provider.pauseOpacity * 100).round()}%',
+          value: provider.pauseOpacity,
+          min: 0,
+          max: 1,
+          divisions: 100,
+          onChanged: provider.setPauseOpacity,
         ),
         const SizedBox(height: AetherSpace.sm),
         AetherChoiceGroup<FloatingLyricAlign>(

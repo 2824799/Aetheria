@@ -14,6 +14,7 @@ using namespace aetheria;
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 namespace {
 
@@ -138,6 +139,8 @@ void FloatingLyricWindow::UpdateStyle(FlValue* payload) {
   style_.font_size = std::clamp(GetDouble(payload, "fontSize", style_.font_size), 8.0, 72.0);
   style_.line_gap = std::clamp(GetDouble(payload, "lineGap", style_.line_gap), 0.0, 32.0);
   style_.opacity = std::clamp(GetDouble(payload, "opacity", style_.opacity), 0.0, 1.0);
+  style_.pause_opacity =
+      std::clamp(GetDouble(payload, "pauseOpacity", style_.pause_opacity), 0.0, 1.0);
   style_.unplayed_color = GetColor(payload, "unplayedColor", style_.unplayed_color);
   style_.played_color = GetColor(payload, "playedColor", style_.played_color);
   style_.shadow_color = GetColor(payload, "shadowColor", style_.shadow_color);
@@ -165,11 +168,12 @@ void FloatingLyricWindow::UpdateLyrics(FlValue* payload) {
   frame_.line = GetString(payload, "line", frame_.line);
   frame_.translation = GetString(payload, "translation", frame_.translation);
   frame_.next_line = GetString(payload, "nextLine", frame_.next_line);
+  frame_.next_translation = GetString(payload, "nextTranslation", "");
   frame_.context_lines = GetStringList(payload, "contextLines");
+  frame_.context_translations = GetStringList(payload, "contextTranslations");
   frame_.progress =
       std::clamp(GetDouble(payload, "progress", frame_.progress), 0.0, 1.0);
   frame_.is_playing = GetBool(payload, "isPlaying", frame_.is_playing);
-  frame_.fade = GetBool(payload, "fade", frame_.fade);
   QueueDraw();
 }
 
@@ -499,12 +503,14 @@ void FloatingLyricWindow::Draw(cairo_t* cr) {
   cairo_restore(cr);
   cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
 
-  const double opacity = frame_.fade ? style_.opacity * 0.22 : style_.opacity;
+  const double opacity = frame_.is_playing ? style_.opacity : style_.pause_opacity;
   const Rgba played = ToRgba(style_.played_color, opacity);
   const Rgba unplayed = ToRgba(style_.unplayed_color, opacity);
   const Rgba translation_color = ToRgba(style_.unplayed_color, opacity * 0.76);
   const Rgba next_color = ToRgba(style_.unplayed_color, opacity * 0.66);
+  const Rgba next_translation_color = ToRgba(style_.unplayed_color, opacity * 0.66 * 0.76);
   const Rgba compact_color = ToRgba(style_.unplayed_color, opacity * 0.52);
+  const Rgba compact_translation_color = ToRgba(style_.unplayed_color, opacity * 0.52 * 0.76);
   const Rgba shadow = ToRgba(style_.shadow_color, opacity);
 
   if (dragging_ && !style_.locked) {
@@ -521,11 +527,14 @@ void FloatingLyricWindow::Draw(cairo_t* cr) {
   const double compact_size = next_size * 0.88;
   const double gap = style_.line_gap;
 
-  std::vector<std::string> compact_lines;
+  std::vector<std::pair<std::string, std::string>> compact_lines;
   if (style_.compact_multiline) {
-    for (const auto& line : frame_.context_lines) {
+    for (size_t i = 0; i < frame_.context_lines.size(); ++i) {
+      const auto& line = frame_.context_lines[i];
       if (!line.empty() && compact_lines.size() < 3) {
-        compact_lines.push_back(line);
+        compact_lines.emplace_back(
+            line, style_.show_translation && i < frame_.context_translations.size()
+                      ? frame_.context_translations[i] : "");
       }
     }
   }
@@ -542,30 +551,48 @@ void FloatingLyricWindow::Draw(cairo_t* cr) {
                                        max_width);
   double total_height = active.height;
 
-  LineLayout translation{nullptr, 0.0};
+  LineLayout translation{nullptr, 0.0, 0.0};
   if (has_translation) {
     translation = CreateLineLayout(cr, frame_.translation, translation_size,
                                    false, style_.align, max_width);
     total_height += gap * 0.55 + translation.height;
   }
 
-  LineLayout next{nullptr, 0.0};
+  LineLayout next{nullptr, 0.0, 0.0};
+  LineLayout next_translation{nullptr, 0.0, 0.0};
   if (has_next) {
     const std::string first_next = frame_.next_line.empty() && !compact_lines.empty()
-                                       ? compact_lines.front()
+                                       ? compact_lines.front().first
                                        : frame_.next_line;
     next = CreateLineLayout(cr, first_next, next_size, false, style_.align,
                             max_width);
     total_height += gap + next.height;
+    const std::string translated_next = frame_.next_line.empty()
+        ? compact_lines.front().second : frame_.next_translation;
+    if (style_.show_translation && !translated_next.empty()) {
+      next_translation = CreateLineLayout(cr, translated_next, next_size * 0.76,
+                                          false, style_.align, max_width);
+      total_height += gap * 0.28 + next_translation.height;
+    }
   }
 
-  std::vector<LineLayout> extras;
-  if (!compact_lines.empty()) {
+  struct PreviewLayout { LineLayout line; LineLayout translation; };
+  std::vector<PreviewLayout> extras;
+  if (has_next && !compact_lines.empty()) {
     const size_t start = frame_.next_line.empty() ? 1 : 0;
     for (size_t i = start; i < compact_lines.size(); ++i) {
-      extras.push_back(CreateLineLayout(cr, compact_lines[i], compact_size,
-                                        false, style_.align, max_width));
-      total_height += gap * 0.28 + extras.back().height;
+      PreviewLayout extra{
+          CreateLineLayout(cr, compact_lines[i].first, compact_size,
+                            false, style_.align, max_width),
+          {nullptr, 0.0, 0.0}};
+      total_height += gap * 0.28 + extra.line.height;
+      if (!compact_lines[i].second.empty()) {
+        extra.translation = CreateLineLayout(cr, compact_lines[i].second,
+                                               compact_size * 0.76, false,
+                                               style_.align, max_width);
+        total_height += gap * 0.28 + extra.translation.height;
+      }
+      extras.push_back(extra);
     }
   }
 
@@ -591,12 +618,25 @@ void FloatingLyricWindow::Draw(cairo_t* cr) {
                        next.font_size, style_.text_shadow_enabled);
     top += next.height;
   }
+  if (next_translation.layout != nullptr) {
+    top += gap * 0.28;
+    DrawLineWithShadow(cr, next_translation.layout, x, top, next_translation_color,
+                       shadow, next_translation.font_size, style_.text_shadow_enabled);
+    top += next_translation.height;
+  }
 
   for (const auto& extra : extras) {
     top += gap * 0.28;
-    DrawLineWithShadow(cr, extra.layout, x, top, compact_color, shadow,
-                       extra.font_size, style_.text_shadow_enabled);
-    top += extra.height;
+    DrawLineWithShadow(cr, extra.line.layout, x, top, compact_color, shadow,
+                       extra.line.font_size, style_.text_shadow_enabled);
+    top += extra.line.height;
+    if (extra.translation.layout != nullptr) {
+      top += gap * 0.28;
+      DrawLineWithShadow(cr, extra.translation.layout, x, top,
+                         compact_translation_color, shadow,
+                         extra.translation.font_size, style_.text_shadow_enabled);
+      top += extra.translation.height;
+    }
   }
 
   g_object_unref(active.layout);
@@ -606,7 +646,9 @@ void FloatingLyricWindow::Draw(cairo_t* cr) {
   if (next.layout != nullptr) {
     g_object_unref(next.layout);
   }
+  if (next_translation.layout != nullptr) g_object_unref(next_translation.layout);
   for (auto& extra : extras) {
-    g_object_unref(extra.layout);
+    g_object_unref(extra.line.layout);
+    if (extra.translation.layout != nullptr) g_object_unref(extra.translation.layout);
   }
 }

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -287,6 +288,8 @@ void FloatingLyricWindow::UpdateStyle(const flutter::EncodableMap& payload) {
   style_.font_size = GetDouble(payload, "fontSize", style_.font_size);
   style_.line_gap = GetDouble(payload, "lineGap", style_.line_gap);
   style_.opacity = GetDouble(payload, "opacity", style_.opacity);
+  style_.pause_opacity =
+      std::clamp(GetDouble(payload, "pauseOpacity", style_.pause_opacity), 0.0, 1.0);
   style_.unplayed_color =
       GetUint(payload, "unplayedColor", style_.unplayed_color);
   style_.played_color = GetUint(payload, "playedColor", style_.played_color);
@@ -314,11 +317,12 @@ void FloatingLyricWindow::UpdateLyrics(const flutter::EncodableMap& payload) {
   frame_.line = GetWideString(payload, "line", frame_.line);
   frame_.translation = GetWideString(payload, "translation", frame_.translation);
   frame_.next_line = GetWideString(payload, "nextLine", frame_.next_line);
+  frame_.next_translation = GetWideString(payload, "nextTranslation", L"");
   frame_.context_lines = GetWideStringList(payload, "contextLines");
+  frame_.context_translations = GetWideStringList(payload, "contextTranslations");
   frame_.progress =
       std::clamp(GetDouble(payload, "progress", frame_.progress), 0.0, 1.0);
   frame_.is_playing = GetBool(payload, "isPlaying", frame_.is_playing);
-  frame_.fade = GetBool(payload, "fade", frame_.fade);
 
   EnsureWindow();
   Draw();
@@ -393,7 +397,8 @@ void FloatingLyricWindow::Draw() {
   graphics.SetTextRenderingHint(Gdiplus::TextRenderingHintAntiAliasGridFit);
   graphics.Clear(Gdiplus::Color(0, 0, 0, 0));
 
-  double effective_opacity = frame_.fade ? style_.opacity * 0.22 : style_.opacity;
+  double effective_opacity =
+      frame_.is_playing ? style_.opacity : style_.pause_opacity;
   if (is_interacting_ && !style_.locked) {
     Gdiplus::Color background(42, 0, 0, 0);
     Gdiplus::SolidBrush background_brush(background);
@@ -423,39 +428,60 @@ void FloatingLyricWindow::Draw() {
                                  Gdiplus::UnitPixel);
   Gdiplus::Font next_font(font_family.get(), next_size,
                           Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
+  Gdiplus::Font next_translation_font(font_family.get(), next_size * 0.76f,
+                                      Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
+  Gdiplus::Font compact_font(font_family.get(), next_size * 0.88f,
+                             Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
+  Gdiplus::Font compact_translation_font(font_family.get(), next_size * 0.88f * 0.76f,
+                                         Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
 
   const bool has_translation =
       style_.show_translation && !frame_.translation.empty();
-  std::vector<std::wstring> compact_lines;
+  std::vector<std::pair<std::wstring, std::wstring>> compact_lines;
   if (style_.compact_multiline) {
-    for (const auto& line : frame_.context_lines) {
+    for (size_t i = 0; i < frame_.context_lines.size(); ++i) {
+      const auto& line = frame_.context_lines[i];
       if (!line.empty() && compact_lines.size() < 3) {
-        compact_lines.push_back(line);
+        compact_lines.emplace_back(
+            line, style_.show_translation && i < frame_.context_translations.size()
+                      ? frame_.context_translations[i] : L"");
       }
     }
   }
   const bool has_next = style_.show_next_line &&
                         (!frame_.next_line.empty() || !compact_lines.empty());
+  const std::wstring next_translation = has_next && style_.show_translation
+      ? (frame_.next_line.empty() ? compact_lines.front().second : frame_.next_translation)
+      : L"";
   const float gap = static_cast<float>(style_.line_gap);
   const float current_height = MeasureLineHeight(graphics, current_font);
   const float translation_height =
       has_translation ? MeasureLineHeight(graphics, translation_font) : 0.0f;
   const float next_height = has_next ? MeasureLineHeight(graphics, next_font) : 0.0f;
+  const float next_translation_height = MeasureLineHeight(graphics, next_translation_font);
+  const float compact_height = MeasureLineHeight(graphics, compact_font);
+  const float compact_translation_height = MeasureLineHeight(graphics, compact_translation_font);
   float total_height = current_height;
   if (has_translation) {
     total_height += gap * 0.55f + translation_height;
   }
   if (has_next) {
     total_height += gap + next_height;
+    if (!next_translation.empty()) {
+      total_height += gap * 0.28f + next_translation_height;
+    }
   }
-  if (!compact_lines.empty()) {
-    const float compact_height = next_height * 0.88f;
-    const size_t extra_count =
-        frame_.next_line.empty() ? compact_lines.size() - 1 : compact_lines.size();
-    total_height += static_cast<float>(extra_count) * (compact_height + gap * 0.28f);
+  if (has_next && !compact_lines.empty()) {
+    const size_t start_index = frame_.next_line.empty() ? 1 : 0;
+    for (size_t i = start_index; i < compact_lines.size(); ++i) {
+      total_height += compact_height + gap * 0.28f;
+      if (!compact_lines[i].second.empty()) {
+        total_height += compact_translation_height + gap * 0.28f;
+      }
+    }
   }
   const float margin = 22.0f;
-  float top = (height - total_height) / 2.0f;
+  float top = std::max(0.0f, (height - total_height) / 2.0f);
   Gdiplus::RectF line_rect(margin, top, width - margin * 2, current_height);
   DrawProgressLine(graphics, frame_.line.empty() ? L"暂无歌词" : frame_.line,
                    line_rect, current_font, style_.align, frame_.progress,
@@ -480,30 +506,48 @@ void FloatingLyricWindow::Draw() {
     top += gap;
     Gdiplus::RectF next_rect(margin, top, width - margin * 2, next_height);
     const std::wstring first_next =
-        frame_.next_line.empty() && !compact_lines.empty() ? compact_lines.front()
+        frame_.next_line.empty() && !compact_lines.empty() ? compact_lines.front().first
                                                            : frame_.next_line;
     DrawLine(graphics, first_next, next_rect, next_font, style_.align,
              ToGdiColor(style_.unplayed_color, effective_opacity * 0.66),
              ToGdiColor(style_.shadow_color, effective_opacity),
              style_.text_shadow_enabled);
     top += next_height;
+    if (!next_translation.empty()) {
+      top += gap * 0.28f;
+      Gdiplus::RectF translated_rect(margin, top, width - margin * 2,
+                                      next_translation_height);
+      DrawLine(graphics, next_translation, translated_rect, next_translation_font,
+               style_.align,
+               ToGdiColor(style_.unplayed_color, effective_opacity * 0.66 * 0.76),
+               ToGdiColor(style_.shadow_color, effective_opacity),
+               style_.text_shadow_enabled);
+      top += next_translation_height;
+    }
 
     const size_t start_index = frame_.next_line.empty() ? 1 : 0;
     if (compact_lines.size() > start_index) {
-      Gdiplus::Font compact_font(font_family.get(), next_size * 0.88f,
-                                 Gdiplus::FontStyleRegular,
-                                 Gdiplus::UnitPixel);
-      const float compact_height = MeasureLineHeight(graphics, compact_font);
       for (size_t i = start_index; i < compact_lines.size(); ++i) {
         top += gap * 0.28f;
         Gdiplus::RectF compact_rect(margin, top, width - margin * 2,
                                     compact_height);
-        DrawLine(graphics, compact_lines[i], compact_rect, compact_font,
+        DrawLine(graphics, compact_lines[i].first, compact_rect, compact_font,
                  style_.align,
                  ToGdiColor(style_.unplayed_color, effective_opacity * 0.52),
                  ToGdiColor(style_.shadow_color, effective_opacity),
                  style_.text_shadow_enabled);
         top += compact_height;
+        if (!compact_lines[i].second.empty()) {
+          top += gap * 0.28f;
+          Gdiplus::RectF translated_rect(margin, top, width - margin * 2,
+                                          compact_translation_height);
+          DrawLine(graphics, compact_lines[i].second, translated_rect,
+                   compact_translation_font, style_.align,
+                   ToGdiColor(style_.unplayed_color, effective_opacity * 0.52 * 0.76),
+                   ToGdiColor(style_.shadow_color, effective_opacity),
+                   style_.text_shadow_enabled);
+          top += compact_translation_height;
+        }
       }
     }
   }

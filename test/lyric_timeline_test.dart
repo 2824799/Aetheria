@@ -2,6 +2,83 @@ import 'package:aetheria/features/lyrics/lyric_timeline.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  for (final separateTranslation in [false, true]) {
+    test(
+      'preview pairs upcoming original and translation ($separateTranslation)',
+      () {
+        const original = '''
+[00:01.000]明るい朝です
+[00:02.000]窓を開けて
+[00:03.000]風を感じて
+[00:04.000]窓を開けて
+''';
+        const translation = '''
+[00:01.000]明亮的早晨
+[00:02.000]打开窗户
+[00:03.000]感受微风
+[00:04.000]再次打开窗户
+''';
+        final timeline = LyricTimeline.parse(
+          content: separateTranslation ? original : '$original\n$translation',
+          translation: separateTranslation ? translation : null,
+        );
+        final previews = timeline.previewLinesAfter(
+          timeline.frameAt(1500).activeIndex,
+          count: 4,
+          showTranslation: true,
+        );
+        expect(previews.map((line) => line.text), ['窓を開けて', '風を感じて', '窓を開けて']);
+        expect(previews.map((line) => line.translation), [
+          '打开窗户',
+          '感受微风',
+          '再次打开窗户',
+        ]);
+        final next = timeline.frameAt(2500);
+        expect(next.line, previews.first.text);
+        expect(next.translation, previews.first.translation);
+        expect(
+          timeline
+              .previewLinesAfter(
+                next.activeIndex,
+                count: 1,
+                showTranslation: true,
+              )
+              .single
+              .text,
+          '風を感じて',
+        );
+        expect(
+          timeline.previewLinesAfter(3, count: 4, showTranslation: true),
+          isEmpty,
+        );
+        expect(
+          timeline.previewLinesAfter(-1, count: 4, showTranslation: true),
+          isEmpty,
+        );
+        expect(
+          timeline
+              .previewLinesAfter(0, count: 4, showTranslation: false)
+              .map((line) => line.translation),
+          ['', '', ''],
+        );
+      },
+    );
+  }
+
+  test('missing translations and empty originals keep previews aligned', () {
+    final timeline = LyricTimeline.parse(
+      content: '[00:01]Current\n[00:02]\n[00:03]Next\n[00:04]Last',
+      translation: '[00:02]空行翻译\n[00:04]最后一句',
+    );
+    final previews = timeline.previewLinesAfter(
+      0,
+      count: 4,
+      showTranslation: true,
+    );
+    expect(previews.map((line) => line.text), ['Next', 'Last']);
+    expect(previews.map((line) => line.translation), ['', '最后一句']);
+  });
+
   test('merges an embedded translation track by matching timestamps', () {
     final timeline = LyricTimeline.parse(
       content: '''
