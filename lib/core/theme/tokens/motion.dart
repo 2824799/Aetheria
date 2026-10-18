@@ -11,11 +11,11 @@ import 'package:flutter/widgets.dart';
 class AetherMotion {
   AetherMotion._();
 
-  static const Duration press = Duration(milliseconds: 80);
-  static const Duration fast = Duration(milliseconds: 150);
-  static const Duration normal = Duration(milliseconds: 200);
-  static const Duration panel = Duration(milliseconds: 240);
-  static const Duration slow = Duration(milliseconds: 280);
+  static const Duration press = Duration(milliseconds: 65);
+  static const Duration fast = Duration(milliseconds: 120);
+  static const Duration normal = Duration(milliseconds: 170);
+  static const Duration panel = Duration(milliseconds: 180);
+  static const Duration slow = Duration(milliseconds: 240);
 
   /// First tooltip show delay. Subsequent tooltips should skip delay at call site.
   static const Duration tooltipDelay = Duration(milliseconds: 400);

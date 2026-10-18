@@ -34,6 +34,12 @@ migrate_working_dir/
 /coverage/
 /dist/
 
+# Generated performance measurements (keep written reports and screenshots)
+/docs/performance/**/*.json
+/docs/performance/**/*.json.gz
+/docs/performance/**/*.csv
+/docs/performance/**/*.csv.gz
+
 # Symbolication related
 app.*.symbols
 

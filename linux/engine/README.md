@@ -10,6 +10,8 @@ Flutter 的 GL context 最初以 surfaceless 模式使用，默认 framebuffer �
 
 X11、软件渲染及无法创建 EGL surface 的设备继续使用 GTK renderer。设置 `AETHERIA_DIRECT_WAYLAND=0` 可在同一构建中对照旧路径。当前验证范围为单主窗口、NVIDIA RTX 4060 Laptop、KDE Wayland、165Hz；混合刷新率多屏、VRR 与其他驱动尚未实测。
 
+Runner 默认通过 `fl_dart_project_set_ui_thread_policy` 将 Dart UI 与 GTK 平台线程分开，避免输入处理和 UI 排版共用线程。`AETHERIA_UI_THREAD=platform` 可切回合并线程进行同一二进制的对照。滚轮、600 首列表拖条和抽屉的实际呈现及输入延迟见[滚动与线程测量](../../docs/performance/linux-scroll-input-2026-10-17.md)。
+
 ## 构建
 
 需要准备好对应 revision 的 Flutter engine checkout 及其依赖，按 Flutter 的 engine 构建说明完成 `gclient sync`，并使 depot_tools、引擎匹配的 Clang/LLD、Ninja 和 `wayland-scanner` 可用。新增依赖是 Wayland client/EGL 开发库。Flutter sysroot 中的裁剪版共享库需要兼容的 LLVM linker；不要使用 GNU BFD 替代 LLD。
@@ -27,6 +29,8 @@ AETHERIA_LINUX_ENGINE_DIR="$PWD/build/linux_engine" \
 ## 测量
 
 `AETHERIA_PRESENTATION_TRACE` 指定 CSV 输出文件，记录合成器的 `wp_presentation.presented` 和 `discarded`。文件使用追加模式，开始一轮测量前应清空。只有存在真实 presentation feedback 时，分析脚本才会计算实际 FPS。
+
+诊断还记录 `submit,serial,entered_us,lock_acquired_us,swap_start_us,swap_end_us,finished_us` 和 `presented_frame,serial,presentation_ns,refresh_ns,flags`，用提交序号关联实际呈现。`vsync_request`、`vsync_deliver` 含 baton 和 monotonic 微秒时间，`frame_callback`、`vsync_timeout` 用于识别回调与超时。未设置 trace 环境变量时不输出这些事件；原有 `presented` 四列保留兼容。`scripts/analyze_desktop_stress.py` 结合测试入口的输入序号与 FrameTiming 分析注入事件到呈现的延迟，不包含物理鼠标或 LCD 时间。
 
 ```bash
 : > build/presentations.csv

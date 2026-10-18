@@ -3,10 +3,13 @@ import 'package:aetheria/core/providers/ui_theme_provider.dart';
 import 'package:aetheria/core/utils/audio_quality.dart';
 import 'package:aetheria/features/library/ui/song_table/song_columns.dart';
 import 'package:aetheria/features/library/ui/song_table/song_table_widgets.dart';
+import 'package:aetheria/features/library/ui/song_table/song_table_tags.dart';
+import 'package:aetheria/features/library/ui/song_table/song_table_text.dart';
 import 'package:aetheria/src/rust/models/song.dart';
 
 class SongTableCellBuilder {
   const SongTableCellBuilder({
+    required this.textCache,
     required this.columnWidths,
     required this.columnOrder,
     required this.onResize,
@@ -15,6 +18,7 @@ class SongTableCellBuilder {
     this.headerHeight = 40,
   });
 
+  final SongTableTextCache textCache;
   final Map<SongColumnKey, double> columnWidths;
   final List<SongColumnKey> columnOrder;
   final void Function(SongColumnKey column, double delta) onResize;
@@ -158,8 +162,14 @@ class SongTableCellBuilder {
             child: Row(
               children: [
                 Expanded(
-                  child: Text(
+                  child: SongTableText(
                     song.title,
+                    cache: textCache,
+                    prefetchGroup: isCurrentlyPlaying
+                        ? null
+                        : hasLyrics
+                        ? SongTableTextGroup.title
+                        : SongTableTextGroup.titleWithoutLyrics,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
@@ -182,8 +192,10 @@ class SongTableCellBuilder {
           width: width,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: AetherSpace.lg),
-            child: Text(
+            child: SongTableText(
               song.artist ?? '未知歌手',
+              cache: textCache,
+              prefetchGroup: SongTableTextGroup.artist,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
@@ -199,46 +211,19 @@ class SongTableCellBuilder {
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: AetherSpace.lg),
             child: song.tags.isEmpty
-                ? Text(
+                ? SongTableText(
                     '无标签',
+                    cache: textCache,
                     style: TextStyle(
                       color: cfg.textSecondary.withValues(alpha: 0.75),
                       fontSize: AetherType.bodySm,
                     ),
                   )
-                : SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      children: song.tags.map((tag) {
-                        final tagColor = tag.color != null
-                            ? songTableParseHexColor(tag.color!, cfg.accent)
-                            : cfg.accent;
-                        return Container(
-                          margin: const EdgeInsets.only(right: AetherSpace.sm),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: tagColor.withValues(alpha: 0.08),
-                            borderRadius: BorderRadius.circular(
-                              AetherRadius.xs,
-                            ),
-                            border: Border(
-                              left: BorderSide(color: tagColor, width: 2),
-                            ),
-                          ),
-                          child: Text(
-                            tag.name,
-                            style: TextStyle(
-                              fontSize: AetherType.caption,
-                              color: tagColor,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        );
-                      }).toList(),
-                    ),
+                : SongTableTags(
+                    tags: song.tags,
+                    textCache: textCache,
+                    cfg: cfg,
+                    availableWidth: width - AetherSpace.lg * 2,
                   ),
           ),
         );
@@ -246,8 +231,9 @@ class SongTableCellBuilder {
         return SizedBox(
           width: width,
           child: Center(
-            child: Text(
+            child: SongTableText(
               song.versions.length.toString(),
+              cache: textCache,
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: cfg.textPrimary,
@@ -273,8 +259,9 @@ class SongTableCellBuilder {
                 color: badgeColor.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(AetherRadius.xs),
               ),
-              child: Text(
+              child: SongTableText(
                 specText,
+                cache: textCache,
                 style: TextStyle(
                   fontSize: AetherType.caption,
                   fontWeight: FontWeight.bold,

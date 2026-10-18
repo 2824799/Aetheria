@@ -33,7 +33,7 @@
 
 统计来自合成歌曲和测试音频 Provider，不含真实音频/DSP、真实封面首次解码、网络同步及完整输入到屏幕的呈现延迟；不能据此宣称所有实际负载都已消除卡顿。原生 integration_test 插件有未检测到提示，但 Flutter Driver 通过并写出了统计回调。
 
-原始比较结果保存在 [ui-input-latency-2026-10-07.json](ui-input-latency-2026-10-07.json)。
+原始比较结果保存在本地 `ui-input-latency-2026-10-07.json`，由 Git 忽略；关键结果记录在本文。
 
 ## 尚未修复：Linux 165Hz 的帧调度
 

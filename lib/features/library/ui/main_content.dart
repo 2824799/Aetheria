@@ -564,6 +564,8 @@ class _MainContentState extends State<MainContent> {
                 onNotification: (notification) {
                   final delta = notification.scrollDelta ?? 0;
                   if (notification.metrics.axis == Axis.vertical &&
+                      !(widget.songTableController?.isScrollbarDragging ??
+                          false) &&
                       delta > 0 &&
                       _tagCollapseFactor.value < 1) {
                     _tagCollapseFactor.value = math.min(

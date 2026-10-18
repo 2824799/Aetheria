@@ -62,7 +62,10 @@ bool AetheriaWayland::Setup() {
       reinterpret_cast<EGLNativeWindowType>(window_), nullptr);
   fl_opengl_manager_clear_current(manager);
   if (egl_surface_ == EGL_NO_SURFACE) return false;
-  if (const char* path = g_getenv("AETHERIA_PRESENTATION_TRACE")) trace_ = fopen(path, "a");
+  if (const char* path = g_getenv("AETHERIA_PRESENTATION_TRACE")) {
+    trace_ = fopen(path, "a");
+    if (trace_) setvbuf(trace_, nullptr, _IOLBF, 0);
+  }
   Resize();
   aetheria_engine_direct(engine_, true);
   // Bootstrap an empty surface; subsequent frames follow wl_surface.frame.
@@ -110,6 +113,12 @@ void AetheriaWayland::Presented(void* data, struct wp_presentation_feedback* fee
   g_mutex_lock(&self->mutex_);
   if (self->trace_) fprintf(self->trace_, "presented,%llu,%u,%u\n",
       static_cast<unsigned long long>(((uint64_t(hi) << 32) | lo) * 1000000000ULL + ns), refresh, flags);
+  const auto frame = self->feedbacks_.find(feedback);
+  if (self->trace_ && frame != self->feedbacks_.end()) {
+    fprintf(self->trace_, "presented_frame,%llu,%llu,%u,%u\n",
+        static_cast<unsigned long long>(frame->second),
+        static_cast<unsigned long long>(((uint64_t(hi) << 32) | lo) * 1000000000ULL + ns), refresh, flags);
+  }
   self->feedbacks_.erase(feedback);
   wp_presentation_feedback_destroy(feedback);
   g_mutex_unlock(&self->mutex_);
@@ -123,7 +132,9 @@ void AetheriaWayland::Discarded(void* data, struct wp_presentation_feedback* fee
   g_mutex_unlock(&self->mutex_);
 }
 bool AetheriaWayland::Present(GLuint framebuffer, int width, int height) {
+  const auto entered = g_get_monotonic_time();
   g_mutex_lock(&mutex_);
+  const auto acquired = g_get_monotonic_time();
   if (!surface_ || egl_surface_ == EGL_NO_SURFACE) { g_mutex_unlock(&mutex_); return false; }
   const auto context = eglGetCurrentContext();
   const auto draw = eglGetCurrentSurface(EGL_DRAW), read = eglGetCurrentSurface(EGL_READ);
@@ -199,22 +210,29 @@ bool AetheriaWayland::Present(GLuint framebuffer, int width, int height) {
     static const wl_callback_listener listener = {FrameDone};
     wl_callback_add_listener(callback_, &listener, this);
   }
+  const uint64_t serial = ++frame_serial_;
   if (presentation_ && trace_) {
     auto* feedback = wp_presentation_feedback(presentation_, surface_);
-    feedbacks_.insert(feedback);
+    feedbacks_[feedback] = serial;
     static const wp_presentation_feedback_listener listener = {SyncOutput, Presented, Discarded};
     wp_presentation_feedback_add_listener(feedback, &listener, this);
   }
+  const auto swap_start = g_get_monotonic_time();
   const bool ok = eglSwapBuffers(egl_display_, egl_surface_) == EGL_TRUE;
+  const auto swap_end = g_get_monotonic_time();
   eglMakeCurrent(egl_display_, draw, read, context);
   wl_display_flush(display_);
+  if (trace_) fprintf(trace_, "submit,%llu,%lld,%lld,%lld,%lld,%lld\n",
+      static_cast<unsigned long long>(serial), static_cast<long long>(entered),
+      static_cast<long long>(acquired), static_cast<long long>(swap_start),
+      static_cast<long long>(swap_end), static_cast<long long>(g_get_monotonic_time()));
   g_mutex_unlock(&mutex_);
   return ok;
 }
 void AetheriaWayland::Destroy() {
   g_mutex_lock(&mutex_);
   if (callback_) { wl_callback_destroy(callback_); callback_ = nullptr; }
-  for (auto* feedback : feedbacks_) wp_presentation_feedback_destroy(feedback);
+  for (const auto& feedback : feedbacks_) wp_presentation_feedback_destroy(feedback.first);
   feedbacks_.clear();
   if (egl_surface_ != EGL_NO_SURFACE) {
     eglDestroySurface(egl_display_, egl_surface_); egl_surface_ = EGL_NO_SURFACE;

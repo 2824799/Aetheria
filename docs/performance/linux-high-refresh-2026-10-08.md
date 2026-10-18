@@ -39,9 +39,6 @@ Release 测量仍有约 0.7% 的长间隔，因此结果应描述为约 164–16
 
 ## 数据与复现
 
-- [全部统计及 UI 原始报告](linux-high-refresh-2026-10-08.json)
-- [Profile 原始 presentation trace](linux-high-refresh-profile-2026-10-08.csv.gz)
-- [Release 原始 presentation trace](linux-high-refresh-release-2026-10-08.csv.gz)
-- [构建、测量和回归命令](../../linux/engine/README.md)
+生成数据仅保留本地，由 Git 忽略：统计及 UI 原始报告为 `linux-high-refresh-2026-10-08.json`，Profile / Release presentation trace 为 `linux-high-refresh-{profile,release}-2026-10-08.csv.gz`。关键结果记录在本文，复测见[构建、测量和回归命令](../../linux/engine/README.md)。
 
 `scripts/analyze_presentation.py` 会在反馈不足、测量不完整、时间戳不递增时失败；`--min-refresh-ratio 0.97` 校验实际呈现达到显示器刷新率的 97%。原始 trace 使用追加模式，每轮测量需先清空文件。

@@ -29,6 +29,8 @@ Flutter 先在没有 EGL surface 的上下文中渲染，默认 framebuffer 的 
 
 该结果针对本机 KDE Wayland、NVIDIA RTX 4060 Laptop、165Hz 显示器上的持续轻量动画。复杂 UI、封面解码、音频/DSP、混合刷新率多屏及其他驱动不由此保证满帧。
 
-[统计与测试输出](linux-visible-rendering-2026-10-08.json) · [原始呈现数据](linux-visible-rendering-2026-10-08.csv.gz) · [实际动画截图](linux-visible-benchmark-2026-10-08.png) · [构建及复测方式](../../linux/engine/README.md)
+统计与测试输出 `linux-visible-rendering-2026-10-08.json`、原始呈现数据 `linux-visible-rendering-2026-10-08.csv.gz` 仅保留本地，由 Git 忽略。关键结果记录在本文。
+
+[实际动画截图](linux-visible-benchmark-2026-10-08.png) · [构建及复测方式](../../linux/engine/README.md)
 
 ![修复后的正式应用，使用独立空数据目录验证中文及界面](linux-rendering-fixed-2026-10-08.png)

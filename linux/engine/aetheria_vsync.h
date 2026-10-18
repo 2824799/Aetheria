@@ -2,6 +2,7 @@
 
 #include <gtk/gtk.h>
 #include <cstdint>
+#include <cstdio>
 #include <vector>
 
 // Owned by FlEngine; Wayland callbacks and timers run on the platform thread.
@@ -31,4 +32,5 @@ class AetheriaVsync {
   bool direct_ = false;
   bool stopped_ = false;
   gint64 opportunity_ = 0;
+  FILE* trace_ = nullptr;
 };

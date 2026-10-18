@@ -5,11 +5,16 @@ AetheriaVsync::AetheriaVsync(Deliver deliver, Now now, void* engine)
     : deliver_(deliver), now_(now), engine_(engine) {
   g_weak_ref_init(&widget_, nullptr);
   g_mutex_init(&mutex_);
+  if (const char* path = g_getenv("AETHERIA_PRESENTATION_TRACE")) {
+    trace_ = fopen(path, "a");
+    if (trace_) setvbuf(trace_, nullptr, _IOLBF, 0);
+  }
 }
 AetheriaVsync::~AetheriaVsync() {
   Stop();
   g_weak_ref_clear(&widget_);
   g_mutex_clear(&mutex_);
+  if (trace_) fclose(trace_);
 }
 void AetheriaVsync::SetWidget(GtkWidget* widget) {
   g_weak_ref_set(&widget_, widget);
@@ -18,6 +23,8 @@ void AetheriaVsync::SetDirect(bool direct) { direct_ = direct; }
 void AetheriaVsync::Request(intptr_t baton) {
   g_mutex_lock(&mutex_);
   if (!stopped_) {
+    if (trace_) fprintf(trace_, "vsync_request,%lld,%lld\n",
+        static_cast<long long>(baton), static_cast<long long>(g_get_monotonic_time()));
     batons_.push_back(baton);
     if (!dispatch_) dispatch_ = g_idle_add_full(G_PRIORITY_HIGH, Dispatch, this, nullptr);
   }
@@ -42,11 +49,15 @@ gboolean AetheriaVsync::Dispatch(gpointer data) {
 gboolean AetheriaVsync::Timeout(gpointer data) {
   auto* self = static_cast<AetheriaVsync*>(data);
   self->timeout_ = 0;
+  if (self->trace_) fprintf(self->trace_, "vsync_timeout,0,%lld\n",
+      static_cast<long long>(g_get_monotonic_time()));
   self->Complete();
   return G_SOURCE_REMOVE;
 }
 void AetheriaVsync::Frame() {
   if (stopped_) return;
+  if (trace_) fprintf(trace_, "frame_callback,0,%lld\n",
+      static_cast<long long>(g_get_monotonic_time()));
   g_mutex_lock(&mutex_);
   const bool pending = !batons_.empty();
   g_mutex_unlock(&mutex_);
@@ -69,7 +80,11 @@ void AetheriaVsync::Complete() {
   }
   if (widget) g_object_unref(widget);
   const uint64_t start = now_();
-  for (auto baton : pending) deliver_(engine_, baton, start, start + interval);
+  for (auto baton : pending) {
+    if (trace_) fprintf(trace_, "vsync_deliver,%lld,%lld\n",
+        static_cast<long long>(baton), static_cast<long long>(g_get_monotonic_time()));
+    deliver_(engine_, baton, start, start + interval);
+  }
 }
 void AetheriaVsync::Stop() {
   g_mutex_lock(&mutex_);

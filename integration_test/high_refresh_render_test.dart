@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:ui' show PlatformDispatcher;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -7,6 +8,8 @@ import 'package:integration_test/integration_test.dart';
 void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
   binding.framePolicy = LiveTestWidgetsFlutterBindingFramePolicy.fullyLive;
+  binding.platformDispatcher.semanticsEnabledTestValue = true;
+  tearDownAll(binding.platformDispatcher.clearSemanticsEnabledTestValue);
   testWidgets('continuous native rendering cadence', (tester) async {
     final controller = AnimationController(
       vsync: tester,
@@ -45,7 +48,7 @@ void main() {
       for (var i = 1; i < times.length; i++) times[i] - times[i - 1],
     ]..sort();
     final report = <String, Object>{
-      'display_hz': tester.view.display.refreshRate,
+      'display_hz': PlatformDispatcher.instance.views.first.display.refreshRate,
       'frames': times.length,
       'wall_fps': times.length < 2
           ? 0

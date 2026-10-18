@@ -3,7 +3,7 @@
 #include <epoxy/egl.h>
 #include <gtk/gtk.h>
 #include <cstdio>
-#include <set>
+#include <map>
 #include <wayland-client.h>
 #include <wayland-egl.h>
 #include "flutter/shell/platform/linux/public/flutter_linux/fl_engine.h"
@@ -46,7 +46,8 @@ class AetheriaWayland {
   wl_callback* callback_ = nullptr;
   wl_egl_window* window_ = nullptr;
   wp_presentation* presentation_ = nullptr;
-  std::set<struct wp_presentation_feedback*> feedbacks_;
+  std::map<struct wp_presentation_feedback*, uint64_t> feedbacks_;
+  uint64_t frame_serial_ = 0;
   EGLDisplay egl_display_ = EGL_NO_DISPLAY;
   EGLSurface egl_surface_ = EGL_NO_SURFACE;
   int scale_ = 1;

@@ -128,25 +128,31 @@ class _AetherPressableState extends State<AetherPressable> {
         widget.hoverColor != null;
     final showFocusRing = widget.showFocus && _focused && _canInteract;
 
-    Widget child = AnimatedScale(
-      scale: scale,
-      duration: _pressed
-          ? Duration.zero
-          : AetherMotion.duration(context, AetherMotion.press),
-      curve: AetherMotion.curve(context),
-      child: Container(
-        foregroundDecoration: BoxDecoration(
-          color: _pressed
-              ? (widget.pressedColor ?? cfg.pressed)
-              : (showHover ? widget.hoverColor : null),
-          borderRadius: radius,
-          border: showFocusRing
-              ? Border.all(color: cfg.borderFocus, width: 1.5)
-              : null,
-        ),
-        child: widget.child,
+    Widget child = Container(
+      foregroundDecoration: BoxDecoration(
+        color: _pressed
+            ? (widget.pressedColor ?? cfg.pressed)
+            : (showHover ? widget.hoverColor : null),
+        borderRadius: radius,
+        border: showFocusRing
+            ? Border.all(color: cfg.borderFocus, width: 1.5)
+            : null,
       ),
+      child: widget.child,
     );
+
+    // Dense table rows intentionally have no scale motion. Avoid allocating an
+    // implicit animation/controller for every row created by a thumb jump.
+    if (widget.pressScale != 1) {
+      child = AnimatedScale(
+        scale: scale,
+        duration: _pressed
+            ? Duration.zero
+            : AetherMotion.duration(context, AetherMotion.press),
+        curve: AetherMotion.curve(context),
+        child: child,
+      );
+    }
 
     child = FocusableActionDetector(
       enabled: _canInteract,

@@ -18,6 +18,9 @@ import 'package:aetheria/core/widgets/aether_toast.dart';
 import 'package:aetheria/core/widgets/aether_menu.dart';
 import 'package:aetheria/features/library/ui/song_table/song_columns.dart';
 import 'package:aetheria/features/library/ui/song_table/song_table_cells.dart';
+import 'package:aetheria/features/library/ui/song_table/song_table_scrollbar.dart';
+import 'package:aetheria/features/library/ui/song_table/song_table_scroll_controller.dart';
+import 'package:aetheria/features/library/ui/song_table/song_table_text.dart';
 import 'package:aetheria/src/rust/models/playlist.dart';
 import 'package:aetheria/src/rust/models/song.dart';
 
@@ -26,6 +29,8 @@ const Duration kSongTablePrimaryTapInterval = Duration(milliseconds: 260);
 
 class SongTableController {
   _SongTableState? _state;
+
+  bool get isScrollbarDragging => _state?._isScrollbarDragging ?? false;
 
   Future<bool> revealSong(String songId) async {
     final state = _state;
@@ -64,7 +69,9 @@ class _SongTableState extends State<SongTable> {
   static const String _columnOrderKey = 'aetheria-song-table-column-order';
   static const String _columnWidthPrefix = 'aetheria-song-table-column-width-';
 
-  final ScrollController _verticalController = ScrollController();
+  final SongTableTextCache _textCache = SongTableTextCache();
+  final SongTableScrollController _verticalController =
+      SongTableScrollController();
   final Set<String> _selectedSongIds = <String>{};
   final ValueNotifier<int> _selectionChanges = ValueNotifier(0);
   final ValueNotifier<Rect?> _selectionRect = ValueNotifier(null);
@@ -80,6 +87,7 @@ class _SongTableState extends State<SongTable> {
   Offset? _selectionCurrent;
   Set<String> _selectionBaseIds = <String>{};
   bool _isBoxSelecting = false;
+  bool _isScrollbarDragging = false;
   bool _isPointerDownForSelection = false;
   bool _boxSelectionAdditive = false;
   DateTime? _lastPrimaryTapAt;
@@ -90,6 +98,7 @@ class _SongTableState extends State<SongTable> {
   double _viewportWidth = 0;
 
   SongTableCellBuilder get _cellBuilder => SongTableCellBuilder(
+    textCache: _textCache,
     columnWidths: _columnWidths,
     columnOrder: _columnOrder,
     onResize: _resizeColumn,
@@ -102,11 +111,13 @@ class _SongTableState extends State<SongTable> {
   void initState() {
     super.initState();
     widget.controller?._attach(this);
+    _verticalController.addListener(_textCache.deferWarmup);
     _loadColumnLayout();
   }
 
   @override
   void dispose() {
+    _textCache.dispose();
     widget.controller?._detach(this);
     _verticalController.dispose();
     _selectionChanges.dispose();
@@ -538,13 +549,17 @@ class _SongTableState extends State<SongTable> {
   }
 
   void _handlePointerDown(PointerDownEvent event) {
+    _textCache.deferWarmup();
     _suppressRowTap = false;
     if (event.kind != PointerDeviceKind.mouse ||
         event.buttons != kPrimaryMouseButton) {
       return;
     }
+    final viewport = context.findRenderObject() as RenderBox?;
+    final viewportX =
+        viewport?.globalToLocal(event.position).dx ?? event.localPosition.dx;
     if (_viewportWidth > 0 &&
-        event.localPosition.dx >= _viewportWidth - _scrollbarHitTestWidth) {
+        viewportX >= _viewportWidth - _scrollbarHitTestWidth) {
       _isPointerDownForSelection = false;
       return;
     }
@@ -683,6 +698,17 @@ class _SongTableState extends State<SongTable> {
     final cfg = context.tokens;
     final songs = libraryProvider.displaySongs;
     final cellBuilder = _cellBuilder;
+    _textCache.configurePrefetch(
+      revision: songs,
+      titles: songs
+          .where(libraryProvider.songHasLyrics)
+          .map((song) => song.title),
+      titlesWithoutLyrics: songs
+          .where((song) => !libraryProvider.songHasLyrics(song))
+          .map((song) => song.title),
+      artists: songs.map((song) => song.artist ?? '未知歌手'),
+    );
+    _verticalController.smoothWheel = !AetherMotion.reduce(context);
 
     if (songs.isEmpty) {
       return const AetherEmptyState(
@@ -700,224 +726,244 @@ class _SongTableState extends State<SongTable> {
             .max(0.0, constraints.maxHeight - _headerHeight)
             .toDouble();
 
-        return Scrollbar(
-          thumbVisibility: true,
-          controller: _verticalController,
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: SizedBox(
-              width: tableWidth,
-              child: Column(
-                children: [
-                  Container(
-                    height: _headerHeight,
-                    decoration: BoxDecoration(
-                      border: Border(
-                        bottom: BorderSide(color: cfg.borderSubtle),
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        SizedBox(
-                          width: _leadingColumnWidth,
-                          child: Center(
-                            child: Icon(
-                              Icons.drag_indicator,
-                              size: 16,
-                              color: cfg.textSecondary.withValues(alpha: 0.65),
-                            ),
-                          ),
+        return ScrollConfiguration(
+          // The fixed track owns vertical scrolling. An automatically added
+          // inner scrollbar would move with the horizontally scrolled table.
+          behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+          child: SongTableScrollbar(
+            controller: _verticalController,
+            headerHeight: _headerHeight,
+            thumbColor: cfg.textSecondary.withValues(alpha: 0.6),
+            onDraggingChanged: (dragging) => _isScrollbarDragging = dragging,
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: SizedBox(
+                width: tableWidth,
+                child: Column(
+                  children: [
+                    Container(
+                      height: _headerHeight,
+                      decoration: BoxDecoration(
+                        border: Border(
+                          bottom: BorderSide(color: cfg.borderSubtle),
                         ),
-                        for (final column in _columnOrder)
-                          cellBuilder.buildHeaderCell(column, cfg),
-                      ],
-                    ),
-                  ),
-                  SizedBox(
-                    height: bodyHeight,
-                    child: Listener(
-                      behavior: HitTestBehavior.translucent,
-                      onPointerDown: _handlePointerDown,
-                      onPointerMove: (event) =>
-                          _handlePointerMove(event, songs),
-                      onPointerUp: (_) => _handlePointerUp(),
-                      onPointerCancel: (_) => _handlePointerUp(),
-                      child: Stack(
+                      ),
+                      child: Row(
                         children: [
-                          ListView.builder(
-                            controller: _verticalController,
-                            itemExtent: _rowHeight,
-                            // Pre-build a few rows outside the viewport so the
-                            // reveal animation doesn't hitch while new rows are
-                            // being laid out for the first time.
-                            scrollCacheExtent: const ScrollCacheExtent.pixels(
-                              _rowHeight * 8,
-                            ),
-                            itemCount: songs.length,
-                            itemBuilder: (context, index) {
-                              final song = songs[index];
-                              final primaryVersion = _primaryVersionFor(song);
-
-                              return Selector<
-                                AudioPlayerProvider,
-                                ({bool playing, bool active, bool running})
-                              >(
-                                selector: (_, audio) => (
-                                  playing: audio.playingSong?.id == song.id,
-                                  active: audio.activeSong?.id == song.id,
-                                  running:
-                                      audio.playingSong?.id == song.id &&
-                                      audio.isPlaying,
-                                ),
-                                builder: (context, state, _) {
-                                  final isCurrentlyPlaying = state.playing;
-                                  final isActive = state.active;
-                                  return SizedBox(
-                                    width: tableWidth,
-                                    height: _rowHeight,
-                                    child: GestureDetector(
-                                      behavior: HitTestBehavior.opaque,
-                                      onSecondaryTapUp: (details) {
-                                        _showContextMenu(
-                                          context,
-                                          details.globalPosition,
-                                          song,
-                                          libraryProvider,
-                                        );
-                                      },
-                                      child: AetherPressable(
-                                        pressScale: 1,
-                                        hoverColor: cfg.bgHover,
-                                        onTap: () async {
-                                          await _handleRowPrimaryTap(
-                                            song,
-                                            index,
-                                            songs,
-                                            libraryProvider,
-                                            audioProvider,
-                                          );
-                                        },
-
-                                        child: AnimatedBuilder(
-                                          animation: _selectionChanges,
-                                          builder: (context, child) => Container(
-                                            decoration: BoxDecoration(
-                                              color:
-                                                  _selectedSongIds.contains(
-                                                    song.id,
-                                                  )
-                                                  ? cfg.selection
-                                                  : isActive
-                                                  ? cfg.accentMuted
-                                                  : Colors.transparent,
-                                            ),
-                                            foregroundDecoration: BoxDecoration(
-                                              border: Border(
-                                                bottom: BorderSide(
-                                                  color: cfg.borderSubtle
-                                                      .withValues(alpha: 0.45),
-                                                ),
-                                                left: BorderSide(
-                                                  color: isActive
-                                                      ? cfg.accent
-                                                      : Colors.transparent,
-                                                  width: 3,
-                                                ),
-                                              ),
-                                            ),
-                                            child: child,
-                                          ),
-                                          child: Row(
-                                            children: [
-                                              SizedBox(
-                                                width: _leadingColumnWidth,
-                                                child: AetherIconButton(
-                                                  icon:
-                                                      isCurrentlyPlaying &&
-                                                          state.running
-                                                      ? Icons
-                                                            .pause_circle_filled
-                                                      : Icons
-                                                            .play_circle_filled,
-                                                  iconSize: AetherIconSize.lg,
-                                                  size: 36,
-                                                  color: isCurrentlyPlaying
-                                                      ? cfg.success
-                                                      : cfg.textSecondary,
-                                                  tooltip:
-                                                      isCurrentlyPlaying &&
-                                                          state.running
-                                                      ? '暂停'
-                                                      : '播放',
-                                                  onPressed: () async {
-                                                    if (isCurrentlyPlaying) {
-                                                      await audioProvider
-                                                          .playPause();
-                                                      return;
-                                                    }
-                                                    try {
-                                                      await audioProvider.playSong(
-                                                        song,
-                                                        songs,
-                                                        libraryProvider
-                                                            .libraryPath,
-                                                        audioServerPort:
-                                                            libraryProvider
-                                                                .audioServerPort,
-                                                      );
-                                                    } catch (e) {
-                                                      if (!context.mounted) {
-                                                        return;
-                                                      }
-                                                      showAetherToast(
-                                                        context,
-                                                        message: e.toString(),
-                                                        kind: AetherToastKind
-                                                            .error,
-                                                      );
-                                                    }
-                                                  },
-                                                ),
-                                              ),
-                                              for (final column in _columnOrder)
-                                                cellBuilder.buildCell(
-                                                  column,
-                                                  song,
-                                                  primaryVersion,
-                                                  cfg,
-                                                  isCurrentlyPlaying,
-                                                  libraryProvider.songHasLyrics(
-                                                    song,
-                                                  ),
-                                                ),
-                                            ],
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  );
-                                },
-                              );
-                            },
-                          ),
-                          Positioned.fill(
-                            child: IgnorePointer(
-                              child: RepaintBoundary(
-                                child: CustomPaint(
-                                  key: const ValueKey('song-selection-overlay'),
-                                  painter: _SelectionPainter(
-                                    _selectionRect,
-                                    cfg.accent,
-                                  ),
+                          SizedBox(
+                            width: _leadingColumnWidth,
+                            child: Center(
+                              child: Icon(
+                                Icons.drag_indicator,
+                                size: 16,
+                                color: cfg.textSecondary.withValues(
+                                  alpha: 0.65,
                                 ),
                               ),
                             ),
                           ),
+                          for (final column in _columnOrder)
+                            cellBuilder.buildHeaderCell(column, cfg),
                         ],
                       ),
                     ),
-                  ),
-                ],
+                    SizedBox(
+                      height: bodyHeight,
+                      child: Listener(
+                        behavior: HitTestBehavior.translucent,
+                        onPointerSignal: (event) =>
+                            _verticalController.pointerKind = event.kind,
+                        onPointerDown: _handlePointerDown,
+                        onPointerMove: (event) =>
+                            _handlePointerMove(event, songs),
+                        onPointerUp: (_) => _handlePointerUp(),
+                        onPointerCancel: (_) => _handlePointerUp(),
+                        child: Stack(
+                          children: [
+                            ListView.builder(
+                              controller: _verticalController,
+                              itemExtent: _rowHeight,
+                              // Fast thumb jumps replace most visible rows. Keep
+                              // the speculative work bounded instead of building
+                              // sixteen extra rows with text and tag scrollables.
+                              scrollCacheExtent: const ScrollCacheExtent.pixels(
+                                _rowHeight * 2,
+                              ),
+                              addAutomaticKeepAlives: false,
+                              itemCount: songs.length,
+                              itemBuilder: (context, index) {
+                                final song = songs[index];
+                                final primaryVersion = _primaryVersionFor(song);
+                                final hasLyrics = libraryProvider.songHasLyrics(
+                                  song,
+                                );
+
+                                return Selector<
+                                  AudioPlayerProvider,
+                                  ({bool playing, bool active, bool running})
+                                >(
+                                  selector: (_, audio) => (
+                                    playing: audio.playingSong?.id == song.id,
+                                    active: audio.activeSong?.id == song.id,
+                                    running:
+                                        audio.playingSong?.id == song.id &&
+                                        audio.isPlaying,
+                                  ),
+                                  builder: (context, state, _) {
+                                    final isCurrentlyPlaying = state.playing;
+                                    final isActive = state.active;
+                                    return SizedBox(
+                                      width: tableWidth,
+                                      height: _rowHeight,
+                                      child: GestureDetector(
+                                        behavior: HitTestBehavior.opaque,
+                                        onSecondaryTapUp: (details) {
+                                          _showContextMenu(
+                                            context,
+                                            details.globalPosition,
+                                            song,
+                                            libraryProvider,
+                                          );
+                                        },
+                                        child: AetherPressable(
+                                          pressScale: 1,
+                                          hoverColor: cfg.bgHover,
+                                          onTap: () async {
+                                            await _handleRowPrimaryTap(
+                                              song,
+                                              index,
+                                              songs,
+                                              libraryProvider,
+                                              audioProvider,
+                                            );
+                                          },
+
+                                          child: AnimatedBuilder(
+                                            animation: _selectionChanges,
+                                            builder: (context, child) => Container(
+                                              decoration: BoxDecoration(
+                                                color:
+                                                    _selectedSongIds.contains(
+                                                      song.id,
+                                                    )
+                                                    ? cfg.selection
+                                                    : isActive
+                                                    ? cfg.accentMuted
+                                                    : Colors.transparent,
+                                              ),
+                                              foregroundDecoration:
+                                                  BoxDecoration(
+                                                    border: Border(
+                                                      bottom: BorderSide(
+                                                        color: cfg.borderSubtle
+                                                            .withValues(
+                                                              alpha: 0.45,
+                                                            ),
+                                                      ),
+                                                      left: BorderSide(
+                                                        color: isActive
+                                                            ? cfg.accent
+                                                            : Colors
+                                                                  .transparent,
+                                                        width: 3,
+                                                      ),
+                                                    ),
+                                                  ),
+                                              child: child,
+                                            ),
+                                            child: Row(
+                                              children: [
+                                                SizedBox(
+                                                  width: _leadingColumnWidth,
+                                                  child: AetherIconButton(
+                                                    icon:
+                                                        isCurrentlyPlaying &&
+                                                            state.running
+                                                        ? Icons
+                                                              .pause_circle_filled
+                                                        : Icons
+                                                              .play_circle_filled,
+                                                    iconSize: AetherIconSize.lg,
+                                                    size: 36,
+                                                    color: isCurrentlyPlaying
+                                                        ? cfg.success
+                                                        : cfg.textSecondary,
+                                                    tooltip:
+                                                        isCurrentlyPlaying &&
+                                                            state.running
+                                                        ? '暂停'
+                                                        : '播放',
+                                                    onPressed: () async {
+                                                      if (isCurrentlyPlaying) {
+                                                        await audioProvider
+                                                            .playPause();
+                                                        return;
+                                                      }
+                                                      try {
+                                                        await audioProvider.playSong(
+                                                          song,
+                                                          songs,
+                                                          libraryProvider
+                                                              .libraryPath,
+                                                          audioServerPort:
+                                                              libraryProvider
+                                                                  .audioServerPort,
+                                                        );
+                                                      } catch (e) {
+                                                        if (!context.mounted) {
+                                                          return;
+                                                        }
+                                                        showAetherToast(
+                                                          context,
+                                                          message: e.toString(),
+                                                          kind: AetherToastKind
+                                                              .error,
+                                                        );
+                                                      }
+                                                    },
+                                                  ),
+                                                ),
+                                                for (final column
+                                                    in _columnOrder)
+                                                  cellBuilder.buildCell(
+                                                    column,
+                                                    song,
+                                                    primaryVersion,
+                                                    cfg,
+                                                    isCurrentlyPlaying,
+                                                    hasLyrics,
+                                                  ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                );
+                              },
+                            ),
+                            Positioned.fill(
+                              child: IgnorePointer(
+                                child: RepaintBoundary(
+                                  child: CustomPaint(
+                                    key: const ValueKey(
+                                      'song-selection-overlay',
+                                    ),
+                                    painter: _SelectionPainter(
+                                      _selectionRect,
+                                      cfg.accent,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),

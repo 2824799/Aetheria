@@ -31,7 +31,6 @@ class _MainLayoutState extends State<MainLayout>
   late AnimationController _drawerController;
   late Animation<Offset> _drawerSlide;
   late Animation<double> _scrimFade;
-  late CurvedAnimation _drawerCurve;
   late final Widget _desktopContent;
   bool _hasOpenedDetail = false;
   final SongTableController _songTableController = SongTableController();
@@ -48,16 +47,11 @@ class _MainLayoutState extends State<MainLayout>
       vsync: this,
     );
     _desktopContent = MainContent(songTableController: _songTableController);
-    final curved = _drawerCurve = CurvedAnimation(
-      parent: _drawerController,
-      curve: AetherMotion.outQuart,
-      reverseCurve: AetherMotion.out,
-    );
     _drawerSlide = Tween<Offset>(
       begin: const Offset(1, 0),
       end: Offset.zero,
-    ).animate(curved);
-    _scrimFade = curved;
+    ).animate(_drawerController);
+    _scrimFade = _drawerController;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final libraryProvider = context.read<LibraryProvider>();
       await libraryProvider.loadLibrary();
@@ -79,7 +73,6 @@ class _MainLayoutState extends State<MainLayout>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _drawerCurve.dispose();
     _drawerController.dispose();
     super.dispose();
   }
@@ -174,7 +167,15 @@ class _MainLayoutState extends State<MainLayout>
         if (AetherMotion.reduce(context)) {
           _drawerController.value = 1;
         } else {
-          _drawerController.forward();
+          // The controller stores the visible progress. Each new request
+          // eases from that position, including a reversal midway through a
+          // close. Reversing an ease-out CurvedAnimation starts nearly still.
+          _drawerController.animateTo(
+            1,
+            duration:
+                _drawerController.duration! * (1 - _drawerController.value),
+            curve: AetherMotion.outQuart,
+          );
         }
       }
     } else {
@@ -183,7 +184,12 @@ class _MainLayoutState extends State<MainLayout>
         if (AetherMotion.reduce(context)) {
           _drawerController.value = 0;
         } else {
-          _drawerController.reverse();
+          _drawerController.animateBack(
+            0,
+            duration:
+                _drawerController.reverseDuration! * _drawerController.value,
+            curve: AetherMotion.out,
+          );
         }
       }
     }
@@ -264,37 +270,46 @@ class _MainLayoutState extends State<MainLayout>
                           child: AnimatedBuilder(
                             animation: _drawerController,
                             child: _hasOpenedDetail
-                                ? Stack(
-                                    children: [
-                                      Positioned.fill(
-                                        child: FadeTransition(
-                                          opacity: _scrimFade,
-                                          child: ModalBarrier(
-                                            color: cfg.scrim.withValues(
-                                              alpha: 0.28,
+                                ? IgnorePointer(
+                                    // Release the list as soon as close is
+                                    // requested, so another row can reopen the
+                                    // drawer before its exit finishes.
+                                    ignoring: !audioProvider.isDetailOpen,
+                                    child: ExcludeFocus(
+                                      excluding: !audioProvider.isDetailOpen,
+                                      child: Stack(
+                                        children: [
+                                          Positioned.fill(
+                                            child: FadeTransition(
+                                              opacity: _scrimFade,
+                                              child: ModalBarrier(
+                                                color: cfg.scrim.withValues(
+                                                  alpha: 0.28,
+                                                ),
+                                                onDismiss: () {
+                                                  _dismissKeyboard();
+                                                  audioProvider.setDetailOpen(
+                                                    false,
+                                                  );
+                                                },
+                                              ),
                                             ),
-                                            onDismiss: () {
-                                              _dismissKeyboard();
-                                              audioProvider.setDetailOpen(
-                                                false,
-                                              );
-                                            },
                                           ),
-                                        ),
-                                      ),
-                                      Positioned(
-                                        right: 0,
-                                        top: 0,
-                                        bottom: 0,
-                                        width: 380,
-                                        child: SlideTransition(
-                                          position: _drawerSlide,
-                                          child: const RepaintBoundary(
-                                            child: DetailPane(),
+                                          Positioned(
+                                            right: 0,
+                                            top: 0,
+                                            bottom: 0,
+                                            width: 380,
+                                            child: SlideTransition(
+                                              position: _drawerSlide,
+                                              child: const RepaintBoundary(
+                                                child: DetailPane(),
+                                              ),
+                                            ),
                                           ),
-                                        ),
+                                        ],
                                       ),
-                                    ],
+                                    ),
                                   )
                                 : const SizedBox.shrink(),
                             builder: (context, child) => Visibility(

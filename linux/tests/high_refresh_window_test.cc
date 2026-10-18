@@ -35,6 +35,8 @@ int main(int argc, char** argv) {
   gtk_window_set_title(GTK_WINDOW(window), "Aetheria rendering lifecycle test");
   gtk_window_set_default_size(GTK_WINDOW(window), 1100, 700);
   g_autoptr(FlDartProject) project = fl_dart_project_new();
+  fl_dart_project_set_ui_thread_policy(
+      project, FL_UI_THREAD_POLICY_RUN_ON_SEPARATE_THREAD);
   auto assets = bundle + "/data/flutter_assets";
   auto icu = bundle + "/data/icudtl.dat";
   auto aot = bundle + "/lib/libapp.so";
