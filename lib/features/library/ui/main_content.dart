@@ -48,85 +48,17 @@ class _MainContentState extends State<MainContent> {
   }) async {
     if (!mounted) return null;
 
-    var progressDialogOpen = false;
-    var progressTitle = initialTitle;
-    var progressSubtitle = initialSubtitle;
-    var progressCurrent = 0;
-    var progressTotal = 0;
-    var progressIndeterminate = true;
-    void Function(void Function())? setDialogState;
-
-    showAetherDialog<void>(
+    return showAetherDialog<T>(
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) {
-        return StatefulBuilder(
-          builder: (dialogContext, updateDialogState) {
-            setDialogState = updateDialogState;
-            progressDialogOpen = true;
-            final cfg = dialogContext.tokens;
-            final progressValue = progressIndeterminate || progressTotal <= 0
-                ? null
-                : (progressCurrent / progressTotal).clamp(0.0, 1.0);
-
-            return AetherDialog(
-              title: progressTitle,
-              maxWidth: 380,
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    progressSubtitle,
-                    style: AetherType.bodySmStyle(cfg.textSecondary),
-                  ),
-                  const SizedBox(height: AetherSpace.xl),
-                  AetherProgress.linear(
-                    size: 6,
-                    value: progressValue,
-                    trackColor: cfg.sliderTrack,
-                  ),
-                  if (progressTotal > 0) ...[
-                    const SizedBox(height: AetherSpace.md),
-                    Text(
-                      '已完成 $progressCurrent / $progressTotal 项',
-                      style: AetherType.captionStyle(
-                        cfg.textPrimary,
-                      ).copyWith(fontWeight: FontWeight.w600),
-                    ),
-                  ],
-                ],
-              ),
-            );
-          },
+        return _MainContentTaskProgressDialog<T>(
+          initialTitle: initialTitle,
+          initialSubtitle: initialSubtitle,
+          task: task,
         );
       },
     );
-    await Future<void>.delayed(Duration.zero);
-
-    void updateProgress({
-      String? title,
-      String? subtitle,
-      int? current,
-      int? total,
-      bool? indeterminate,
-    }) {
-      setDialogState?.call(() {
-        if (title != null) progressTitle = title;
-        if (subtitle != null) progressSubtitle = subtitle;
-        if (current != null) progressCurrent = current;
-        if (total != null) progressTotal = total;
-        if (indeterminate != null) progressIndeterminate = indeterminate;
-      });
-    }
-
-    try {
-      return await task(updateProgress);
-    } finally {
-      if (mounted && progressDialogOpen) {
-        Navigator.of(context, rootNavigator: true).pop();
-      }
-    }
   }
 
   Future<void> _importFiles(LibraryProvider provider) async {
@@ -589,5 +521,104 @@ class _MainContentState extends State<MainContent> {
     _searchController.dispose();
     _tagCollapseFactor.dispose();
     super.dispose();
+  }
+}
+
+
+class _MainContentTaskProgressDialog<T> extends StatefulWidget {
+  final String initialTitle;
+  final String initialSubtitle;
+  final Future<T> Function(ProgressDialogUpdate updateProgress) task;
+
+  const _MainContentTaskProgressDialog({
+    required this.initialTitle,
+    required this.initialSubtitle,
+    required this.task,
+  });
+
+  @override
+  State<_MainContentTaskProgressDialog<T>> createState() =>
+      _MainContentTaskProgressDialogState<T>();
+}
+
+class _MainContentTaskProgressDialogState<T>
+    extends State<_MainContentTaskProgressDialog<T>> {
+  late String _title = widget.initialTitle;
+  late String _subtitle = widget.initialSubtitle;
+  int _current = 0;
+  int _total = 0;
+  bool _indeterminate = true;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _execute());
+  }
+
+  Future<void> _execute() async {
+    try {
+      final result = await widget.task(({
+        title,
+        subtitle,
+        current,
+        total,
+        indeterminate,
+      }) {
+        if (!mounted) return;
+        setState(() {
+          if (title != null) _title = title;
+          if (subtitle != null) _subtitle = subtitle;
+          if (current != null) _current = current;
+          if (total != null) _total = total;
+          if (indeterminate != null) _indeterminate = indeterminate;
+        });
+      });
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop(result);
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
+      rethrow;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cfg = context.tokens;
+    final progressValue = _indeterminate || _total <= 0
+        ? null
+        : (_current / _total).clamp(0.0, 1.0);
+
+    return AetherDialog(
+      title: _title,
+      maxWidth: 380,
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            _subtitle,
+            style: AetherType.bodySmStyle(cfg.textSecondary),
+          ),
+          const SizedBox(height: AetherSpace.xl),
+          AetherProgress.linear(
+            size: 6,
+            value: progressValue,
+            trackColor: cfg.sliderTrack,
+          ),
+          if (_total > 0) ...[
+            const SizedBox(height: AetherSpace.md),
+            Text(
+              '已完成 $_current / $_total 项',
+              style: AetherType.captionStyle(
+                cfg.textPrimary,
+              ).copyWith(fontWeight: FontWeight.w600),
+            ),
+          ],
+        ],
+      ),
+    );
   }
 }

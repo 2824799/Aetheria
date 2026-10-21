@@ -140,6 +140,8 @@ void main() {
     final thumbPasses = <Map<String, Object>>[];
     final thumbInputs = <List<num>>[];
     final thumbFrames = <List<num>>[];
+    final wheelInputs = <List<num>>[];
+    final wheelFrames = <List<num>>[];
     var latestThumbInput = -1;
     var recordingFrames = true;
     Animation<Offset>? drawerAnimation;
@@ -147,7 +149,15 @@ void main() {
     AnimationStatus? animationDirection;
     var currentPhase = '';
     SchedulerBinding.instance.addPersistentFrameCallback((_) {
-      if (!recordingFrames || !currentPhase.startsWith('thumb')) return;
+      if (!recordingFrames) return;
+      if (currentPhase.startsWith('wheel')) {
+        wheelFrames.add([
+          tester.binding.platformDispatcher.frameData.frameNumber,
+          developer.Timeline.now,
+          position.pixels,
+        ]);
+      }
+      if (!currentPhase.startsWith('thumb')) return;
       thumbFrames.add([
         tester.binding.platformDispatcher.frameData.frameNumber,
         latestThumbInput,
@@ -161,6 +171,31 @@ void main() {
       final sent = developer.Timeline.now;
       await gesture.moveTo(point);
       thumbInputs.add([seq, sent, developer.Timeline.now, position.pixels]);
+    }
+
+    void wheel(double delta) {
+      final sent = developer.Timeline.now;
+      final before = position.pixels;
+      tester.binding.handlePointerEventForSource(
+        PointerScrollEvent(
+          viewId: tester.view.viewId,
+          position: tester.getCenter(list),
+          scrollDelta: Offset(0, delta),
+        ),
+        source: TestBindingEventSource.test,
+      );
+      wheelInputs.add([
+        sent,
+        developer.Timeline.now,
+        delta,
+        before,
+        position.pixels,
+      ]);
+      expect(
+        position.pixels,
+        before,
+        reason: 'wheel input must not jump content',
+      );
     }
 
     void recordAnimation(AnimationStatus status) {
@@ -300,16 +335,8 @@ void main() {
       });
       position.jumpTo(position.maxScrollExtent / 2);
       await measure('wheel_scroll', () async {
-        final center = tester.getCenter(list);
         for (var i = 0; i < 480; i++) {
-          tester.binding.handlePointerEventForSource(
-            PointerScrollEvent(
-              viewId: tester.view.viewId,
-              position: center,
-              scrollDelta: Offset(0, (i ~/ 80).isEven ? 36 : -36),
-            ),
-            source: TestBindingEventSource.test,
-          );
+          wheel((i ~/ 80).isEven ? 36 : -36);
           if (i == 79) {
             expect(
               position.pixels,
@@ -319,6 +346,20 @@ void main() {
           await pause(3);
         }
       });
+      for (final cadence in [30, 60, 90, 120]) {
+        position.jumpTo(position.maxScrollExtent / 4);
+        await measure('wheel_cadence_${cadence}ms', () async {
+          final start = position.pixels;
+          final count = (2400 / cadence).ceil();
+          for (var i = 0; i < count; i++) {
+            wheel(60);
+            await pause(cadence);
+          }
+          await pause(200);
+          expect(position.pixels, closeTo(start + count * 60, .01));
+          expect(position.isScrollingNotifier.value, isFalse);
+        });
+      }
       position.jumpTo(0);
       final firstTitle = library.displaySongs.first.title;
       final firstSong = find.descendant(
@@ -407,6 +448,16 @@ void main() {
           'scroll_offset',
         ],
         'thumb_frames': thumbFrames,
+        'wheel_input_columns': [
+          'sent_us',
+          'handled_us',
+          'delta',
+          'offset_before',
+          'offset_after',
+        ],
+        'wheel_inputs': wheelInputs,
+        'wheel_frame_columns': ['frame_number', 'sample_us', 'scroll_offset'],
+        'wheel_frames': wheelFrames,
         'frame_timing_columns': [
           'frame_number',
           'vsync_start_us',

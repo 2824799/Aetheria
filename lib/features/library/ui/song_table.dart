@@ -734,7 +734,14 @@ class _SongTableState extends State<SongTable> {
             controller: _verticalController,
             headerHeight: _headerHeight,
             thumbColor: cfg.textSecondary.withValues(alpha: 0.6),
-            onDraggingChanged: (dragging) => _isScrollbarDragging = dragging,
+            onDraggingChanged: (dragging) {
+              _isScrollbarDragging = dragging;
+              if (dragging) {
+                _textCache.suspendWarmup();
+              } else {
+                _textCache.resumeWarmup();
+              }
+            },
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: SizedBox(

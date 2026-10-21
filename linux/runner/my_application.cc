@@ -159,25 +159,53 @@ static void my_application_activate(GApplication* application) {
   GtkWindow* window =
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
   set_application_icon(window);
-
-  // Use a header bar when running in GNOME as this is the common style used
-  // by applications and is the setup most users will be using (e.g. Ubuntu
-  // desktop).
-  // If running on X and not using GNOME then just use a traditional title bar
-  // in case the window manager does more exotic layout, e.g. tiling.
-  // If running on Wayland assume the header bar will work (may need changing
-  // if future cases occur).
+  // Window titlebar and decoration handling:
+  // - AETHERIA_TITLEBAR=none / hidden / 0: completely borderless window (no titlebar).
+  // - AETHERIA_TITLEBAR=system / ssd: use window manager / server-side titlebar.
+  // - AETHERIA_TITLEBAR=csd / headerbar: force GTK HeaderBar.
+  // - Default: Use native window manager decoration on KDE / non-GNOME desktops,
+  //   and use GtkHeaderBar only when running under GNOME Shell.
+  const gchar* titlebar_env = g_getenv("AETHERIA_TITLEBAR");
   gboolean use_header_bar = TRUE;
-#ifdef GDK_WINDOWING_X11
-  GdkScreen* screen = gtk_window_get_screen(window);
-  if (GDK_IS_X11_SCREEN(screen)) {
-    const gchar* wm_name = gdk_x11_screen_get_window_manager_name(screen);
-    if (g_strcmp0(wm_name, "GNOME Shell") != 0) {
+  gboolean window_decorated = TRUE;
+
+  if (titlebar_env != nullptr) {
+    if (g_ascii_strcasecmp(titlebar_env, "none") == 0 ||
+        g_ascii_strcasecmp(titlebar_env, "hidden") == 0 ||
+        g_ascii_strcasecmp(titlebar_env, "0") == 0 ||
+        g_ascii_strcasecmp(titlebar_env, "false") == 0) {
+      window_decorated = FALSE;
       use_header_bar = FALSE;
+    } else if (g_ascii_strcasecmp(titlebar_env, "system") == 0 ||
+               g_ascii_strcasecmp(titlebar_env, "ssd") == 0) {
+      use_header_bar = FALSE;
+    } else if (g_ascii_strcasecmp(titlebar_env, "csd") == 0 ||
+               g_ascii_strcasecmp(titlebar_env, "headerbar") == 0) {
+      use_header_bar = TRUE;
     }
-  }
+  } else {
+    const gchar* desktop = g_getenv("XDG_CURRENT_DESKTOP");
+    bool is_gnome = false;
+    if (desktop != nullptr &&
+        (g_strrstr(desktop, "GNOME") != nullptr || g_strrstr(desktop, "gnome") != nullptr)) {
+      is_gnome = true;
+    }
+#ifdef GDK_WINDOWING_X11
+    GdkScreen* screen = gtk_window_get_screen(window);
+    if (GDK_IS_X11_SCREEN(screen)) {
+      const gchar* wm_name = gdk_x11_screen_get_window_manager_name(screen);
+      if (g_strcmp0(wm_name, "GNOME Shell") != 0) {
+        is_gnome = false;
+      }
+    }
 #endif
-  if (use_header_bar) {
+    use_header_bar = is_gnome;
+  }
+
+  if (!window_decorated) {
+    gtk_window_set_decorated(window, FALSE);
+    gtk_window_set_title(window, "aetheria");
+  } else if (use_header_bar) {
     GtkHeaderBar* header_bar = GTK_HEADER_BAR(gtk_header_bar_new());
     gtk_widget_show(GTK_WIDGET(header_bar));
     gtk_header_bar_set_title(header_bar, "aetheria");

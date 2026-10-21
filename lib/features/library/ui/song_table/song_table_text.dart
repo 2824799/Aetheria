@@ -84,6 +84,19 @@ class SongTableTextCache extends ChangeNotifier {
     }
   }
 
+  bool _warmupSuspended = false;
+
+  void suspendWarmup() {
+    _warmupSuspended = true;
+    _warmTimer?.cancel();
+    _warmTimer = null;
+  }
+
+  void resumeWarmup() {
+    _warmupSuspended = false;
+    deferWarmup();
+  }
+
   void deferWarmup() => _resumeAfter = _clock.elapsedMilliseconds + 200;
 
   _TextSpec _withText(_TextSpec spec, String text) => (
@@ -102,7 +115,7 @@ class SongTableTextCache extends ChangeNotifier {
 
   void _queueWarmup(_TextSpec spec, BoxConstraints constraints) {
     final source = _sources[spec.group];
-    if (source == null || source.isEmpty || _disposed) return;
+    if (source == null || source.isEmpty || _disposed || _warmupSuspended) return;
     final key = (
       _withText(spec, ''),
       constraints.minWidth,
@@ -130,7 +143,7 @@ class SongTableTextCache extends ChangeNotifier {
     // yield for actual interaction and an executing frame, so playback cannot
     // starve preparation of the next rows. Check a 0.75ms budget between
     // labels; an individual native paragraph layout cannot be preempted.
-    if (_clock.elapsedMilliseconds < _resumeAfter ||
+    if (_warmupSuspended || _clock.elapsedMilliseconds < _resumeAfter ||
         scheduler.schedulerPhase != SchedulerPhase.idle) {
       _scheduleWarmup(16);
       return;

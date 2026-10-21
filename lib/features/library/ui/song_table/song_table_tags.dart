@@ -20,25 +20,23 @@ class SongTableTags extends StatelessWidget {
   final AppThemeConfig cfg;
   final double availableWidth;
 
-  static final _widths =
-      <(String, TextStyle, TextScaler, TextDirection, Locale?), double>{};
+  static final _widths = <(String, double), double>{};
 
   double _labelWidth(BuildContext context, String label) {
+    final scaler = MediaQuery.textScalerOf(context);
+    final scale = scaler.scale(14) / 14;
+    final key = (label, scale);
+    final cached = _widths[key];
+    if (cached != null) return cached;
+
     final style = DefaultTextStyle.of(context).style.merge(
       const TextStyle(
         fontSize: AetherType.caption,
         fontWeight: FontWeight.bold,
       ),
     );
-    final scaler = MediaQuery.textScalerOf(context);
     final direction = Directionality.of(context);
     final locale = Localizations.maybeLocaleOf(context);
-    final key = (label, style, scaler, direction, locale);
-    final cached = _widths.remove(key);
-    if (cached != null) {
-      _widths[key] = cached;
-      return cached;
-    }
     final painter = TextPainter(
       text: TextSpan(text: label, style: style),
       textDirection: direction,
@@ -47,7 +45,6 @@ class SongTableTags extends StatelessWidget {
     )..layout();
     final width = painter.width;
     painter.dispose();
-    if (_widths.length >= 256) _widths.remove(_widths.keys.first);
     _widths[key] = width;
     return width;
   }

@@ -118,6 +118,22 @@ void main() {
     }
     await gesture.up();
     await tester.pumpAndSettle();
+    // Jump to the very end of the list and verify the thumb reaches the bottom:
+    controller.jumpTo(controller.position.maxScrollExtent);
+    await tester.pumpAndSettle();
+    final bottomThumbY = List.generate(box.size.height.floor(), (i) => i.toDouble())
+        .lastWhere(
+          (y) => painter.hitTestOnlyThumbInteractive(
+            Offset(thumbX, y),
+            PointerDeviceKind.mouse,
+          ),
+        );
+    expect(
+      bottomThumbY,
+      greaterThan(box.size.height - 12),
+      reason: 'The thumb must reach the very bottom of the table at max scroll',
+    );
+
     expect(audio.isDetailOpen, isFalse);
     expect(audio.activeSong, isNull);
     expect(tester.takeException(), isNull);

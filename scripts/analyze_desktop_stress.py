@@ -5,7 +5,7 @@ from bisect import bisect_left, bisect_right
 import csv
 import json
 from pathlib import Path
-from statistics import median
+from statistics import mean, median, pstdev
 
 
 def time_stats(values):
@@ -21,7 +21,7 @@ def time_stats(values):
     }
 
 
-def input_latency(report, trace):
+def matched_presentations(report, trace):
     submits = {int(row[1]): list(map(int, row[2:]))
                for row in trace if len(row) == 7 and row[0] == 'submit'}
     shown = {int(row[1]): int(row[2]) / 1000
@@ -35,6 +35,11 @@ def input_latency(report, trace):
             serial = ordered[index][1]
             if serial in shown:
                 frames[frame[0]] = (frame, shown[serial])
+    return frames, submits, shown
+
+
+def input_latency(report, trace):
+    frames, submits, shown = matched_presentations(report, trace)
     inputs = {row[0]: row for row in report.get('thumb_inputs', [])}
     handled = [row[2] for row in report.get('thumb_inputs', [])]
     for name, phase in report['phases'].items():
@@ -72,6 +77,39 @@ def input_latency(report, trace):
             }
         if name == 'thumb_step_latency' and (not samples or not submits):
             raise ValueError('Missing matched input / UI / raster / presentation samples')
+
+
+def wheel_motion(report, trace):
+    frames, _, _ = matched_presentations(report, trace)
+    for name, phase in report['phases'].items():
+        if not name.startswith('wheel_cadence_'):
+            continue
+        inputs = [row for row in report.get('wheel_inputs', [])
+                  if phase['start_us'] <= row[0] <= phase['end_us']]
+        if len(inputs) < 2:
+            raise ValueError(f'{name}: missing wheel input samples')
+        periods = [b[0] - a[0] for a, b in zip(inputs, inputs[1:])]
+        steady_start = inputs[0][0] + 800000
+        steady_end = inputs[-1][0] + median(periods)
+        samples = sorted((frames[number][1], offset)
+                         for number, sample, offset in report.get('wheel_frames', [])
+                         if number in frames and steady_start <= sample <= steady_end)
+        if len(samples) < 20:
+            raise ValueError(f'{name}: missing actual presented wheel frames')
+        speeds = [(b[1] - a[1]) * 1e6 / (b[0] - a[0])
+                  for a, b in zip(samples, samples[1:]) if b[0] > a[0]]
+        average = mean(speeds)
+        phase['wheel_motion'] = {
+            'presented_samples': len(samples),
+            'input_period_p50_ms': median(periods) / 1000,
+            'steady_presented_fps': (len(samples) - 1) * 1e6 /
+                (samples[-1][0] - samples[0][0]),
+            'mean_speed_px_s': average,
+            'speed_cv': pstdev(speeds) / abs(average),
+            'speed_min_ratio': min(speeds) / average,
+            'speed_max_ratio': max(speeds) / average,
+            'input_jump_max_px': max(abs(row[4] - row[3]) for row in inputs),
+        }
 
 
 def cadence(intervals):
@@ -134,6 +172,8 @@ def analyze(report_path, trace_path):
     }
     if report.get('thumb_inputs'):
         input_latency(report, trace)
+    if report.get('wheel_inputs'):
+        wheel_motion(report, trace)
     return report
 
 
