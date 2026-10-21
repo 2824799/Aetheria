@@ -286,12 +286,12 @@ class SyncProvider extends ChangeNotifier {
       final localFilesDir = Directory(
         _joinPath(libraryProvider.libraryPath, ['files']),
       );
-      final localFiles = await _listLibraryFiles(
+      final localFilesMap = await _listLibraryFilesWithSize(
         localFilesDir,
         libraryProvider.libraryPath,
       );
       if (remoteFiles.isEmpty &&
-          (remoteDatabaseSize > 0 || localFiles.isNotEmpty)) {
+          (remoteDatabaseSize > 0 || localFilesMap.isNotEmpty)) {
         throw Exception('远端文件清单异常（清单为空但远端数据库非空或本地存在现有音乐文件），已中止同步以防止本地文件被误清空');
       }
 
@@ -318,18 +318,11 @@ class SyncProvider extends ChangeNotifier {
       }
 
       progress = 0;
-      statusMessage = '正在比对本地与远端音乐文件...';
+      statusMessage = '正在快速比对差异文件...';
       notifyListeners();
       final plan = await _buildFileSyncPlan(
         libraryProvider.libraryPath,
         remoteFiles,
-        onProgress: (completed, total) {
-          statusMessage = total <= 0
-              ? '正在比对本地与远端音乐文件...'
-              : '正在比对本地与远端音乐文件 ($completed / $total)...';
-          progress = total <= 0 ? null : (completed / total) * 0.15;
-          notifyListeners();
-        },
       );
 
       var completed = 0;
@@ -342,26 +335,32 @@ class SyncProvider extends ChangeNotifier {
         notifyListeners();
       }
 
-      for (final file in plan.downloads) {
-        updateProgress('正在下载 ${file.path.split('/').last}...');
-        final destination = File(_joinPath(tempDir.path, file.path.split('/')));
-        await destination.parent.create(recursive: true);
-        await _downloadToFile(
-          Uri.http(device.endpoint, '/sync/file', {'path': file.path}),
-          destination,
-          token,
-        );
-        if (await destination.length() != file.size) {
-          throw Exception('文件大小校验失败: ${file.path}');
-        }
-        final remoteMd5 = file.md5;
-        if (remoteMd5 != null && remoteMd5.isNotEmpty) {
-          final downloadedHash = await _fileMd5(destination);
-          if (downloadedHash != remoteMd5) {
-            throw Exception('文件校验失败: ${file.path}');
+      if (plan.downloads.isNotEmpty) {
+        for (final file in plan.downloads) {
+          updateProgress(
+            '正在同步 (${completed + 1}/${plan.downloads.length}) ${file.path.split('/').last}...',
+          );
+          final destination = File(_joinPath(tempDir.path, file.path.split('/')));
+          await destination.parent.create(recursive: true);
+          await _downloadToFile(
+            Uri.http(device.endpoint, '/sync/file', {'path': file.path}),
+            destination,
+            token,
+          );
+          if (await destination.length() != file.size) {
+            throw Exception('文件大小校验失败: ${file.path}');
           }
+          final remoteMd5 = file.md5;
+          if (remoteMd5 != null && remoteMd5.isNotEmpty) {
+            final downloadedHash = await _fileMd5(destination);
+            if (downloadedHash != remoteMd5) {
+              throw Exception('文件校验失败: ${file.path}');
+            }
+          }
+          completed++;
         }
-        completed++;
+      } else {
+        updateProgress('所有音乐文件已是最新，正在应用数据库...');
       }
 
       updateProgress('正在暂停播放并准备覆盖本地库...');
@@ -493,59 +492,34 @@ class SyncProvider extends ChangeNotifier {
 
   Future<_FileSyncPlan> _buildFileSyncPlan(
     String libraryPath,
-    List<_RemoteFileInfo> remoteFiles, {
-    void Function(int completed, int total)? onProgress,
-  }) async {
+    List<_RemoteFileInfo> remoteFiles,
+  ) async {
     final filesDir = Directory(_joinPath(libraryPath, ['files']));
     await filesDir.create(recursive: true);
-    final localFiles = await _listLibraryFiles(filesDir, libraryPath);
-    final localFileSet = localFiles.toSet();
+    final localFilesMap = await _listLibraryFilesWithSize(filesDir, libraryPath);
     final remoteByPath = {for (final file in remoteFiles) file.path: file};
     final downloads = <_RemoteFileInfo>[];
     final removeOrReplace = <String>{};
-    var compared = 0;
-    final comparisonTotal = localFiles.length + remoteFiles.length;
-    onProgress?.call(compared, comparisonTotal);
-
-    for (final local in localFiles) {
-      try {
-        final remote = remoteByPath[local];
-        if (remote == null) {
-          removeOrReplace.add(local);
-          continue;
-        }
-
-        final localFile = File(_resolveLibraryRelativePath(libraryPath, local));
-        final stat = await localFile.stat();
-        if (stat.size != remote.size) {
-          removeOrReplace.add(local);
-          downloads.add(remote);
-          continue;
-        }
-
-        final remoteMd5 = remote.md5;
-        if (remoteMd5 != null && remoteMd5.isNotEmpty) {
-          final hash = await _cachedFileMd5(localFile, stat);
-          if (hash != remoteMd5) {
-            removeOrReplace.add(local);
-            downloads.add(remote);
-          }
-        }
-      } finally {
-        compared++;
-        onProgress?.call(compared, comparisonTotal);
-      }
-    }
 
     for (final remote in remoteFiles) {
-      if (!localFileSet.contains(remote.path)) {
+      final localSize = localFilesMap[remote.path];
+      if (localSize == null) {
+        // 本地不存在，需要下载
         downloads.add(remote);
+      } else if (localSize != remote.size) {
+        // 本地大小与远端不一致（损坏或不完整），需要替换并重新下载
+        downloads.add(remote);
+        removeOrReplace.add(remote.path);
       }
-      compared++;
-      onProgress?.call(compared, comparisonTotal);
+      // 本地已存在且大小完全一致，视为无需同步，直接跳过！
     }
 
-    await _persistFileHashCache();
+    // 检查本地存在但远端清单中已经不存在的多余文件
+    for (final localPath in localFilesMap.keys) {
+      if (!remoteByPath.containsKey(localPath)) {
+        removeOrReplace.add(localPath);
+      }
+    }
 
     return _FileSyncPlan(
       remoteFiles: remoteFiles,
@@ -810,20 +784,59 @@ class SyncProvider extends ChangeNotifier {
     final filesDir = Directory(
       _joinPath(libraryProvider.libraryPath, ['files']),
     );
-    final filePaths = await _listLibraryFiles(
+    final localFilesMap = await _listLibraryFilesWithSize(
       filesDir,
       libraryProvider.libraryPath,
     );
+
+    final knownAudioFiles = <String, ({int size, String? md5})>{};
+    for (final song in libraryProvider.songs) {
+      for (final version in song.versions) {
+        var rel = _normalizePath(version.filepath);
+        if (!rel.startsWith('files/')) {
+          rel = 'files/$rel';
+        }
+        if (rel.isNotEmpty) {
+          knownAudioFiles[rel] = (
+            size: version.fileSize.toInt(),
+            md5: version.md5,
+          );
+        }
+      }
+    }
+
     final files = <Map<String, dynamic>>[];
-    for (final relPath in filePaths) {
-      final file = File(
-        _resolveLibraryRelativePath(libraryProvider.libraryPath, relPath),
-      );
-      final stat = await file.stat();
+    for (final entry in localFilesMap.entries) {
+      final relPath = entry.key;
+      final actualSize = entry.value;
+      final known = knownAudioFiles[relPath];
+      String? fileMd5;
+
+      if (known != null &&
+          known.size == actualSize &&
+          known.md5 != null &&
+          known.md5!.isNotEmpty) {
+        fileMd5 = known.md5;
+      } else {
+        final file = File(
+          _resolveLibraryRelativePath(libraryProvider.libraryPath, relPath),
+        );
+        if (actualSize < 5 * 1024 * 1024) {
+          try {
+            fileMd5 = await _fileMd5(file);
+          } catch (_) {}
+        } else {
+          try {
+            final stat = await file.stat();
+            fileMd5 = await _cachedFileMd5(file, stat);
+          } catch (_) {}
+        }
+      }
+
       files.add({
         'path': relPath,
-        'size': stat.size,
-        'md5': await _cachedFileMd5(file, stat),
+        'size': actualSize,
+        'md5': fileMd5,
       });
     }
 
@@ -1036,17 +1049,17 @@ class SyncProvider extends ChangeNotifier {
     return targets.map(InternetAddress.new).toList();
   }
 
-  Future<List<String>> _listLibraryFiles(
+  Future<Map<String, int>> _listLibraryFilesWithSize(
     Directory filesDir,
     String libraryPath,
   ) async {
     if (!await filesDir.exists()) {
-      return [];
+      return {};
     }
     final normalizedLibrary = _normalizePath(libraryPath);
     final prefix = normalizedLibrary == '/' ? '/' : '$normalizedLibrary/';
     final prefixLength = prefix.length;
-    final result = <String>[];
+    final result = <String, int>{};
     await for (final entity in filesDir.list(
       recursive: true,
       followLinks: false,
@@ -1060,11 +1073,22 @@ class SyncProvider extends ChangeNotifier {
       }
       final rel = normalizedFile.substring(prefixLength);
       if (_isSafeLibraryFilePath(rel)) {
-        result.add(rel);
+        try {
+          final stat = await entity.stat();
+          result[rel] = stat.size;
+        } catch (_) {}
       }
     }
-    result.sort();
     return result;
+  }
+
+  Future<List<String>> _listLibraryFiles(
+    Directory filesDir,
+    String libraryPath,
+  ) async {
+    final map = await _listLibraryFilesWithSize(filesDir, libraryPath);
+    final list = map.keys.toList()..sort();
+    return list;
   }
 
   Future<String> _fileMd5(File file) async {
@@ -1232,6 +1256,22 @@ class SyncProvider extends ChangeNotifier {
       removeOrReplace: const {},
     );
     return _applyMirrorSync(libraryPath, tempDb, tempDir, backupDir, plan);
+  }
+
+  @visibleForTesting
+  Future<({List<String> downloads, Set<String> removeOrReplace})>
+      buildFileSyncPlanForTesting({
+    required String libraryPath,
+    required List<({String path, int size, String? md5})> remoteFiles,
+  }) async {
+    final remotes = remoteFiles
+        .map((r) => _RemoteFileInfo(path: r.path, size: r.size, md5: r.md5))
+        .toList();
+    final plan = await _buildFileSyncPlan(libraryPath, remotes);
+    return (
+      downloads: plan.downloads.map((d) => d.path).toList(),
+      removeOrReplace: plan.removeOrReplace,
+    );
   }
 
   String _newId() {

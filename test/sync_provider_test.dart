@@ -157,5 +157,44 @@ void main() {
       expect(await backupD.exists(), isTrue);
       expect(await backupD.readAsString(), 'song-D-to-remove');
     });
+
+    test('buildFileSyncPlan correctly plans downloads and replacements using fast size comparison', () async {
+      final libraryDir = Directory('${tempRoot.path}/fast_sync_lib');
+      final filesDir = Directory('${libraryDir.path}/files');
+      await filesDir.create(recursive: true);
+
+      // Local files
+      final localA = File('${filesDir.path}/songA.flac');
+      await localA.writeAsBytes(List.filled(100, 1)); // 100 bytes, matching remote
+
+      final localB = File('${filesDir.path}/songB.flac');
+      await localB.writeAsBytes(List.filled(50, 2)); // 50 bytes, remote has 80 bytes (corrupted/changed)
+
+      final localD = File('${filesDir.path}/songD.flac');
+      await localD.writeAsBytes(List.filled(30, 4)); // 30 bytes, obsolete (not in remote)
+
+      final plan = await provider.buildFileSyncPlanForTesting(
+        libraryPath: libraryDir.path,
+        remoteFiles: [
+          (path: 'files/songA.flac', size: 100, md5: 'hashA'),
+          (path: 'files/songB.flac', size: 80, md5: 'hashB'),
+          (path: 'files/songC.flac', size: 200, md5: 'hashC'), // new file
+        ],
+      );
+
+      // songA is identical: should NOT be in downloads, NOT in removeOrReplace
+      expect(plan.downloads, isNot(contains('files/songA.flac')));
+      expect(plan.removeOrReplace, isNot(contains('files/songA.flac')));
+
+      // songB size mismatch: must be in downloads and in removeOrReplace
+      expect(plan.downloads, contains('files/songB.flac'));
+      expect(plan.removeOrReplace, contains('files/songB.flac'));
+
+      // songC missing locally: must be in downloads
+      expect(plan.downloads, contains('files/songC.flac'));
+
+      // songD obsolete: must be in removeOrReplace
+      expect(plan.removeOrReplace, contains('files/songD.flac'));
+    });
   });
 }
