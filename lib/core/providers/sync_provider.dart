@@ -278,6 +278,23 @@ class SyncProvider extends ChangeNotifier {
           .where((file) => _isSafeLibraryFilePath(file.path))
           .toList();
 
+      final remoteDatabase = manifest['database'] is Map<String, dynamic>
+          ? manifest['database'] as Map<String, dynamic>
+          : const <String, dynamic>{};
+      final remoteDatabaseSize = (remoteDatabase['size'] as num?)?.toInt() ?? 0;
+
+      final localFilesDir = Directory(
+        _joinPath(libraryProvider.libraryPath, ['files']),
+      );
+      final localFiles = await _listLibraryFiles(
+        localFilesDir,
+        libraryProvider.libraryPath,
+      );
+      if (remoteFiles.isEmpty &&
+          (remoteDatabaseSize > 0 || localFiles.isNotEmpty)) {
+        throw Exception('远端文件清单异常（清单为空但远端数据库非空或本地存在现有音乐文件），已中止同步以防止本地文件被误清空');
+      }
+
       tempDir = await _createTempDir(libraryProvider.libraryPath);
       final tempDb = File(_joinPath(tempDir.path, ['database.db']));
       progress = null;
@@ -288,12 +305,7 @@ class SyncProvider extends ChangeNotifier {
         tempDb,
         token,
       );
-      final remoteDatabase = manifest['database'] is Map<String, dynamic>
-          ? manifest['database'] as Map<String, dynamic>
-          : const <String, dynamic>{};
-      final remoteDatabaseSize = (remoteDatabase['size'] as num?)?.toInt();
-      if (remoteDatabaseSize != null &&
-          remoteDatabaseSize > 0 &&
+      if (remoteDatabaseSize > 0 &&
           await tempDb.length() != remoteDatabaseSize) {
         throw Exception('数据库大小校验失败');
       }
@@ -552,21 +564,50 @@ class SyncProvider extends ChangeNotifier {
     final dbFile = File(_joinPath(libraryPath, ['database.db']));
     await backupDir.create(recursive: true);
 
-    if (await dbFile.exists()) {
-      await dbFile.copy(_joinPath(backupDir.path, ['database.db']));
-    }
+    final replacedBackups = <String, String>{};
+    final newlyInstalled = <String>[];
+    final deletedBackups = <String, String>{};
+    var dbBackedUp = false;
 
-    final sourcePaths = plan.remoteFiles.map((file) => file.path).toSet();
-    final filesDir = Directory(_joinPath(libraryPath, ['files']));
-    await filesDir.create(recursive: true);
-    final localFiles = await _listLibraryFiles(filesDir, libraryPath);
-    final pathsToRemove = <String>{
-      ...plan.removeOrReplace,
-      ...localFiles.where((path) => !sourcePaths.contains(path)),
-    };
-    final movedToBackup = <String>[];
-    final installedFiles = <String>[];
     try {
+      // 1. 先安装新文件与变更文件（本地已存且未变更的文件完全不受影响）
+      for (final remote in plan.downloads) {
+        final tempFile = File(
+          _resolveLibraryRelativePath(tempDir.path, remote.path),
+        );
+        if (!await tempFile.exists()) {
+          throw Exception('同步临时文件缺失: ${remote.path}');
+        }
+
+        final destination = File(
+          _resolveLibraryRelativePath(libraryPath, remote.path),
+        );
+
+        if (await destination.exists()) {
+          final backupPath = _resolveLibraryRelativePath(
+            backupDir.path,
+            remote.path,
+          );
+          final backupFile = File(backupPath);
+          await backupFile.parent.create(recursive: true);
+          await _moveFile(destination, backupFile);
+          replacedBackups[remote.path] = backupPath;
+        }
+
+        await destination.parent.create(recursive: true);
+        await tempFile.copy(destination.path);
+        newlyInstalled.add(remote.path);
+      }
+
+      // 2. 仅在所有新文件安装就位后，清理远端清单中确实不存在的多余文件
+      final sourcePaths = plan.remoteFiles.map((file) => file.path).toSet();
+      final filesDir = Directory(_joinPath(libraryPath, ['files']));
+      await filesDir.create(recursive: true);
+      final currentLocalFiles = await _listLibraryFiles(filesDir, libraryPath);
+      final pathsToRemove = currentLocalFiles.where(
+        (path) => !sourcePaths.contains(path),
+      ).toList();
+
       for (final relPath in pathsToRemove) {
         final localPath = _resolveLibraryRelativePath(libraryPath, relPath);
         final localFile = File(localPath);
@@ -574,54 +615,58 @@ class SyncProvider extends ChangeNotifier {
           continue;
         }
         final backupPath = _resolveLibraryRelativePath(backupDir.path, relPath);
-        await File(backupPath).parent.create(recursive: true);
-        await _moveFile(localFile, File(backupPath));
-        movedToBackup.add(relPath);
+        final backupFile = File(backupPath);
+        await backupFile.parent.create(recursive: true);
+        await _moveFile(localFile, backupFile);
+        deletedBackups[relPath] = backupPath;
       }
 
-      for (final remote in plan.downloads) {
-        final destination = File(
-          _resolveLibraryRelativePath(libraryPath, remote.path),
-        );
-        if (await destination.exists()) {
-          continue;
-        }
-        final tempFile = File(
-          _resolveLibraryRelativePath(tempDir.path, remote.path),
-        );
-        if (!await tempFile.exists()) {
-          throw Exception('同步临时文件缺失: ${remote.path}');
-        }
-        await destination.parent.create(recursive: true);
-        await tempFile.copy(destination.path);
-        installedFiles.add(remote.path);
+      // 3. 替换数据库
+      if (await dbFile.exists()) {
+        await dbFile.copy(_joinPath(backupDir.path, ['database.db']));
+        dbBackedUp = true;
       }
-
       await _removeDatabaseSidecars(dbFile);
       await tempDb.copy(dbFile.path);
     } catch (_) {
-      for (final relPath in installedFiles.reversed) {
-        final file = File(_resolveLibraryRelativePath(libraryPath, relPath));
-        if (await file.exists()) {
-          await file.delete();
+      // 回滚保障：发生任何异常时恢复现场
+      if (dbBackedUp) {
+        final backupDb = File(_joinPath(backupDir.path, ['database.db']));
+        if (await backupDb.exists()) {
+          await _removeDatabaseSidecars(dbFile);
+          await backupDb.copy(dbFile.path);
         }
       }
-      for (final relPath in movedToBackup.reversed) {
-        final backupFile = File(
-          _resolveLibraryRelativePath(backupDir.path, relPath),
-        );
+
+      for (final entry in deletedBackups.entries) {
+        final backupFile = File(entry.value);
         if (await backupFile.exists()) {
           final localFile = File(
-            _resolveLibraryRelativePath(libraryPath, relPath),
+            _resolveLibraryRelativePath(libraryPath, entry.key),
           );
           await _moveFile(backupFile, localFile);
         }
       }
-      final backupDb = File(_joinPath(backupDir.path, ['database.db']));
-      if (await backupDb.exists()) {
-        await _removeDatabaseSidecars(dbFile);
-        await backupDb.copy(dbFile.path);
+
+      for (final relPath in newlyInstalled.reversed) {
+        final destFile = File(
+          _resolveLibraryRelativePath(libraryPath, relPath),
+        );
+        if (await destFile.exists()) {
+          await destFile.delete();
+        }
       }
+
+      for (final entry in replacedBackups.entries) {
+        final backupFile = File(entry.value);
+        if (await backupFile.exists()) {
+          final localFile = File(
+            _resolveLibraryRelativePath(libraryPath, entry.key),
+          );
+          await _moveFile(backupFile, localFile);
+        }
+      }
+
       rethrow;
     }
   }
@@ -642,7 +687,7 @@ class SyncProvider extends ChangeNotifier {
         }
       }
       existing.sort((a, b) => b.path.compareTo(a.path));
-      for (final old in existing.skip(4)) {
+      for (final old in existing.skip(10)) {
         unawaited(old.delete(recursive: true));
       }
     } catch (_) {}
@@ -998,6 +1043,9 @@ class SyncProvider extends ChangeNotifier {
     if (!await filesDir.exists()) {
       return [];
     }
+    final normalizedLibrary = _normalizePath(libraryPath);
+    final prefix = normalizedLibrary == '/' ? '/' : '$normalizedLibrary/';
+    final prefixLength = prefix.length;
     final result = <String>[];
     await for (final entity in filesDir.list(
       recursive: true,
@@ -1006,12 +1054,11 @@ class SyncProvider extends ChangeNotifier {
       if (entity is! File) {
         continue;
       }
-      final normalizedLibrary = _normalizePath(libraryPath);
       final normalizedFile = _normalizePath(entity.path);
-      if (!normalizedFile.startsWith('$normalizedLibrary/')) {
+      if (!normalizedFile.startsWith(prefix)) {
         continue;
       }
-      final rel = normalizedFile.substring(normalizedLibrary.length + 1);
+      final rel = normalizedFile.substring(prefixLength);
       if (_isSafeLibraryFilePath(rel)) {
         result.add(rel);
       }
@@ -1147,7 +1194,44 @@ class SyncProvider extends ChangeNotifier {
   }
 
   String _normalizePath(String path) {
-    return path.replaceAll('\\', '/').replaceAll(RegExp('/+'), '/');
+    var normalized = path.replaceAll('\\', '/').replaceAll(RegExp('/+'), '/');
+    while (normalized.length > 1 && normalized.endsWith('/')) {
+      normalized = normalized.substring(0, normalized.length - 1);
+    }
+    return normalized;
+  }
+
+  @visibleForTesting
+  String normalizePathForTesting(String path) => _normalizePath(path);
+
+  @visibleForTesting
+  Future<List<String>> listLibraryFilesForTesting(
+    Directory filesDir,
+    String libraryPath,
+  ) =>
+      _listLibraryFiles(filesDir, libraryPath);
+
+  @visibleForTesting
+  Future<void> applyMirrorSyncForTesting({
+    required String libraryPath,
+    required File tempDb,
+    required Directory tempDir,
+    required Directory backupDir,
+    required List<String> remoteFilePaths,
+    required List<String> downloadPaths,
+  }) {
+    final remoteFiles = remoteFilePaths
+        .map((p) => _RemoteFileInfo(path: p, size: 0))
+        .toList();
+    final downloads = downloadPaths
+        .map((p) => _RemoteFileInfo(path: p, size: 0))
+        .toList();
+    final plan = _FileSyncPlan(
+      remoteFiles: remoteFiles,
+      downloads: downloads,
+      removeOrReplace: const {},
+    );
+    return _applyMirrorSync(libraryPath, tempDb, tempDir, backupDir, plan);
   }
 
   String _newId() {
