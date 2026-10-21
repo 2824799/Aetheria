@@ -579,7 +579,7 @@ class SyncProvider extends ChangeNotifier {
         movedToBackup.add(relPath);
       }
 
-      for (final remote in plan.remoteFiles) {
+      for (final remote in plan.downloads) {
         final destination = File(
           _resolveLibraryRelativePath(libraryPath, remote.path),
         );
