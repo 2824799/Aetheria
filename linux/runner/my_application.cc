@@ -218,6 +218,17 @@ static void my_application_activate(GApplication* application) {
   RestoreAndTrackWindowState(window);
 
   g_autoptr(FlDartProject) project = fl_dart_project_new();
+  // Linux GLES Impeller is experimental and unstable under NVIDIA Wayland.
+  // Default to Skia unless explicitly requested via AETHERIA_ENABLE_IMPELLER=1.
+  const gchar* impeller_env = g_getenv("AETHERIA_ENABLE_IMPELLER");
+  gboolean enable_impeller = FALSE;
+  if (impeller_env != nullptr &&
+      (g_ascii_strcasecmp(impeller_env, "1") == 0 ||
+       g_ascii_strcasecmp(impeller_env, "true") == 0)) {
+    enable_impeller = TRUE;
+  }
+  fl_dart_project_set_enable_impeller(project, enable_impeller);
+
   // Keep GTK input and Wayland frame callbacks responsive while Dart lays out
   // newly exposed rows. The platform-thread policy otherwise serializes them.
   if (g_strcmp0(g_getenv("AETHERIA_UI_THREAD"), "platform") != 0) {
