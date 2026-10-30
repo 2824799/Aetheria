@@ -197,6 +197,34 @@ class LibraryProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  void markSongHasNoLyrics(String songId) {
+    if (songId.isEmpty) {
+      return;
+    }
+    if (songIdsWithLyrics.contains(songId)) {
+      songIdsWithLyrics = songIdsWithLyrics.where((id) => id != songId).toSet();
+    }
+    songs = songs
+        .map(
+          (entry) => entry.id == songId
+              ? Song(
+                  id: entry.id,
+                  title: entry.title,
+                  artist: entry.artist,
+                  album: entry.album,
+                  lyrics: null,
+                  coverPath: entry.coverPath,
+                  rating: entry.rating,
+                  createdAt: entry.createdAt,
+                  versions: entry.versions,
+                  tags: entry.tags,
+                )
+              : entry,
+        )
+        .toList();
+    notifyListeners();
+  }
+
   Future<String?> ensureSongCover(Song song) async {
     if (song.id.isEmpty) {
       return null;

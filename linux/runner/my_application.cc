@@ -101,7 +101,7 @@ void setup_native_channel(FlView* view) {
 }
 
 void teardown_native_channel() {
-  FloatingLyricWindow::GetInstance().Hide();
+  FloatingLyricWindow::GetInstance().DestroyWindowHandle();
   FloatingLyricWindow::GetInstance().SetBoundsCallback(nullptr);
   g_clear_object(&g_native_channel);
 }

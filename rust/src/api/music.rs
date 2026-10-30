@@ -214,23 +214,46 @@ fn read_text_file_if_exists(path: &Path) -> Option<String> {
     }
 }
 
+pub(crate) fn sanitize_lyric_content(content: &str) -> String {
+    let mut clean_lines = Vec::new();
+    let normalized = content.replace("\r\n", "\n").replace('\r', "\n");
+    for raw_line in normalized.lines() {
+        let trimmed = raw_line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let lower = trimmed.to_ascii_lowercase();
+        if lower.starts_with("[awlrc:")
+            || lower.starts_with("[kana:")
+            || lower.starts_with("[encoding:")
+            || lower.starts_with("[re:")
+            || lower.starts_with("[ve:")
+        {
+            continue;
+        }
+        if trimmed.len() > 500 && !trimmed.contains(' ') {
+            continue;
+        }
+        clean_lines.push(trimmed);
+    }
+    clean_lines.join("\n")
+}
+
 fn embedded_lyrics_from_audio(path: &Path) -> Option<String> {
     let tagged_file = Probe::open(path).ok()?.read().ok()?;
     let primary = tagged_file
         .primary_tag()
         .and_then(|tag| tag.get_string(&ItemKey::Lyrics))
-        .map(str::trim)
-        .filter(|text| !text.is_empty())
-        .map(ToOwned::to_owned);
+        .map(sanitize_lyric_content)
+        .filter(|text| !text.is_empty());
     if primary.is_some() {
         return primary;
     }
     tagged_file
         .first_tag()
         .and_then(|tag| tag.get_string(&ItemKey::Lyrics))
-        .map(str::trim)
+        .map(sanitize_lyric_content)
         .filter(|text| !text.is_empty())
-        .map(ToOwned::to_owned)
 }
 
 fn copy_sidecar_lyrics(src_path: &Path, dest_audio_path: &Path) {
@@ -1187,7 +1210,7 @@ pub fn get_local_lyric_candidates(
                               content: String,
                               candidate_title: String,
                               candidate_artist: Option<String>| {
-        let normalized = content.trim().replace("\r\n", "\n").replace('\r', "\n");
+        let normalized = sanitize_lyric_content(&content);
         if normalized.is_empty() || seen_contents.iter().any(|item| item == &normalized) {
             return;
         }
@@ -1263,7 +1286,7 @@ pub fn save_lyric(
     offset_ms: i32,
 ) -> Result<SavedLyric, String> {
     let conn = establish_connection().map_err(|e| e.to_string())?;
-    let trimmed_content = content.trim().replace("\r\n", "\n").replace('\r', "\n");
+    let trimmed_content = sanitize_lyric_content(&content);
     if trimmed_content.is_empty() {
         return Err("歌词内容不能为空。".to_string());
     }
@@ -1369,8 +1392,30 @@ pub fn update_lyric_offset(lyric_id: String, offset_ms: i32) -> Result<SavedLyri
 
 pub fn delete_lyric(lyric_id: String) -> Result<(), String> {
     let conn = establish_connection().map_err(|e| e.to_string())?;
+    let song_id: Option<String> = conn
+        .query_row(
+            "SELECT song_id FROM lyrics WHERE id = ?1",
+            params![lyric_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+
     conn.execute("DELETE FROM lyrics WHERE id = ?1", params![lyric_id])
         .map_err(|e| e.to_string())?;
+
+    if let Some(sid) = song_id {
+        let remaining: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM lyrics WHERE song_id = ?1",
+                params![sid],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        if remaining == 0 {
+            let _ = conn.execute("UPDATE songs SET lyrics = NULL WHERE id = ?1", params![sid]);
+        }
+    }
     Ok(())
 }
 
@@ -1989,4 +2034,20 @@ pub fn refresh_song_database() -> Result<(), String> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sanitize_lyric_content() {
+        let dirty = "[offset:0]\n[00:01.00]Hello world\n[awlrc:lrc:W29mZnNld...]\n[kana:11111]\n[00:05.00]Second line\n";
+        let clean = sanitize_lyric_content(dirty);
+        assert_eq!(clean, "[offset:0]\n[00:01.00]Hello world\n[00:05.00]Second line");
+
+        let long_token = format!("[00:02.00]{}", "A".repeat(600));
+        let clean_long = sanitize_lyric_content(&long_token);
+        assert!(clean_long.is_empty());
+    }
 }

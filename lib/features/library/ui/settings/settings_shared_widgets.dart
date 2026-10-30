@@ -251,7 +251,7 @@ class _SettingsFloatingLyricPreviewState
                   ),
                 ),
                 if (provider.showTranslation) ...[
-                  SizedBox(height: provider.lineGap * 0.55),
+                  SizedBox(height: provider.lineGap * 0.20),
                   Align(
                     alignment: alignment,
                     child: Text(
@@ -260,13 +260,13 @@ class _SettingsFloatingLyricPreviewState
                         color: provider.unplayedColor.withValues(
                           alpha: provider.unplayedColor.a * 0.76,
                         ),
-                        fontSize: fontSize * 0.42,
+                        fontSize: fontSize * 0.60,
                       ),
                     ),
                   ),
                 ],
                 if (provider.showNextLine) ...[
-                  SizedBox(height: provider.lineGap),
+                  SizedBox(height: provider.lineGap * 0.85),
                   Align(
                     alignment: alignment,
                     child: Text(
@@ -275,7 +275,7 @@ class _SettingsFloatingLyricPreviewState
                         color: provider.unplayedColor.withValues(
                           alpha: provider.unplayedColor.a * 0.66,
                         ),
-                        fontSize: fontSize * 0.55,
+                        fontSize: fontSize * 0.58,
                       ),
                     ),
                   ),

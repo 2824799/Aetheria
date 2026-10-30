@@ -126,10 +126,21 @@ class LyricTimeline {
           .replaceAll(qrcLineReg, '')
           .trim();
       if (lineTimes.isEmpty) {
-        if (rawLine.trim().isNotEmpty) {
-          plainLines.add(
-            LyricLine(null, null, _cleanLyricText(rawLine), const []),
-          );
+        final trimmed = rawLine.trim();
+        final lower = trimmed.toLowerCase();
+        if (trimmed.isNotEmpty &&
+            !lower.startsWith('[awlrc:') &&
+            !lower.startsWith('[kana:') &&
+            !lower.startsWith('[encoding:') &&
+            !lower.startsWith('[re:') &&
+            !lower.startsWith('[ve:') &&
+            !(trimmed.length > 500 && !trimmed.contains(' '))) {
+          final cleaned = _cleanLyricText(rawLine);
+          if (cleaned.isNotEmpty) {
+            plainLines.add(
+              LyricLine(null, null, cleaned, const []),
+            );
+          }
         }
         continue;
       }

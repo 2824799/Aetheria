@@ -215,5 +215,23 @@ pub fn init_db() -> Result<()> {
         }
     }
 
+    // Clean up any legacy oversized/base64 tags (e.g. [awlrc:...], [kana:...]) in stored lyrics
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT id, content FROM lyrics WHERE content LIKE '%[awlrc:%' OR content LIKE '%[kana:%'",
+    ) {
+        if let Ok(rows) = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        }) {
+            let dirty: Vec<(String, String)> = rows.filter_map(|r| r.ok()).collect();
+            for (id, content) in dirty {
+                let clean = crate::api::music::sanitize_lyric_content(&content);
+                let _ = conn.execute(
+                    "UPDATE lyrics SET content = ?1 WHERE id = ?2",
+                    params![clean, id],
+                );
+            }
+        }
+    }
+
     Ok(())
 }

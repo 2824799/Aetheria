@@ -116,4 +116,59 @@ void main() {
       },
     );
   }
+
+  testWidgets(
+    'empty lyrics (pure music) passes empty line without falling back to song title',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      final settings = FloatingLyricsProvider();
+      await settings.load();
+      await settings.setEnabled(true);
+      final audio = TestAudio()
+        ..isPlaying = true
+        ..playingSong = const Song(
+          id: 'pure-music',
+          title: 'The Spectre',
+          lyrics: '',
+          rating: 0,
+          createdAt: '',
+          versions: [],
+          tags: [],
+        );
+      audio.positionListenable.value = const Duration(milliseconds: 1500);
+      final frames = <Map<dynamic, dynamic>>[];
+      const channel = MethodChannel('com.aetheria.app/notification');
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            if (call.method == 'updateFloatingLyrics') {
+              frames.add(call.arguments as Map);
+            }
+            return null;
+          });
+      addTearDown(() {
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, null);
+      });
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<FloatingLyricsProvider>.value(
+              value: settings,
+            ),
+            ChangeNotifierProvider<AudioPlayerProvider>.value(value: audio),
+          ],
+          child: const FloatingLyricsBridge(child: SizedBox.shrink()),
+        ),
+      );
+      await tester.pump();
+      expect(frames.last['line'], '');
+      expect(frames.last['translation'], '');
+      expect(frames.last['nextLine'], '');
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      settings.dispose();
+      audio.dispose();
+    },
+  );
 }

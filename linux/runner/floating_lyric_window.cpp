@@ -519,13 +519,28 @@ void FloatingLyricWindow::Draw(cairo_t* cr) {
     cairo_fill(cr);
   }
 
-  const double max_width = std::max(1.0, width - kMargin * 2);
+  if (frame_.line.empty()) {
+    return;
+  }
+
+  const double left_margin = (style_.align == "left") ? 0.0 : ((style_.align == "right") ? 0.0 : kMargin);
+  const double max_width = (style_.align == "center")
+      ? std::max(1.0, width - kMargin * 2)
+      : static_cast<double>(width);
   const double current_size =
       style_.font_size * (style_.zoom_current_line ? 1.08 : 1.0);
-  const double translation_size = current_size * 0.42;
-  const double next_size = current_size * 0.55;
-  const double compact_size = next_size * 0.88;
+  const double translation_size = current_size * 0.60;
+  const double next_size = current_size * 0.58;
+  const double next_translation_size = next_size * 0.80;
+  const double compact_size = next_size * 0.90;
+  const double compact_translation_size = compact_size * 0.80;
   const double gap = style_.line_gap;
+
+  const double active_trans_gap = std::max(2.0, gap * 0.20);
+  const double next_trans_gap = std::max(2.0, gap * 0.14);
+  const double compact_trans_gap = std::max(2.0, gap * 0.12);
+  const double active_to_next_gap = gap * 0.85;
+  const double compact_group_gap = std::max(4.0, gap * 0.45);
 
   std::vector<std::pair<std::string, std::string>> compact_lines;
   if (style_.compact_multiline) {
@@ -539,8 +554,7 @@ void FloatingLyricWindow::Draw(cairo_t* cr) {
     }
   }
 
-  const std::string active_text =
-      frame_.line.empty() ? "暂无歌词" : frame_.line;
+  const std::string& active_text = frame_.line;
   const bool has_translation =
       style_.show_translation && !frame_.translation.empty();
   const bool has_next = style_.show_next_line &&
@@ -555,7 +569,7 @@ void FloatingLyricWindow::Draw(cairo_t* cr) {
   if (has_translation) {
     translation = CreateLineLayout(cr, frame_.translation, translation_size,
                                    false, style_.align, max_width);
-    total_height += gap * 0.55 + translation.height;
+    total_height += active_trans_gap + translation.height;
   }
 
   LineLayout next{nullptr, 0.0, 0.0};
@@ -566,13 +580,13 @@ void FloatingLyricWindow::Draw(cairo_t* cr) {
                                        : frame_.next_line;
     next = CreateLineLayout(cr, first_next, next_size, false, style_.align,
                             max_width);
-    total_height += gap + next.height;
+    total_height += active_to_next_gap + next.height;
     const std::string translated_next = frame_.next_line.empty()
         ? compact_lines.front().second : frame_.next_translation;
     if (style_.show_translation && !translated_next.empty()) {
-      next_translation = CreateLineLayout(cr, translated_next, next_size * 0.76,
+      next_translation = CreateLineLayout(cr, translated_next, next_translation_size,
                                           false, style_.align, max_width);
-      total_height += gap * 0.28 + next_translation.height;
+      total_height += next_trans_gap + next_translation.height;
     }
   }
 
@@ -585,20 +599,19 @@ void FloatingLyricWindow::Draw(cairo_t* cr) {
           CreateLineLayout(cr, compact_lines[i].first, compact_size,
                             false, style_.align, max_width),
           {nullptr, 0.0, 0.0}};
-      total_height += gap * 0.28 + extra.line.height;
+      total_height += compact_group_gap + extra.line.height;
       if (!compact_lines[i].second.empty()) {
         extra.translation = CreateLineLayout(cr, compact_lines[i].second,
-                                               compact_size * 0.76, false,
+                                               compact_translation_size, false,
                                                style_.align, max_width);
-        total_height += gap * 0.28 + extra.translation.height;
+        total_height += compact_trans_gap + extra.translation.height;
       }
       extras.push_back(extra);
     }
   }
 
   double top = std::max(0.0, (height - total_height) / 2.0);
-  // Pango handles alignment inside max_width. Moving x again double-aligns text.
-  const double x = kMargin;
+  const double x = left_margin;
 
   DrawProgressLine(cr, active.layout, x, top, frame_.progress,
                    played, unplayed, shadow, active.font_size,
@@ -606,32 +619,32 @@ void FloatingLyricWindow::Draw(cairo_t* cr) {
   top += active.height;
 
   if (translation.layout != nullptr) {
-    top += gap * 0.55;
+    top += active_trans_gap;
     DrawLineWithShadow(cr, translation.layout, x, top, translation_color, shadow,
                        translation.font_size, style_.text_shadow_enabled);
     top += translation.height;
   }
 
   if (next.layout != nullptr) {
-    top += gap;
+    top += active_to_next_gap;
     DrawLineWithShadow(cr, next.layout, x, top, next_color, shadow,
                        next.font_size, style_.text_shadow_enabled);
     top += next.height;
   }
   if (next_translation.layout != nullptr) {
-    top += gap * 0.28;
+    top += next_trans_gap;
     DrawLineWithShadow(cr, next_translation.layout, x, top, next_translation_color,
                        shadow, next_translation.font_size, style_.text_shadow_enabled);
     top += next_translation.height;
   }
 
   for (const auto& extra : extras) {
-    top += gap * 0.28;
+    top += compact_group_gap;
     DrawLineWithShadow(cr, extra.line.layout, x, top, compact_color, shadow,
                        extra.line.font_size, style_.text_shadow_enabled);
     top += extra.line.height;
     if (extra.translation.layout != nullptr) {
-      top += gap * 0.28;
+      top += compact_trans_gap;
       DrawLineWithShadow(cr, extra.translation.layout, x, top,
                          compact_translation_color, shadow,
                          extra.translation.font_size, style_.text_shadow_enabled);

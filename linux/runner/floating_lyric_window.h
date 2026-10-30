@@ -18,6 +18,7 @@ class FloatingLyricWindow {
   void UpdateStyle(FlValue* payload);
   void UpdateLyrics(FlValue* payload);
   void SetBoundsCallback(std::function<void(int, int, int, int)> callback);
+  void DestroyWindowHandle();
 
  private:
   FloatingLyricWindow() = default;
@@ -60,7 +61,6 @@ class FloatingLyricWindow {
   };
 
   void EnsureWindow();
-  void DestroyWindowHandle();
   void ApplyWindowGeometry();
   void ApplyStacking();
   void EndDrag();

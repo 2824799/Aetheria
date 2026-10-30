@@ -416,8 +416,8 @@ void FloatingLyricWindow::Draw() {
   }
   const float current_size =
       static_cast<float>(style_.font_size * (style_.zoom_current_line ? 1.08 : 1.0));
-  const float translation_size = current_size * 0.42f;
-  const float next_size = current_size * 0.55f;
+  const float translation_size = current_size * 0.60f;
+  const float next_size = current_size * 0.58f;
   Gdiplus::Font current_font(
       font_family.get(), current_size,
       style_.bold_current_line ? Gdiplus::FontStyleBold
@@ -428,12 +428,33 @@ void FloatingLyricWindow::Draw() {
                                  Gdiplus::UnitPixel);
   Gdiplus::Font next_font(font_family.get(), next_size,
                           Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
-  Gdiplus::Font next_translation_font(font_family.get(), next_size * 0.76f,
+  Gdiplus::Font next_translation_font(font_family.get(), next_size * 0.80f,
                                       Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
-  Gdiplus::Font compact_font(font_family.get(), next_size * 0.88f,
+  Gdiplus::Font compact_font(font_family.get(), next_size * 0.90f,
                              Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
-  Gdiplus::Font compact_translation_font(font_family.get(), next_size * 0.88f * 0.76f,
+  Gdiplus::Font compact_translation_font(font_family.get(), next_size * 0.90f * 0.80f,
                                          Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
+
+  if (frame_.line.empty()) {
+    HBITMAP hbitmap = nullptr;
+    bitmap.GetHBITMAP(Gdiplus::Color(0, 0, 0, 0), &hbitmap);
+    HDC screen_dc = GetDC(nullptr);
+    HDC mem_dc = CreateCompatibleDC(screen_dc);
+    HGDIOBJ old_bitmap = SelectObject(mem_dc, hbitmap);
+    POINT src = {0, 0};
+    SIZE size = {width, height};
+    BLENDFUNCTION blend = {};
+    blend.BlendOp = AC_SRC_OVER;
+    blend.SourceConstantAlpha = 255;
+    blend.AlphaFormat = AC_SRC_ALPHA;
+    POINT dst = {static_cast<LONG>(style_.window_x), static_cast<LONG>(style_.window_y)};
+    UpdateLayeredWindow(hwnd_, screen_dc, &dst, &size, mem_dc, &src, 0, &blend, ULW_ALPHA);
+    SelectObject(mem_dc, old_bitmap);
+    DeleteDC(mem_dc);
+    ReleaseDC(nullptr, screen_dc);
+    DeleteObject(hbitmap);
+    return;
+  }
 
   const bool has_translation =
       style_.show_translation && !frame_.translation.empty();
@@ -454,6 +475,12 @@ void FloatingLyricWindow::Draw() {
       ? (frame_.next_line.empty() ? compact_lines.front().second : frame_.next_translation)
       : L"";
   const float gap = static_cast<float>(style_.line_gap);
+  const float active_trans_gap = std::max(2.0f, gap * 0.20f);
+  const float next_trans_gap = std::max(2.0f, gap * 0.14f);
+  const float compact_trans_gap = std::max(2.0f, gap * 0.12f);
+  const float active_to_next_gap = gap * 0.85f;
+  const float compact_group_gap = std::max(4.0f, gap * 0.45f);
+
   const float current_height = MeasureLineHeight(graphics, current_font);
   const float translation_height =
       has_translation ? MeasureLineHeight(graphics, translation_font) : 0.0f;
@@ -463,27 +490,29 @@ void FloatingLyricWindow::Draw() {
   const float compact_translation_height = MeasureLineHeight(graphics, compact_translation_font);
   float total_height = current_height;
   if (has_translation) {
-    total_height += gap * 0.55f + translation_height;
+    total_height += active_trans_gap + translation_height;
   }
   if (has_next) {
-    total_height += gap + next_height;
+    total_height += active_to_next_gap + next_height;
     if (!next_translation.empty()) {
-      total_height += gap * 0.28f + next_translation_height;
+      total_height += next_trans_gap + next_translation_height;
     }
   }
   if (has_next && !compact_lines.empty()) {
     const size_t start_index = frame_.next_line.empty() ? 1 : 0;
     for (size_t i = start_index; i < compact_lines.size(); ++i) {
-      total_height += compact_height + gap * 0.28f;
+      total_height += compact_group_gap + compact_height;
       if (!compact_lines[i].second.empty()) {
-        total_height += compact_translation_height + gap * 0.28f;
+        total_height += compact_trans_gap + compact_translation_height;
       }
     }
   }
-  const float margin = 22.0f;
+  const float margin = (style_.align == "left" || style_.align == "right") ? 0.0f : 22.0f;
+  const float max_width = (style_.align == "center") ? width - margin * 2.0f : static_cast<float>(width);
+  const float x = (style_.align == "center") ? margin : 0.0f;
   float top = std::max(0.0f, (height - total_height) / 2.0f);
-  Gdiplus::RectF line_rect(margin, top, width - margin * 2, current_height);
-  DrawProgressLine(graphics, frame_.line.empty() ? L"暂无歌词" : frame_.line,
+  Gdiplus::RectF line_rect(x, top, max_width, current_height);
+  DrawProgressLine(graphics, frame_.line,
                    line_rect, current_font, style_.align, frame_.progress,
                    ToGdiColor(style_.played_color, effective_opacity),
                    ToGdiColor(style_.unplayed_color, effective_opacity),
@@ -492,8 +521,8 @@ void FloatingLyricWindow::Draw() {
   top += current_height;
 
   if (has_translation) {
-    top += gap * 0.55f;
-    Gdiplus::RectF translation_rect(margin, top, width - margin * 2,
+    top += active_trans_gap;
+    Gdiplus::RectF translation_rect(x, top, max_width,
                                     translation_height);
     DrawLine(graphics, frame_.translation, translation_rect, translation_font,
              style_.align, ToGdiColor(style_.unplayed_color, effective_opacity * 0.76),
@@ -503,8 +532,8 @@ void FloatingLyricWindow::Draw() {
   }
 
   if (has_next) {
-    top += gap;
-    Gdiplus::RectF next_rect(margin, top, width - margin * 2, next_height);
+    top += active_to_next_gap;
+    Gdiplus::RectF next_rect(x, top, max_width, next_height);
     const std::wstring first_next =
         frame_.next_line.empty() && !compact_lines.empty() ? compact_lines.front().first
                                                            : frame_.next_line;
@@ -514,8 +543,8 @@ void FloatingLyricWindow::Draw() {
              style_.text_shadow_enabled);
     top += next_height;
     if (!next_translation.empty()) {
-      top += gap * 0.28f;
-      Gdiplus::RectF translated_rect(margin, top, width - margin * 2,
+      top += next_trans_gap;
+      Gdiplus::RectF translated_rect(x, top, max_width,
                                       next_translation_height);
       DrawLine(graphics, next_translation, translated_rect, next_translation_font,
                style_.align,
@@ -528,8 +557,8 @@ void FloatingLyricWindow::Draw() {
     const size_t start_index = frame_.next_line.empty() ? 1 : 0;
     if (compact_lines.size() > start_index) {
       for (size_t i = start_index; i < compact_lines.size(); ++i) {
-        top += gap * 0.28f;
-        Gdiplus::RectF compact_rect(margin, top, width - margin * 2,
+        top += compact_group_gap;
+        Gdiplus::RectF compact_rect(x, top, max_width,
                                     compact_height);
         DrawLine(graphics, compact_lines[i].first, compact_rect, compact_font,
                  style_.align,
@@ -538,8 +567,8 @@ void FloatingLyricWindow::Draw() {
                  style_.text_shadow_enabled);
         top += compact_height;
         if (!compact_lines[i].second.empty()) {
-          top += gap * 0.28f;
-          Gdiplus::RectF translated_rect(margin, top, width - margin * 2,
+          top += compact_trans_gap;
+          Gdiplus::RectF translated_rect(x, top, max_width,
                                           compact_translation_height);
           DrawLine(graphics, compact_lines[i].second, translated_rect,
                    compact_translation_font, style_.align,

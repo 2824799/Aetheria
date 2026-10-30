@@ -194,9 +194,7 @@ class _FloatingLyricsBridgeState extends State<FloatingLyricsBridge> {
               const <LyricPreviewLine>[])
         : const <LyricPreviewLine>[];
     await NativeAudioHelper.updateFloatingLyrics(<String, dynamic>{
-      'line': frame.line.isEmpty
-          ? (songTitle?.isNotEmpty == true ? songTitle : '暂无歌词')
-          : frame.line,
+      'line': frame.line,
       'translation': settings.showTranslation ? frame.translation : '',
       'nextLine': previews.isNotEmpty ? previews.first.text : '',
       'nextTranslation': previews.isNotEmpty ? previews.first.translation : '',

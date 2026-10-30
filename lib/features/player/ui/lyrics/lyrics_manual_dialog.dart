@@ -7,6 +7,7 @@ import 'package:aetheria/core/providers/ui_theme_provider.dart';
 import 'package:aetheria/core/widgets/aether_button.dart';
 import 'package:aetheria/core/widgets/aether_dialog.dart';
 import 'package:aetheria/core/widgets/aether_text_field.dart';
+import 'package:aetheria/features/player/ui/lyrics/lyrics_shared.dart';
 import 'package:aetheria/src/rust/models/song.dart';
 
 class ManualLyricDialog extends StatefulWidget {
@@ -33,7 +34,9 @@ class ManualLyricDialogState extends State<ManualLyricDialog> {
   @override
   void initState() {
     super.initState();
-    _controller = TextEditingController(text: widget.song.lyrics ?? '');
+    _controller = TextEditingController(
+      text: sanitizeLyricContent(widget.song.lyrics ?? ''),
+    );
   }
 
   @override
@@ -43,7 +46,7 @@ class ManualLyricDialogState extends State<ManualLyricDialog> {
   }
 
   Future<void> _save() async {
-    final content = _controller.text.trim();
+    final content = sanitizeLyricContent(_controller.text.trim());
     if (content.isEmpty || _saving) {
       return;
     }

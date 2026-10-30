@@ -12,6 +12,31 @@ String lyricSourceLabel(String source) {
   };
 }
 
+String sanitizeLyricContent(String content) {
+  final cleanLines = <String>[];
+  for (final rawLine in content
+      .replaceAll('\r\n', '\n')
+      .replaceAll('\r', '\n')
+      .split('\n')) {
+    final trimmed = rawLine.trim();
+    if (trimmed.isEmpty) continue;
+    final lower = trimmed.toLowerCase();
+    if (lower.startsWith('[awlrc:') ||
+        lower.startsWith('[kana:') ||
+        lower.startsWith('[encoding:') ||
+        lower.startsWith('[re:') ||
+        lower.startsWith('[ve:') ||
+        lower.startsWith('[offset:')) {
+      continue;
+    }
+    if (trimmed.length > 500 && !trimmed.contains(' ')) {
+      continue;
+    }
+    cleanLines.add(trimmed);
+  }
+  return cleanLines.join('\n');
+}
+
 const lyricsFontFallback = <String>[
   'Microsoft YaHei UI',
   'Microsoft YaHei',

@@ -8,6 +8,7 @@ import 'package:aetheria/core/providers/floating_lyrics_provider.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
 import 'package:aetheria/core/widgets/aether_button.dart';
 import 'package:aetheria/core/widgets/aether_dialog.dart';
+import 'package:aetheria/features/player/ui/lyrics/lyrics_shared.dart';
 import 'package:aetheria/features/player/ui/lyrics/lyrics_synced_view.dart';
 import 'package:aetheria/services/lyric_search_service.dart';
 import 'package:aetheria/src/rust/models/song.dart';
@@ -48,8 +49,19 @@ class LyricPreviewDialogState extends State<LyricPreviewDialog> {
       if (!mounted) {
         return;
       }
+      final cleanContent = sanitizeLyricContent(loaded.content);
+      final cleanTranslation = loaded.translation != null
+          ? sanitizeLyricContent(loaded.translation!)
+          : null;
+      final cleanRomanized = loaded.romanized != null
+          ? sanitizeLyricContent(loaded.romanized!)
+          : null;
       setState(() {
-        _loaded = loaded;
+        _loaded = LoadedLyricContent(
+          content: cleanContent,
+          translation: cleanTranslation,
+          romanized: cleanRomanized,
+        );
         _loading = false;
       });
     } catch (e) {
@@ -79,9 +91,13 @@ class LyricPreviewDialogState extends State<LyricPreviewDialog> {
         sourceId: widget.candidate.sourceId,
         title: widget.candidate.title,
         artist: widget.candidate.artist,
-        content: loaded.content,
-        translation: loaded.translation,
-        romanized: loaded.romanized,
+        content: sanitizeLyricContent(loaded.content),
+        translation: loaded.translation != null
+            ? sanitizeLyricContent(loaded.translation!)
+            : null,
+        romanized: loaded.romanized != null
+            ? sanitizeLyricContent(loaded.romanized!)
+            : null,
         offsetMs: 0,
       );
       if (!mounted) {

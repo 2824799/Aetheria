@@ -5,6 +5,7 @@ import 'package:aetheria/core/providers/audio_player_provider.dart';
 import 'dart:async';
 import 'package:provider/provider.dart';
 
+import 'package:aetheria/core/providers/floating_lyrics_provider.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
 import 'package:aetheria/core/widgets/aether_button.dart';
 import 'package:aetheria/core/widgets/aether_progress.dart';
@@ -37,6 +38,7 @@ class _LyricsDisplayPanelState extends State<LyricsDisplayPanel> {
   bool _loading = false;
   String? _error;
   String? _lastLoadKey;
+  int? _lastLyricRevision;
 
   String get _loadKey => '${widget.song.id}|${widget.audioVersion?.id ?? ''}';
 
@@ -104,6 +106,18 @@ class _LyricsDisplayPanelState extends State<LyricsDisplayPanel> {
 
   @override
   Widget build(BuildContext context) {
+    final lyricRevision = context.select<FloatingLyricsProvider, int>(
+      (p) => p.lyricRevision,
+    );
+    if (_lastLyricRevision != null && _lastLyricRevision != lyricRevision) {
+      _lastLyricRevision = lyricRevision;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _loadSavedLyric();
+      });
+    } else {
+      _lastLyricRevision = lyricRevision;
+    }
+
     final cfg = widget.cfg;
     final content = _displayContent;
     final sourceText = _savedLyric == null

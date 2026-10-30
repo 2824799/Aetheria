@@ -43,6 +43,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
   List<LyricSearchCandidate> _candidates = const <LyricSearchCandidate>[];
   bool _loadingSaved = false;
   bool _searching = false;
+  bool _cleared = false;
   String? _error;
   String? _lastLoadKey;
 
@@ -61,6 +62,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
         oldWidget.audioVersion?.id != widget.audioVersion?.id) {
       _candidates = const <LyricSearchCandidate>[];
       _error = null;
+      _cleared = false;
       unawaited(_loadSavedLyric());
     }
   }
@@ -87,6 +89,9 @@ class _LyricsPanelState extends State<LyricsPanel> {
       setState(() {
         _savedLyric = lyric;
         _loadingSaved = false;
+        if (lyric != null) {
+          _cleared = false;
+        }
       });
       if (lyric != null) {
         context.read<LibraryProvider>().markSongHasLyrics(widget.song.id);
@@ -149,6 +154,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
     setState(() {
       _savedLyric = saved;
       _candidates = const <LyricSearchCandidate>[];
+      _cleared = false;
       _error = null;
     });
     context.read<LibraryProvider>().markSongHasLyrics(widget.song.id);
@@ -170,6 +176,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
     setState(() {
       _savedLyric = saved;
       _candidates = const <LyricSearchCandidate>[];
+      _cleared = false;
       _error = null;
     });
     context.read<LibraryProvider>().markSongHasLyrics(widget.song.id);
@@ -250,7 +257,68 @@ class _LyricsPanelState extends State<LyricsPanel> {
     }
   }
 
+  Future<void> _clearLyrics() async {
+    final confirmed = await showAetherConfirmDialog(
+      context: context,
+      title: '清除歌词',
+      message: '确定要清除当前歌词并恢复到无歌词状态吗？',
+      confirmLabel: '清除',
+      dangerous: true,
+    );
+    if (!confirmed || !mounted) {
+      return;
+    }
+
+    setState(() {
+      _loadingSaved = true;
+      _error = null;
+    });
+
+    try {
+      final lyrics = await music.getLyricsForSong(songId: widget.song.id);
+      for (final lyric in lyrics) {
+        if (widget.audioVersion == null ||
+            lyric.audioVersionId == widget.audioVersion?.id ||
+            lyric.audioVersionId == null) {
+          await music.deleteLyric(lyricId: lyric.id);
+        }
+      }
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _savedLyric = null;
+        _candidates = const <LyricSearchCandidate>[];
+        _cleared = true;
+        _loadingSaved = false;
+      });
+      context.read<LibraryProvider>().markSongHasNoLyrics(widget.song.id);
+      context.read<FloatingLyricsProvider>().notifyLyricUpdated();
+      showAetherToast(
+        context,
+        message: '已清除歌词并恢复为无歌词状态',
+        kind: AetherToastKind.success,
+      );
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _loadingSaved = false;
+        _error = e.toString();
+      });
+      showAetherToast(
+        context,
+        message: '清除歌词失败: $e',
+        kind: AetherToastKind.error,
+      );
+    }
+  }
+
   String? get _displayContent {
+    if (_cleared) {
+      return null;
+    }
     final content = _savedLyric?.content.trim();
     if (content != null && content.isNotEmpty) {
       return content;
@@ -338,6 +406,17 @@ class _LyricsPanelState extends State<LyricsPanel> {
                   onPressed: _openManualEditor,
                 ),
               ),
+              if (_savedLyric != null || _displayContent != null)
+                Tooltip(
+                  message: '清除歌词',
+                  child: AetherIconButton(
+                    icon: Icons.delete_outline,
+                    iconSize: AetherIconSize.xl,
+                    color: cfg.warning,
+                    tooltip: '清除歌词',
+                    onPressed: _clearLyrics,
+                  ),
+                ),
             ],
           ),
         ),
@@ -366,12 +445,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
 
   Widget _buildCurrentLyricPreview(AppThemeConfig cfg, String content) {
     final lyric = _savedLyric;
-    final previewText = content
-        .replaceAll('\r\n', '\n')
-        .replaceAll('\r', '\n')
-        .split('\n')
-        .where((line) => line.trim().isNotEmpty)
-        .join('\n');
+    final previewText = sanitizeLyricContent(content);
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(
@@ -441,6 +515,17 @@ class _LyricsPanelState extends State<LyricsPanel> {
                       },
                     ),
                   ),
+                  const SizedBox(width: AetherSpace.xs),
+                  Tooltip(
+                    message: '清除歌词',
+                    child: AetherIconButton(
+                      icon: Icons.delete_outline,
+                      iconSize: AetherIconSize.md,
+                      color: cfg.warning,
+                      tooltip: '清除歌词',
+                      onPressed: _clearLyrics,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -448,14 +533,16 @@ class _LyricsPanelState extends State<LyricsPanel> {
             Expanded(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(AetherSpace.lg),
-                child: SelectableText(
-                  previewText.isEmpty ? '暂无可预览内容' : previewText,
-                  style: TextStyle(
-                    color: cfg.textSecondary,
-                    fontSize: widget.compact
-                        ? AetherType.bodySm
-                        : AetherType.body,
-                    height: 1.65,
+                child: SelectionArea(
+                  child: Text(
+                    previewText.isEmpty ? '暂无可预览内容' : previewText,
+                    style: TextStyle(
+                      color: cfg.textSecondary,
+                      fontSize: widget.compact
+                          ? AetherType.bodySm
+                          : AetherType.body,
+                      height: 1.65,
+                    ),
                   ),
                 ),
               ),
