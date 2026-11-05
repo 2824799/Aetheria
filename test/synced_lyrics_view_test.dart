@@ -110,12 +110,132 @@ void main() {
     expect(find.text('另一句话'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('blank line displays ellipsis when active', (
+    tester,
+  ) async {
+    final audio = _TestAudioPlayer();
+    addTearDown(audio.dispose);
+    const lrc = '''
+[00:01.000]First line
+[00:02.000]
+[00:03.000]Third line
+''';
+    await tester.pumpWidget(_view(audio, content: lrc));
+    await tester.pumpAndSettle();
+    audio.setPosition(const Duration(milliseconds: 2200));
+    await tester.pumpAndSettle();
+    expect(find.text('···'), findsOneWidget);
+  });
+
+  testWidgets('line spacing is tight and compact without excessive padding', (
+    tester,
+  ) async {
+    final audio = _TestAudioPlayer();
+    addTearDown(audio.dispose);
+    await tester.pumpWidget(_view(audio, content: _original));
+    await tester.pumpAndSettle();
+    final listView = tester.widget<ListView>(find.byType(ListView));
+    expect(listView.itemExtent, lessThanOrEqualTo(45.0));
+  });
+
+  testWidgets(
+    'scrolling away keeps seek guide open without auto-recycling until user taps upper/lower area',
+    (tester) async {
+      final audio = _TestAudioPlayer();
+      addTearDown(audio.dispose);
+      const manyLines = '''
+[00:01.000]Line 1
+[00:02.000]Line 2
+[00:03.000]Line 3
+[00:04.000]Line 4
+[00:05.000]Line 5
+[00:06.000]Line 6
+[00:07.000]Line 7
+[00:08.000]Line 8
+''';
+      await tester.pumpWidget(
+        _view(audio, content: manyLines, allowSeekGuide: true),
+      );
+      await tester.pumpAndSettle();
+
+      // Initially no seek guide
+      expect(find.byType(LyricSeekGuideOverlay), findsNothing);
+
+      // Scroll down
+      await tester.drag(find.byType(ListView), const Offset(0, -60));
+      await tester.pumpAndSettle();
+      expect(find.byType(LyricSeekGuideOverlay), findsOneWidget);
+
+      // Scroll AGAIN while seek guide is already visible - MUST NOT GET STUCK!
+      final scrollable = tester.state<ScrollableState>(find.byType(Scrollable));
+      final offsetBefore = scrollable.position.pixels;
+      await tester.drag(find.byType(ListView), const Offset(0, -60));
+      await tester.pumpAndSettle();
+      final offsetAfter = scrollable.position.pixels;
+      expect(offsetAfter, greaterThan(offsetBefore));
+
+      // Wait 3 seconds - should NOT auto-recycle!
+      await tester.pump(const Duration(seconds: 3));
+      expect(find.byType(LyricSeekGuideOverlay), findsOneWidget);
+
+      // Tap top area above center line
+      final listTop = tester.getTopLeft(find.byType(ListView));
+      await tester.tapAt(listTop + const Offset(100, 20));
+      await tester.pumpAndSettle();
+
+      // Guide should now be recycled
+      expect(find.byType(LyricSeekGuideOverlay), findsNothing);
+
+      // Scroll again
+      await tester.drag(find.byType(ListView), const Offset(0, -60));
+      await tester.pumpAndSettle();
+      expect(find.byType(LyricSeekGuideOverlay), findsOneWidget);
+
+      // Scroll AGAIN while guide is visible
+      await tester.drag(find.byType(ListView), const Offset(0, -40));
+      await tester.pumpAndSettle();
+
+      // Tap bottom area below center line
+      final listBottom = tester.getBottomLeft(find.byType(ListView));
+      await tester.tapAt(listBottom + const Offset(100, -20));
+      await tester.pumpAndSettle();
+
+      // Guide should be recycled again
+      expect(find.byType(LyricSeekGuideOverlay), findsNothing);
+
+      // Scroll once more and test seeking with the play button
+      await tester.drag(find.byType(ListView), const Offset(0, -60));
+      await tester.pumpAndSettle();
+      expect(find.byType(LyricSeekGuideOverlay), findsOneWidget);
+
+      final playButton = find.byIcon(Icons.play_arrow);
+      expect(playButton, findsOneWidget);
+      await tester.tap(playButton);
+      await tester.pumpAndSettle();
+
+      expect(find.byType(LyricSeekGuideOverlay), findsNothing);
+
+      // Scroll again to show the guide
+      await tester.drag(find.byType(ListView), const Offset(0, -60));
+      await tester.pumpAndSettle();
+      expect(find.byType(LyricSeekGuideOverlay), findsOneWidget);
+
+      // Drag starting exactly from the center (over the dashed line) - MUST scroll freely without getting stuck!
+      final centerPoint = tester.getCenter(find.byType(ListView));
+      final offsetBeforeCenterDrag = scrollable.position.pixels;
+      await tester.dragFrom(centerPoint, const Offset(0, -50));
+      await tester.pumpAndSettle();
+      expect(scrollable.position.pixels, greaterThan(offsetBeforeCenterDrag));
+    },
+  );
 }
 
 Widget _view(
   AudioPlayerProvider audio, {
   required String content,
   String? translation,
+  bool allowSeekGuide = false,
 }) {
   return ChangeNotifierProvider<AudioPlayerProvider>.value(
     value: audio,
@@ -132,7 +252,7 @@ Widget _view(
               offsetMs: 0,
               cfg: AppThemeConfig.pink,
               compact: true,
-              allowSeekGuide: false,
+              allowSeekGuide: allowSeekGuide,
             ),
           ),
         ),
@@ -152,6 +272,11 @@ class _TestAudioPlayer extends ChangeNotifier implements AudioPlayerProvider {
 
   void setPosition(Duration position) {
     positionListenable.value = position;
+  }
+
+  @override
+  Future<void> seek(Duration position) async {
+    setPosition(position);
   }
 
   @override

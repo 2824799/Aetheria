@@ -519,7 +519,19 @@ void FloatingLyricWindow::Draw(cairo_t* cr) {
     cairo_fill(cr);
   }
 
-  if (frame_.line.empty()) {
+  std::vector<std::pair<std::string, std::string>> compact_lines;
+  if (style_.compact_multiline) {
+    for (size_t i = 0; i < frame_.context_lines.size(); ++i) {
+      const auto& line = frame_.context_lines[i];
+      if (!line.empty() && compact_lines.size() < 3) {
+        compact_lines.emplace_back(
+            line, style_.show_translation && i < frame_.context_translations.size()
+                      ? frame_.context_translations[i] : "");
+      }
+    }
+  }
+
+  if (frame_.line.empty() && frame_.next_line.empty() && compact_lines.empty()) {
     return;
   }
 
@@ -542,19 +554,7 @@ void FloatingLyricWindow::Draw(cairo_t* cr) {
   const double active_to_next_gap = gap * 0.85;
   const double compact_group_gap = std::max(4.0, gap * 0.45);
 
-  std::vector<std::pair<std::string, std::string>> compact_lines;
-  if (style_.compact_multiline) {
-    for (size_t i = 0; i < frame_.context_lines.size(); ++i) {
-      const auto& line = frame_.context_lines[i];
-      if (!line.empty() && compact_lines.size() < 3) {
-        compact_lines.emplace_back(
-            line, style_.show_translation && i < frame_.context_translations.size()
-                      ? frame_.context_translations[i] : "");
-      }
-    }
-  }
-
-  const std::string& active_text = frame_.line;
+  const std::string active_text = frame_.line.empty() ? "···" : frame_.line;
   const bool has_translation =
       style_.show_translation && !frame_.translation.empty();
   const bool has_next = style_.show_next_line &&

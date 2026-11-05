@@ -435,7 +435,19 @@ void FloatingLyricWindow::Draw() {
   Gdiplus::Font compact_translation_font(font_family.get(), next_size * 0.90f * 0.80f,
                                          Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
 
-  if (frame_.line.empty()) {
+  std::vector<std::pair<std::wstring, std::wstring>> compact_lines;
+  if (style_.compact_multiline) {
+    for (size_t i = 0; i < frame_.context_lines.size(); ++i) {
+      const auto& line = frame_.context_lines[i];
+      if (!line.empty() && compact_lines.size() < 3) {
+        compact_lines.emplace_back(
+            line, style_.show_translation && i < frame_.context_translations.size()
+                      ? frame_.context_translations[i] : L"");
+      }
+    }
+  }
+
+  if (frame_.line.empty() && frame_.next_line.empty() && compact_lines.empty()) {
     HBITMAP hbitmap = nullptr;
     bitmap.GetHBITMAP(Gdiplus::Color(0, 0, 0, 0), &hbitmap);
     HDC screen_dc = GetDC(nullptr);
@@ -456,19 +468,9 @@ void FloatingLyricWindow::Draw() {
     return;
   }
 
+  const std::wstring active_text = frame_.line.empty() ? L"···" : frame_.line;
   const bool has_translation =
       style_.show_translation && !frame_.translation.empty();
-  std::vector<std::pair<std::wstring, std::wstring>> compact_lines;
-  if (style_.compact_multiline) {
-    for (size_t i = 0; i < frame_.context_lines.size(); ++i) {
-      const auto& line = frame_.context_lines[i];
-      if (!line.empty() && compact_lines.size() < 3) {
-        compact_lines.emplace_back(
-            line, style_.show_translation && i < frame_.context_translations.size()
-                      ? frame_.context_translations[i] : L"");
-      }
-    }
-  }
   const bool has_next = style_.show_next_line &&
                         (!frame_.next_line.empty() || !compact_lines.empty());
   const std::wstring next_translation = has_next && style_.show_translation
@@ -512,7 +514,7 @@ void FloatingLyricWindow::Draw() {
   const float x = (style_.align == "center") ? margin : 0.0f;
   float top = std::max(0.0f, (height - total_height) / 2.0f);
   Gdiplus::RectF line_rect(x, top, max_width, current_height);
-  DrawProgressLine(graphics, frame_.line,
+  DrawProgressLine(graphics, active_text,
                    line_rect, current_font, style_.align, frame_.progress,
                    ToGdiColor(style_.played_color, effective_opacity),
                    ToGdiColor(style_.unplayed_color, effective_opacity),

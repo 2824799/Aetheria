@@ -36,14 +36,24 @@ class SyncedLyricsView extends StatefulWidget {
 class _SyncedLyricsViewState extends State<SyncedLyricsView> {
   final ScrollController _controller = ScrollController();
   late LyricTimeline _timeline;
-  Timer? _guideTimer;
+  Offset? _pointerDownPos;
+  DateTime? _pointerDownTime;
   int _lastActiveIndex = -1;
   bool _guideVisible = false;
   bool _autoScrolling = false;
   ValueListenable<Duration>? _position;
   bool _visible = true;
 
-  double get _lineExtent => widget.compact ? 72 : 84;
+  bool get _hasTranslation =>
+      _timeline.translationByTime.isNotEmpty ||
+      _timeline.lines.any((l) => l.translation != null && l.translation!.isNotEmpty);
+
+  double get _lineExtent {
+    if (_hasTranslation) {
+      return widget.compact ? 44.0 : 50.0;
+    }
+    return widget.compact ? 30.0 : 34.0;
+  }
 
   @override
   void initState() {
@@ -58,6 +68,7 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
         oldWidget.translation != widget.translation) {
       _parseTimeline();
       _lastActiveIndex = -1;
+      _guideVisible = false;
     }
   }
 
@@ -92,7 +103,6 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
 
   @override
   void dispose() {
-    _guideTimer?.cancel();
     _position?.removeListener(_onPositionChanged);
     _controller.dispose();
     super.dispose();
@@ -126,52 +136,87 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        return Stack(
-          children: [
-            NotificationListener<ScrollNotification>(
-              onNotification: (notification) {
-                if (!widget.allowSeekGuide || _autoScrolling) {
-                  return false;
-                }
-                if (notification is ScrollStartNotification ||
-                    notification is ScrollUpdateNotification) {
-                  _showSeekGuide();
-                }
-                return false;
-              },
-              child: ListView.builder(
-                controller: _controller,
-                padding: EdgeInsets.symmetric(
-                  horizontal: widget.compact ? 18 : 24,
-                  vertical: math.max(
-                    18,
-                    constraints.maxHeight / 2 - _lineExtent / 2,
+        final centerHeight = math.max(34.0, _lineExtent);
+        final centerY = constraints.maxHeight / 2;
+        final centerHalf = centerHeight / 2;
+
+        return Listener(
+          behavior: HitTestBehavior.translucent,
+          onPointerDown: (event) {
+            _pointerDownPos = event.localPosition;
+            _pointerDownTime = DateTime.now();
+          },
+          onPointerUp: (event) {
+            if (!_guideVisible || _pointerDownPos == null) {
+              return;
+            }
+            final moved = (event.localPosition - _pointerDownPos!).distance;
+            final elapsed = _pointerDownTime == null
+                ? Duration.zero
+                : DateTime.now().difference(_pointerDownTime!);
+            if (moved < 12 && elapsed < const Duration(milliseconds: 500)) {
+              final y = event.localPosition.dy;
+              if (y < centerY - centerHalf || y > centerY + centerHalf) {
+                _recycleToActivePosition();
+              }
+            }
+          },
+          child: MouseRegion(
+            cursor: _guideVisible ? SystemMouseCursors.click : MouseCursor.defer,
+            child: Stack(
+              children: [
+                NotificationListener<ScrollNotification>(
+                  onNotification: (notification) {
+                    if (!widget.allowSeekGuide || _autoScrolling) {
+                      return false;
+                    }
+                    if (notification is ScrollStartNotification ||
+                        notification is ScrollUpdateNotification) {
+                      _showSeekGuide();
+                    }
+                    return false;
+                  },
+                  child: ListView.builder(
+                    controller: _controller,
+                    padding: EdgeInsets.symmetric(
+                      horizontal: widget.compact ? 18 : 24,
+                      vertical: math.max(
+                        18,
+                        constraints.maxHeight / 2 - _lineExtent / 2,
+                      ),
+                    ),
+                    itemExtent: _lineExtent,
+                    itemCount: lines.length,
+                    itemBuilder: (context, index) {
+                      final line = lines[index];
+                      final active = index == activeIndex;
+                      final lineTranslation = timeline.translationFor(line);
+                      return LyricLineTile(
+                        line: line,
+                        translation: lineTranslation.isEmpty
+                            ? null
+                            : lineTranslation,
+                        active: active,
+                        cfg: widget.cfg,
+                        compact: widget.compact,
+                      );
+                    },
                   ),
                 ),
-                itemExtent: _lineExtent,
-                itemCount: lines.length,
-                itemBuilder: (context, index) {
-                  final line = lines[index];
-                  final active = index == activeIndex;
-                  final lineTranslation = timeline.translationFor(line);
-                  return LyricLineTile(
-                    line: line,
-                    translation: lineTranslation.isEmpty
-                        ? null
-                        : lineTranslation,
-                    active: active,
-                    cfg: widget.cfg,
-                    compact: widget.compact,
-                  );
-                },
-              ),
+                if (widget.allowSeekGuide && _guideVisible)
+                  Positioned(
+                    top: math.max(0.0, centerY - centerHalf),
+                    left: 0,
+                    right: 0,
+                    height: centerHeight,
+                    child: LyricSeekGuideOverlay(
+                      cfg: widget.cfg,
+                      onSeek: timed ? () => _seekToGuideLine(lines) : null,
+                    ),
+                  ),
+              ],
             ),
-            if (widget.allowSeekGuide && _guideVisible)
-              LyricSeekGuideOverlay(
-                cfg: widget.cfg,
-                onSeek: timed ? () => _seekToGuideLine(lines) : null,
-              ),
-          ],
+          ),
         );
       },
     );
@@ -200,20 +245,20 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
   }
 
   void _showSeekGuide() {
-    _guideTimer?.cancel();
     if (!_guideVisible) {
       setState(() {
         _guideVisible = true;
       });
     }
-    _guideTimer = Timer(const Duration(milliseconds: 2400), () {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _guideVisible = false;
-        _lastActiveIndex = -1;
-      });
+  }
+
+  void _recycleToActivePosition() {
+    if (!_guideVisible) {
+      return;
+    }
+    setState(() {
+      _guideVisible = false;
+      _lastActiveIndex = -1;
     });
   }
 
@@ -240,6 +285,7 @@ class _SyncedLyricsViewState extends State<SyncedLyricsView> {
     }
     setState(() {
       _guideVisible = false;
+      _lastActiveIndex = -1;
     });
   }
 }
@@ -263,16 +309,19 @@ class LyricLineTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final baseStyle = TextStyle(
-      color: active ? cfg.textPrimary : cfg.textSecondary,
+      color: active ? cfg.textPrimary : cfg.textSecondary.withValues(alpha: 0.75),
       fontSize: active
           ? (compact ? AetherType.titleSm : AetherType.title)
-          : (compact ? AetherType.body : AetherType.body),
-      fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+          : (compact ? AetherType.bodySm : AetherType.body),
+      fontWeight: active ? FontWeight.w700 : FontWeight.w400,
       fontFamilyFallback: lyricsFontFallback,
-      height: 1.24,
+      height: 1.22,
     );
+    final isBlank = line.text.trim().isEmpty;
+    final textToShow = isBlank ? (active ? '···' : ' ') : line.text;
+
     return AnimatedScale(
-      scale: active ? 1.04 : 1.0,
+      scale: active ? 1.05 : 1.0,
       duration: AetherMotion.duration(context, AetherMotion.fast),
       curve: AetherMotion.out,
       child: Center(
@@ -283,7 +332,7 @@ class LyricLineTile extends StatelessWidget {
               duration: AetherMotion.duration(context, AetherMotion.fast),
               style: baseStyle,
               child: Text(
-                line.text.isEmpty ? ' ' : line.text,
+                textToShow,
                 textAlign: TextAlign.center,
                 softWrap: true,
                 maxLines: active ? 3 : 2,
@@ -292,7 +341,7 @@ class LyricLineTile extends StatelessWidget {
             ),
             if (translation != null && translation!.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.only(top: AetherSpace.xxs),
+                padding: const EdgeInsets.only(top: 2),
                 child: Text(
                   translation!,
                   textAlign: TextAlign.center,
@@ -302,11 +351,11 @@ class LyricLineTile extends StatelessWidget {
                   style: TextStyle(
                     color: active
                         ? cfg.accent
-                        : cfg.textSecondary.withValues(alpha: 0.65),
+                        : cfg.textSecondary.withValues(alpha: 0.55),
                     fontSize: compact ? AetherType.caption : AetherType.bodySm,
-                    fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                    fontWeight: active ? FontWeight.w600 : FontWeight.w400,
                     fontFamilyFallback: lyricsFontFallback,
-                    height: 1.2,
+                    height: 1.15,
                   ),
                 ),
               ),
@@ -329,38 +378,35 @@ class LyricSeekGuideOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Positioned.fill(
-      child: IgnorePointer(
-        ignoring: false,
-        child: Center(
-          child: Row(
-            children: [
-              const SizedBox(width: AetherSpace.xl + 2),
-              Expanded(
-                child: CustomPaint(
-                  painter: LyricDashedLinePainter(
-                    cfg.accent.withValues(alpha: 0.55),
-                  ),
-                  child: const SizedBox(height: 1),
+    return Center(
+      child: Row(
+        children: [
+          const SizedBox(width: AetherSpace.xl + 2),
+          Expanded(
+            child: IgnorePointer(
+              child: CustomPaint(
+                painter: LyricDashedLinePainter(
+                  cfg.accent.withValues(alpha: 0.55),
                 ),
+                child: const SizedBox(height: 1),
               ),
-              const SizedBox(width: AetherSpace.md),
-              Material(
-                color: cfg.accent.withValues(alpha: 0.14),
-                shape: const CircleBorder(),
-                child: AetherIconButton(
-                  icon: Icons.play_arrow,
-                  size: 34,
-                  iconSize: AetherIconSize.lg,
-                  color: cfg.accent,
-                  tooltip: '从这里播放',
-                  onPressed: onSeek,
-                ),
-              ),
-              const SizedBox(width: AetherSpace.lg),
-            ],
+            ),
           ),
-        ),
+          const SizedBox(width: AetherSpace.md),
+          Material(
+            color: cfg.accent.withValues(alpha: 0.14),
+            shape: const CircleBorder(),
+            child: AetherIconButton(
+              icon: Icons.play_arrow,
+              size: 34,
+              iconSize: AetherIconSize.lg,
+              color: cfg.accent,
+              tooltip: '从这里播放',
+              onPressed: onSeek,
+            ),
+          ),
+          const SizedBox(width: AetherSpace.lg),
+        ],
       ),
     );
   }

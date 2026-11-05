@@ -459,7 +459,13 @@ private class FloatingLyricView(context: Context) : View(context) {
 
         drawProgressText(
             canvas = canvas,
-            text = frame.line.ifBlank { "暂无歌词" },
+            text = if (frame.line.isNotBlank()) {
+                frame.line
+            } else if (hasNext || extraLines.isNotEmpty()) {
+                "···"
+            } else {
+                "暂无歌词"
+            },
             y = baseline,
             size = currentSize,
             progress = frame.progress,
