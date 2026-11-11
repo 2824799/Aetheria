@@ -86,6 +86,53 @@ fn importing_into_a_missing_song_fails_cleanly() {
 }
 
 #[test]
+fn concurrent_imports_register_one_copy_of_the_same_file() {
+    let _library = TestLibrary::new();
+    let source = wav(3);
+    let barrier = std::sync::Barrier::new(6);
+    let results = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..6)
+            .map(|_| {
+                scope.spawn(|| {
+                    barrier.wait();
+                    import::import_song(source.path())
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap())
+            .collect::<Vec<_>>()
+    });
+    assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+    for error in results.into_iter().filter_map(Result::err) {
+        assert!(error.to_string().contains("请勿重复导入"));
+    }
+    assert_eq!(managed_files().len(), 1);
+    assert_eq!(songs::all().unwrap()[0].versions.len(), 1);
+}
+
+#[test]
+fn failed_registration_rolls_back_rows_audio_and_sidecar() {
+    let _library = TestLibrary::new();
+    let source = wav(3);
+    let sidecar = Path::new(source.path()).with_extension("lrc");
+    fs::write(&sidecar, "[00:01.00]hello").unwrap();
+    connection::open()
+        .unwrap()
+        .execute_batch(
+            "CREATE TRIGGER reject_audio BEFORE INSERT ON audio_files
+         BEGIN SELECT RAISE(ABORT, 'test registration failure'); END;",
+        )
+        .unwrap();
+    let result = import::import_song(source.path());
+    fs::remove_file(sidecar).unwrap();
+    assert!(result.is_err());
+    assert!(managed_files().is_empty());
+    assert!(songs::all().unwrap().is_empty());
+}
+
+#[test]
 fn files_with_the_same_title_and_artist_become_versions_of_one_song() {
     let _library = TestLibrary::new();
     let (first, second, third) = (wav(3), wav(5), wav(7));
@@ -374,6 +421,42 @@ fn refresh_and_export_work_on_managed_files() {
     );
 
     assert!(maintenance::refresh_metadata("gone").is_err());
+}
+
+#[test]
+fn export_sanitizes_original_filenames_from_either_platform() {
+    let library = TestLibrary::new();
+    let source = wav(3);
+    let song = import::import_song(source.path()).unwrap();
+    let version = &song.versions[0];
+    let export_dir = library.scratch_dir().join("export");
+    fs::create_dir_all(&export_dir).unwrap();
+    let conn = connection::open().unwrap();
+    for original_name in ["../../track.wav", r"C:\outside\track.wav"] {
+        conn.execute(
+            "UPDATE audio_files SET original_name = ?1 WHERE id = ?2",
+            params![original_name, version.id],
+        )
+        .unwrap();
+        let exported =
+            maintenance::export_version(&version.id, &export_dir.to_string_lossy()).unwrap();
+        assert_eq!(Path::new(&exported), export_dir.join("track.wav"));
+        assert_eq!(
+            fs::read(&exported).unwrap(),
+            fs::read(source.path()).unwrap()
+        );
+    }
+    conn.execute(
+        "UPDATE audio_files SET original_name = 'C:outside.wav' WHERE id = ?1",
+        params![version.id],
+    )
+    .unwrap();
+    let exported = maintenance::export_version(&version.id, &export_dir.to_string_lossy()).unwrap();
+    assert_eq!(Path::new(&exported).parent().unwrap(), export_dir);
+    assert_eq!(
+        Path::new(&exported).file_name(),
+        paths::audio_file(&version.filepath).unwrap().file_name()
+    );
 }
 
 #[test]

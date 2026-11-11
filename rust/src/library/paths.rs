@@ -50,9 +50,11 @@ pub fn cover_file(stored: &str) -> Option<PathBuf> {
     file_name(stored).map(|name| covers_dir().join(name))
 }
 
-fn file_name(stored: &str) -> Option<&str> {
+pub(super) fn file_name(stored: &str) -> Option<&str> {
     let name = stored.rsplit(['/', '\\']).next()?;
-    (!name.is_empty() && name != "." && name != "..").then_some(name)
+    // A drive-relative path such as C:track.wav replaces the base when joined
+    // on Windows. Colons can also address NTFS alternate data streams.
+    (!name.is_empty() && name != "." && name != ".." && !name.contains([':', '\0'])).then_some(name)
 }
 
 #[cfg(test)]
@@ -68,6 +70,10 @@ mod tests {
         assert_eq!(file_name("files/.."), None);
         assert_eq!(file_name("files/"), None);
         assert_eq!(file_name(""), None);
+        assert_eq!(file_name("C:outside.wav"), None);
+        assert_eq!(file_name("files/C:outside.wav"), None);
+        assert_eq!(file_name("files/track.wav:stream"), None);
+        assert_eq!(file_name("files/bad\0.wav"), None);
         assert!(audio_file("/etc/passwd").unwrap().starts_with(files_dir()));
         assert!(cover_file("../x.jpg").unwrap().starts_with(covers_dir()));
     }

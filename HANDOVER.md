@@ -1,6 +1,6 @@
 # Aetheria 项目移交与编译指南 (React -> Flutter/Rust 重构版)
 
-本项目已成功从原有的 `Tauri + React` 架构重构为 `Flutter + Rust` 架构，支持 **Windows 桌面端** 和 **Android 移动端 (arm64-v8a)**。
+本项目已从原有的 `Tauri + React` 架构重构为 `Flutter + Rust` 架构，支持 **Windows / Linux 桌面端** 和 **Android 移动端**。
 
 ---
 
@@ -37,7 +37,7 @@
   ```bash
   flutter build windows
   ```
-* **输出路径**：`D:\python\app\build\windows\x64\runner\Release\aetheria.exe`
+* **输出路径**：项目目录下的 `build/windows/x64/runner/Release/aetheria.exe`。
 * *注意*：运行打包好的 `aetheria.exe` 时，必须保证同级目录下的所有 `.dll` 依赖文件完整。
 
 ### Android 编译 (只限 arm64-v8a)
@@ -45,7 +45,11 @@
   ```bash
   flutter build apk --target-platform android-arm64
   ```
-* **输出路径**：`D:\python\app\build\app\outputs\flutter-apk\app-release.apk`
+* **输出路径**：项目目录下的 `build/app/outputs/flutter-apk/app-release.apk`。
+
+### Linux 编译
+* **指令**：`flutter build linux --release`
+* **输出路径**：项目目录下的 `build/linux/x64/release/bundle/`；分发时保留整个目录。
 
 ---
 
@@ -77,6 +81,16 @@ subprojects {
 
 ## 4. 后续 UI 调整与 Bug 修复注意事项
 
-1. **主题变量统一**：所有的 UI 组件应当通过 `ref.watch(uiThemeProvider)` 获取当前主题的 CSS 对应变量（如 `bgApp`、`textNormal` 等），严禁在组件内硬编码颜色值。
+1. **主题变量统一**：UI 组件通过 `context.tokens` 获取 `AppThemeConfig` 的颜色（如 `bgApp`、`textPrimary`）；主题状态由 `provider` 管理，规范见 `lib/core/theme/UI_CONTRACT.md`。
 2. **音频状态联动**：如果遇到播放进度条、音量或播放状态不一致的 bug，应优先排查 `lib/core/providers/audio_player_provider.dart` 的状态监听逻辑。
 3. **新增 Rust 接口**：如果修改了 `rust/src/api/` 下的 Rust 函数，请务必在根目录运行 `flutter_rust_bridge_codegen` 重新生成 Dart 桥接代码。
+
+## 5. 重构验收（2026-11-11）
+
+保留库模块、状态层、UI 拆分及主题改动，并补修以下边界：
+
+* 播放器停止和销毁排在尚未完成的开流之后，避免同步替换文件时音频流重新出现。
+* Dart 播放、封面和 Android 导出与 Rust 共用相同的文件名约束：只取末段，拒绝盘符相对路径和 NTFS 数据流名称；导出文件名兼容两种平台的分隔符。
+* 并发导入在 SQLite 写事务内再次检查 MD5，失败时回滚记录并清理音频与歌词副本。
+
+验证：`flutter analyze` 无问题；`flutter test` 137 项通过，截图入口默认跳过，单独启用后 24 项通过并复查截图；`cargo test` 45 项通过、1 项声卡测试忽略。Linux 调试构建与 Android arm64 API 26 的 `cargo ndk check` 通过。Windows 构建、Android 整包及真实设备的播放/交互尚未验证。

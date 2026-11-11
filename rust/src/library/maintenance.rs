@@ -103,8 +103,8 @@ pub fn export_version(version_id: &str, destination: &str) -> Result<String> {
     let destination = Path::new(destination);
     let target = if destination.is_dir() {
         // `original_name` is untrusted (synced database): keep its last component only.
-        let name = Path::new(&original_name)
-            .file_name()
+        let name = paths::file_name(&original_name)
+            .map(std::ffi::OsStr::new)
             .or_else(|| source.file_name())
             .ok_or_else(|| LibraryError::new("文件名无效。"))?;
         destination.join(name)
