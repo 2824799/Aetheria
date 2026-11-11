@@ -4,7 +4,7 @@ use super::{paths, probe, songs, LibraryError, Result, AUDIO_EXTENSIONS};
 use crate::audio::dsp;
 use crate::database::connection;
 use crate::models::{AudioVersion, PreviewInfo, Song};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -60,16 +60,7 @@ fn import(source: &Path, target: Target<'_>) -> Result<(Connection, AudioVersion
     let md5 = probe::file_md5(source)?;
 
     let mut conn = connection::open()?;
-    let duplicate: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM audio_files WHERE md5 = ?1)",
-        params![md5],
-        |row| row.get(0),
-    )?;
-    if duplicate {
-        return Err(LibraryError::new(format!(
-            "音频文件 [{original_name}] 已存在于音乐库中，请勿重复导入！"
-        )));
-    }
+    ensure_not_duplicate(&conn, &md5, &original_name)?;
     if let Target::Song(song_id) = target {
         if !songs::exists(&conn, song_id)? {
             return Err(songs::song_not_found());
@@ -97,7 +88,10 @@ fn import(source: &Path, target: Target<'_>) -> Result<(Connection, AudioVersion
             .into_owned()
     };
     let mut register = || -> Result<String> {
-        let tx = conn.transaction()?;
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        // Another import may have committed while this one measured/copied
+        // the file. Check again while holding the SQLite writer lock.
+        ensure_not_duplicate(&tx, &md5, &original_name)?;
         let song_id = match target {
             Target::Song(song_id) => song_id.to_string(),
             Target::Named { title, artist } => {
@@ -158,6 +152,20 @@ fn import(source: &Path, target: Target<'_>) -> Result<(Connection, AudioVersion
     // Cover extraction is cosmetic; the import itself has already succeeded.
     let _ = songs::ensure_cover_with(&conn, &version.song_id);
     Ok((conn, version))
+}
+
+fn ensure_not_duplicate(conn: &Connection, md5: &str, original_name: &str) -> Result<()> {
+    let duplicate: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM audio_files WHERE md5 = ?1)",
+        params![md5],
+        |row| row.get(0),
+    )?;
+    if duplicate {
+        return Err(LibraryError::new(format!(
+            "音频文件 [{original_name}] 已存在于音乐库中，请勿重复导入！"
+        )));
+    }
+    Ok(())
 }
 
 fn find_or_create_song(

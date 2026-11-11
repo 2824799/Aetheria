@@ -8,7 +8,6 @@ use crate::database::connection;
 use crate::models::{LocalLyricCandidate, SavedLyric};
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use std::fs;
-use std::path::Path;
 use uuid::Uuid;
 
 const LYRIC_COLUMNS: &str = "id, song_id, audio_version_id, source, source_id, title, artist, \
@@ -289,10 +288,11 @@ pub fn local_candidates(
             }
             // Sidecar copied at import time, then one dropped in by hand
             // under the file's original name.
-            let original_stem = Path::new(&original_name).file_stem().unwrap_or_default();
-            let mut by_original_name = paths::files_dir().join(original_stem).into_os_string();
-            by_original_name.push(".lrc");
-            for sidecar in [audio_path.with_extension("lrc"), by_original_name.into()] {
+            let mut sidecars = vec![audio_path.with_extension("lrc")];
+            if let Some(name) = paths::file_name(&original_name) {
+                sidecars.push(paths::files_dir().join(name).with_extension("lrc"));
+            }
+            for sidecar in sidecars {
                 if let Ok(content) = fs::read_to_string(&sidecar) {
                     push(
                         "local_lrc",

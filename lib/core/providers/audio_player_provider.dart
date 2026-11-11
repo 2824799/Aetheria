@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:aetheria/core/utils/library_paths.dart';
 import 'package:aetheria/services/native_audio_helper.dart';
 import 'package:aetheria/src/rust/api/playback.dart' as playback;
 import 'package:aetheria/src/rust/audio/player.dart' show AudioOutputInfo;
@@ -464,7 +465,8 @@ class AudioPlayerProvider extends ChangeNotifier {
   // ---- Engine stream ----
 
   String _audioPath(AudioVersion version) {
-    return '$_libraryPath/${version.filepath}'.replaceAll('\\', '/');
+    return managedAudioPath(_libraryPath, version.filepath) ??
+        (throw const FormatException('音乐库中的音频文件名无效。'));
   }
 
   /// Gain that pulls louder tracks down towards the quietest primary version
@@ -524,7 +526,7 @@ class AudioPlayerProvider extends ChangeNotifier {
     _streamStart = done.future;
     try {
       await previous;
-      if (request == _streamRequest) {
+      if (request == _streamRequest && !_disposed) {
         await _openStream(request, startPosition, startPaused);
       }
     } finally {
@@ -547,10 +549,9 @@ class AudioPlayerProvider extends ChangeNotifier {
     final position = duration > Duration.zero && startPosition > duration
         ? duration
         : startPosition;
-    final path = _audioPath(version);
-
     _hasPreparedPlayback = false;
     try {
+      final path = _audioPath(version);
       if (!await File(path).exists()) {
         throw Exception('音频文件不存在: $path');
       }
@@ -847,10 +848,9 @@ class AudioPlayerProvider extends ChangeNotifier {
 
   /// Releases every audio file before LAN sync replaces the library on disk.
   Future<void> stopForLibrarySync() async {
-    _streamRequest++;
+    final stopping = _stopStream();
     _stopPositionTimer();
     _stopOutputInfoTimer();
-    await playback.stopPlayback();
     isPlaying = false;
     _hasPreparedPlayback = false;
     playingSong = null;
@@ -860,7 +860,23 @@ class AudioPlayerProvider extends ChangeNotifier {
     currentPosition = Duration.zero;
     totalDuration = Duration.zero;
     _pendingRestorePosition = null;
+    await stopping;
     _publishPlaybackState();
+  }
+
+  /// Queue the stop behind any native open already in flight. A stop that
+  /// overtakes an open would let that open recreate the stream afterwards.
+  Future<void> _stopStream() async {
+    _streamRequest++;
+    final previous = _streamStart;
+    final done = Completer<void>();
+    _streamStart = done.future;
+    try {
+      await previous;
+      await playback.stopPlayback();
+    } finally {
+      done.complete();
+    }
   }
 
   /// Plays the primary version of [song] with [queue] as the play queue.
@@ -1027,6 +1043,9 @@ class AudioPlayerProvider extends ChangeNotifier {
     }
     final version = playingVersion;
     final canSkip = currentQueue.length > 1;
+    final audioPath = version == null
+        ? null
+        : managedAudioPath(_libraryPath, version.filepath);
     unawaited(
       NativeAudioHelper.showNotification(<String, dynamic>{
         'title': song.title,
@@ -1036,14 +1055,14 @@ class AudioPlayerProvider extends ChangeNotifier {
         'durationMs': totalDuration.inMilliseconds,
         'hasPrevious': canSkip,
         'hasNext': canSkip,
-        if (version != null && _libraryPath.isNotEmpty)
-          'audioPath': _audioPath(version),
+        'audioPath': ?audioPath,
       }),
     );
   }
 
   @override
   void dispose() {
+    _disposed = true;
     _positionTimer?.cancel();
     _outputInfoTimer?.cancel();
     _audioRouteChangeDebounce?.cancel();
@@ -1051,8 +1070,7 @@ class AudioPlayerProvider extends ChangeNotifier {
     if (Platform.isAndroid) {
       NativeAudioHelper.hideNotification();
     }
-    unawaited(playback.stopPlayback());
-    _disposed = true;
+    unawaited(_stopStream());
     _position.dispose();
     super.dispose();
   }

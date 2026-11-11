@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'package:aetheria/core/providers/library_provider.dart';
+import 'package:aetheria/core/utils/library_paths.dart';
 import 'package:aetheria/core/theme/theme.dart';
 import 'package:aetheria/src/rust/models/song.dart';
 
@@ -87,7 +88,7 @@ class _SongCoverArtState extends State<SongCoverArt> {
     if (libraryPath.trim().isEmpty) {
       return null;
     }
-    return '$libraryPath/$path'.replaceAll('\\', '/');
+    return managedCoverPath(libraryPath, path);
   }
 
   @override

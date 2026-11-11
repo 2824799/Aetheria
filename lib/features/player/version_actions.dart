@@ -5,6 +5,7 @@ import 'package:aetheria/core/providers/library_provider.dart';
 import 'package:aetheria/core/utils/audio_formats.dart';
 import 'package:aetheria/core/utils/audio_quality.dart';
 import 'package:aetheria/core/utils/formatting.dart';
+import 'package:aetheria/core/utils/library_paths.dart';
 import 'package:aetheria/core/widgets/aether_dialog.dart';
 import 'package:aetheria/core/widgets/aether_progress_dialog.dart';
 import 'package:aetheria/core/widgets/aether_toast.dart';
@@ -140,20 +141,23 @@ Future<void> linkNewVersion(BuildContext context, Song song) async {
 /// Downloads folder on Android, to a user-chosen location elsewhere.
 Future<void> exportVersion(BuildContext context, AudioVersion version) async {
   try {
+    final fileName =
+        managedFileName(version.originalName) ??
+        managedFileName(version.filepath) ??
+        'audio';
     final String successMessage;
     final Future<void> Function() export;
     if (Platform.isAndroid) {
       final libraryPath = context.read<LibraryProvider>().libraryPath;
-      final sourcePath = '$libraryPath/${version.filepath}'.replaceAll(
-        '\\',
-        '/',
-      );
-      export = () =>
-          NativeAudioHelper.saveToDownloads(sourcePath, version.originalName);
+      final sourcePath = managedAudioPath(libraryPath, version.filepath);
+      if (sourcePath == null) {
+        throw const FormatException('音乐库中的音频文件名无效。');
+      }
+      export = () => NativeAudioHelper.saveToDownloads(sourcePath, fileName);
       successMessage = '已成功导出至系统 Downloads/Aetheria 文件夹！';
     } else {
       final destination = await FilePicker.platform.saveFile(
-        fileName: version.originalName,
+        fileName: fileName,
         dialogTitle: '选择保存音频的位置',
       );
       if (destination == null) return;
