@@ -1,276 +1,131 @@
 import 'package:flutter/material.dart';
+
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
 import 'package:aetheria/core/utils/audio_quality.dart';
+import 'package:aetheria/features/library/ui/song_badges.dart';
 import 'package:aetheria/features/library/ui/song_table/song_columns.dart';
-import 'package:aetheria/features/library/ui/song_table/song_table_widgets.dart';
+import 'package:aetheria/features/library/ui/song_table/song_table_column_layout.dart';
 import 'package:aetheria/features/library/ui/song_table/song_table_tags.dart';
 import 'package:aetheria/features/library/ui/song_table/song_table_text.dart';
 import 'package:aetheria/src/rust/models/song.dart';
 
-class SongTableCellBuilder {
-  const SongTableCellBuilder({
-    required this.textCache,
-    required this.columnWidths,
-    required this.columnOrder,
-    required this.onResize,
-    required this.onResizeEnd,
-    required this.onReorder,
-    this.headerHeight = 40,
-  });
+/// Builds the body cells of one song row.
+class SongTableCells {
+  const SongTableCells({required this.textCache, required this.layout});
 
   final SongTableTextCache textCache;
-  final Map<SongColumnKey, double> columnWidths;
-  final List<SongColumnKey> columnOrder;
-  final void Function(SongColumnKey column, double delta) onResize;
-  final VoidCallback onResizeEnd;
-  final void Function(SongColumnKey dragged, SongColumnKey target) onReorder;
-  final double headerHeight;
+  final SongTableColumnLayout layout;
 
-  Widget buildHeaderCell(SongColumnKey column, AppThemeConfig cfg) {
-    final width = columnWidths[column] ?? column.defaultWidth;
+  static const EdgeInsets _padding = EdgeInsets.symmetric(
+    horizontal: AetherSpace.lg,
+  );
+
+  Widget build(
+    SongColumnKey column,
+    Song song,
+    AppThemeConfig cfg, {
+    required bool isPlaying,
+    required bool hasLyrics,
+  }) {
+    final width = layout.widthOf(column);
     return SizedBox(
       width: width,
-      height: headerHeight,
-      child: DragTarget<SongColumnKey>(
-        onWillAcceptWithDetails: (details) => details.data != column,
-        onAcceptWithDetails: (details) => onReorder(details.data, column),
-        builder: (context, candidateData, rejectedData) {
-          final isDropTarget = candidateData.isNotEmpty;
-          return Container(
-            decoration: BoxDecoration(
-              color: isDropTarget ? cfg.selection : cfg.bgHover,
-              border: Border(
-                right: BorderSide(
-                  color: cfg.borderSubtle.withValues(alpha: 0.45),
-                ),
-              ),
+      child: switch (column) {
+        SongColumnKey.title => _title(song, cfg, isPlaying, hasLyrics),
+        SongColumnKey.artist => _artist(song, cfg),
+        SongColumnKey.tags => _tags(song, cfg, width),
+        SongColumnKey.versions => _versions(song, cfg),
+        SongColumnKey.spec => _quality(song),
+      },
+    );
+  }
+
+  Widget _title(Song song, AppThemeConfig cfg, bool isPlaying, bool hasLyrics) {
+    return Padding(
+      padding: _padding,
+      child: Row(
+        children: [
+          Expanded(
+            child: SongTableText(
+              song.title,
+              cache: textCache,
+              prefetchGroup: isPlaying
+                  ? null
+                  : hasLyrics
+                  ? SongTableTextGroup.title
+                  : SongTableTextGroup.titleWithoutLyrics,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AetherType.titleSmStyle(
+                isPlaying ? cfg.accent : cfg.textPrimary,
+              ).copyWith(fontWeight: FontWeight.w500),
             ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Draggable<SongColumnKey>(
-                    data: column,
-                    feedback: Material(
-                      color: cfg.bgPopover,
-                      child: Container(
-                        width: width,
-                        height: headerHeight - 8,
-                        alignment: Alignment.centerLeft,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: AetherSpace.lg,
-                        ),
-                        decoration: BoxDecoration(
-                          color: cfg.bg1.withValues(alpha: 0.96),
-                          borderRadius: BorderRadius.circular(AetherRadius.md),
-                          border: Border.all(
-                            color: cfg.accent.withValues(alpha: 0.55),
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: cfg.scrim.withValues(alpha: 0.22),
-                              blurRadius: 18,
-                              offset: const Offset(0, 8),
-                            ),
-                          ],
-                        ),
-                        child: Text(
-                          column.label,
-                          style: TextStyle(
-                            color: cfg.textPrimary,
-                            fontSize: AetherType.titleSm,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                    ),
-                    childWhenDragging: Opacity(
-                      opacity: 0.35,
-                      child: buildHeaderLabel(column, cfg),
-                    ),
-                    child: buildHeaderLabel(column, cfg),
-                  ),
-                ),
-                MouseRegion(
-                  cursor: SystemMouseCursors.resizeColumn,
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onHorizontalDragUpdate: (details) =>
-                        onResize(column, details.delta.dx),
-                    onHorizontalDragEnd: (_) => onResizeEnd(),
-                    onHorizontalDragCancel: onResizeEnd,
-                    child: Container(
-                      width: 12,
-                      alignment: Alignment.center,
-                      child: Container(
-                        width: 2,
-                        height: 18,
-                        decoration: BoxDecoration(
-                          color: cfg.borderSubtle.withValues(alpha: 0.85),
-                          borderRadius: BorderRadius.circular(
-                            AetherRadius.full,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
+          ),
+          if (hasLyrics) ...[
+            const SizedBox(width: AetherSpace.sm),
+            const LrcBadge(),
+          ],
+        ],
       ),
     );
   }
 
-  Widget buildHeaderLabel(SongColumnKey column, AppThemeConfig cfg) {
-    final centered =
-        column == SongColumnKey.versions || column == SongColumnKey.spec;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: AetherSpace.lg),
-      alignment: centered ? Alignment.center : Alignment.centerLeft,
-      child: Text(
-        column.label,
-        textAlign: centered ? TextAlign.center : TextAlign.left,
+  Widget _artist(Song song, AppThemeConfig cfg) {
+    final artist = song.artist;
+    return Padding(
+      padding: _padding,
+      child: SongTableText(
+        artist ?? '未知歌手',
+        cache: textCache,
+        prefetchGroup: SongTableTextGroup.artist,
         maxLines: 1,
-        softWrap: false,
-        overflow: TextOverflow.clip,
-        style: TextStyle(
-          color: cfg.textSecondary,
-          fontWeight: FontWeight.w700,
-          fontSize: AetherType.titleSm,
+        overflow: TextOverflow.ellipsis,
+        style: AetherType.bodyStyle(
+          artist == null ? cfg.textTertiary : cfg.textSecondary,
         ),
       ),
     );
   }
 
-  Widget buildCell(
-    SongColumnKey column,
-    Song song,
-    AudioVersion? primaryVersion,
-    AppThemeConfig cfg,
-    bool isCurrentlyPlaying,
-    bool hasLyrics,
-  ) {
-    final width = columnWidths[column] ?? column.defaultWidth;
-
-    switch (column) {
-      case SongColumnKey.title:
-        return SizedBox(
-          width: width,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: AetherSpace.lg),
-            child: Row(
-              children: [
-                Expanded(
-                  child: SongTableText(
-                    song.title,
-                    cache: textCache,
-                    prefetchGroup: isCurrentlyPlaying
-                        ? null
-                        : hasLyrics
-                        ? SongTableTextGroup.title
-                        : SongTableTextGroup.titleWithoutLyrics,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: isCurrentlyPlaying ? cfg.accent : cfg.textPrimary,
-                      fontWeight: FontWeight.w600,
-                      fontSize: AetherType.titleSm,
-                    ),
-                  ),
-                ),
-                if (hasLyrics) ...[
-                  const SizedBox(width: AetherSpace.sm),
-                  SongTableLrcBadge(cfg: cfg),
-                ],
-              ],
-            ),
-          ),
-        );
-      case SongColumnKey.artist:
-        return SizedBox(
-          width: width,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: AetherSpace.lg),
-            child: SongTableText(
-              song.artist ?? '未知歌手',
+  Widget _tags(Song song, AppThemeConfig cfg, double width) {
+    return Padding(
+      padding: _padding,
+      child: song.tags.isEmpty
+          ? SongTableText(
+              '—',
               cache: textCache,
-              prefetchGroup: SongTableTextGroup.artist,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: cfg.textSecondary,
-                fontSize: AetherType.body,
-              ),
+              style: AetherType.bodySmStyle(cfg.textTertiary),
+            )
+          : SongTableTags(
+              tags: song.tags,
+              textCache: textCache,
+              cfg: cfg,
+              availableWidth: width - _padding.horizontal,
             ),
-          ),
-        );
-      case SongColumnKey.tags:
-        return SizedBox(
-          width: width,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: AetherSpace.lg),
-            child: song.tags.isEmpty
-                ? SongTableText(
-                    '无标签',
-                    cache: textCache,
-                    style: TextStyle(
-                      color: cfg.textSecondary.withValues(alpha: 0.75),
-                      fontSize: AetherType.bodySm,
-                    ),
-                  )
-                : SongTableTags(
-                    tags: song.tags,
-                    textCache: textCache,
-                    cfg: cfg,
-                    availableWidth: width - AetherSpace.lg * 2,
-                  ),
-          ),
-        );
-      case SongColumnKey.versions:
-        return SizedBox(
-          width: width,
-          child: Center(
-            child: SongTableText(
-              song.versions.length.toString(),
-              cache: textCache,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: cfg.textPrimary,
-                fontWeight: FontWeight.bold,
-                fontSize: AetherType.body,
-              ),
-            ),
-          ),
-        );
-      case SongColumnKey.spec:
-        final specText = audioQualityText(primaryVersion);
-        final badgeColor = audioQualityColor(primaryVersion, cfg);
+    );
+  }
 
-        return SizedBox(
-          width: width,
-          child: Center(
-            child: Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: AetherSpace.md,
-                vertical: 3,
-              ),
-              decoration: BoxDecoration(
-                color: badgeColor.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(AetherRadius.xs),
-              ),
-              child: SongTableText(
-                specText,
-                cache: textCache,
-                style: TextStyle(
-                  fontSize: AetherType.caption,
-                  fontWeight: FontWeight.bold,
-                  color: badgeColor,
-                ),
-              ),
-            ),
-          ),
-        );
-    }
+  Widget _versions(Song song, AppThemeConfig cfg) {
+    final count = song.versions.length;
+    return Center(
+      child: SongTableText(
+        count.toString(),
+        cache: textCache,
+        textAlign: TextAlign.center,
+        // One version is the norm; only extra versions deserve attention.
+        style: AetherType.bodyStyle(
+          count > 1 ? cfg.textPrimary : cfg.textTertiary,
+        ).copyWith(fontWeight: count > 1 ? FontWeight.w600 : FontWeight.w400),
+      ),
+    );
+  }
+
+  Widget _quality(Song song) {
+    return Center(
+      child: AudioQualityBadge(
+        version: primaryVersionOf(song),
+        textCache: textCache,
+      ),
+    );
   }
 }

@@ -1,161 +1,111 @@
 import 'package:flutter/material.dart';
-import 'package:aetheria/core/utils/formatting.dart';
-import 'package:aetheria/core/providers/library_provider.dart';
+
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
 import 'package:aetheria/core/utils/audio_quality.dart';
 import 'package:aetheria/core/widgets/aether_pressable.dart';
-import 'package:aetheria/features/layout/mobile/mobile_utils.dart';
+import 'package:aetheria/features/library/ui/song_badges.dart';
 import 'package:aetheria/src/rust/models/song.dart';
 
+/// One song in the mobile list: title, artist, audio quality and tags.
 class MobileSongTile extends StatelessWidget {
-  final Song song;
-  final AppThemeConfig cfg;
-  final LibraryProvider libraryProvider;
-  final bool isActive;
-  final bool isCurrentlyPlaying;
-  final VoidCallback onTap;
-  final VoidCallback onLongPress;
-
   const MobileSongTile({
     super.key,
     required this.song,
-    required this.cfg,
-    required this.libraryProvider,
+    required this.hasLyrics,
     required this.isActive,
-    required this.isCurrentlyPlaying,
+    required this.isPlaying,
     required this.onTap,
     required this.onLongPress,
   });
 
+  final Song song;
+  final bool hasLyrics;
+
+  /// The song whose details were opened last.
+  final bool isActive;
+
+  /// The song loaded in the player.
+  final bool isPlaying;
+  final VoidCallback onTap;
+  final VoidCallback onLongPress;
+
   @override
   Widget build(BuildContext context) {
-    AudioVersion? primary;
-    for (final version in song.versions) {
-      if (version.isPrimary) {
-        primary = version;
-        break;
-      }
-    }
-    if (primary == null && song.versions.isNotEmpty) {
-      primary = song.versions.first;
-    }
-
-    final specsText = audioQualityText(primary);
-    final qualityColor = audioQualityColor(primary, cfg);
+    final cfg = context.tokens;
+    final radius = BorderRadius.circular(AetherRadius.md);
+    final artist = song.artist;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: AetherSpace.sm),
       child: AetherPressable(
         onTap: onTap,
         onLongPress: onLongPress,
-        borderRadius: BorderRadius.circular(AetherRadius.md),
+        borderRadius: radius,
+        pressScale: AetherMotion.pressScaleSubtle,
         hoverColor: cfg.bgHover,
         pressedColor: cfg.pressed,
         child: Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AetherSpace.xl,
+            vertical: AetherSpace.lg,
+          ),
           decoration: BoxDecoration(
-            color: isActive ? cfg.bgHover : cfg.bg1,
-            borderRadius: BorderRadius.circular(AetherRadius.md),
-            border: Border(
-              left: BorderSide(
-                color: isCurrentlyPlaying ? cfg.accent : Colors.transparent,
-                width: 4,
-              ),
+            color: isPlaying ? cfg.accentMuted : cfg.bg1,
+            borderRadius: radius,
+            border: Border.all(
+              color: isActive && !isPlaying
+                  ? cfg.borderStrong
+                  : cfg.borderSubtle,
             ),
           ),
-          padding: const EdgeInsets.symmetric(
-            horizontal: AetherSpace.lg,
-            vertical: AetherSpace.lg - 2,
-          ),
-          child: Row(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            song.title,
-                            style: AetherType.titleSmStyle(
-                              isCurrentlyPlaying ? cfg.accent : cfg.textPrimary,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        if (libraryProvider.songHasLyrics(song)) ...[
-                          const SizedBox(width: AetherSpace.sm),
-                          MobileLrcBadge(cfg: cfg),
-                        ],
-                      ],
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      song.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AetherType.titleSmStyle(
+                        isPlaying ? cfg.accent : cfg.textPrimary,
+                      ).copyWith(fontWeight: FontWeight.w500),
                     ),
-                    const SizedBox(height: AetherSpace.xs),
-                    Row(
-                      children: [
-                        Flexible(
-                          child: Text(
-                            song.artist ?? '未知歌手',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: AetherType.bodySmStyle(cfg.textSecondary),
-                          ),
-                        ),
-                        const SizedBox(width: AetherSpace.md),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: AetherSpace.xs,
-                            vertical: 1,
-                          ),
-                          decoration: BoxDecoration(
-                            color: qualityColor.withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(
-                              AetherRadius.xs,
-                            ),
-                          ),
-                          child: Text(
-                            specsText,
-                            style: AetherType.captionStyle(
-                              qualityColor,
-                            ).copyWith(fontWeight: FontWeight.w700),
-                          ),
-                        ),
-                      ],
-                    ),
-                    if (song.tags.isNotEmpty) ...[
-                      const SizedBox(height: AetherSpace.xs),
-                      Wrap(
-                        spacing: AetherSpace.sm,
-                        runSpacing: AetherSpace.xs,
-                        children: song.tags.map((t) {
-                          final c = parseTagColor(t.color, cfg.textSecondary);
-                          return Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: AetherSpace.sm,
-                              vertical: 1,
-                            ),
-                            decoration: BoxDecoration(
-                              color: c.withValues(alpha: 0.10),
-                              borderRadius: BorderRadius.circular(
-                                AetherRadius.xs,
-                              ),
-                              border: Border.all(
-                                color: c.withValues(alpha: 0.35),
-                              ),
-                            ),
-                            child: Text(
-                              t.name,
-                              style: AetherType.captionStyle(
-                                c,
-                              ).copyWith(fontWeight: FontWeight.w600),
-                            ),
-                          );
-                        }).toList(),
+                  ),
+                  if (hasLyrics) ...[
+                    const SizedBox(width: AetherSpace.sm),
+                    const LrcBadge(),
+                  ],
+                ],
+              ),
+              const SizedBox(height: AetherSpace.xs),
+              Row(
+                children: [
+                  Flexible(
+                    child: Text(
+                      artist ?? '未知歌手',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AetherType.bodySmStyle(
+                        artist == null ? cfg.textTertiary : cfg.textSecondary,
                       ),
-                    ],
+                    ),
+                  ),
+                  const SizedBox(width: AetherSpace.md),
+                  AudioQualityBadge(version: primaryVersionOf(song)),
+                ],
+              ),
+              if (song.tags.isNotEmpty) ...[
+                const SizedBox(height: AetherSpace.md),
+                Wrap(
+                  spacing: AetherSpace.sm,
+                  runSpacing: AetherSpace.xs,
+                  children: [
+                    for (final tag in song.tags) SongTagChip(tag: tag),
                   ],
                 ),
-              ),
+              ],
             ],
           ),
         ),

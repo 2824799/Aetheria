@@ -124,7 +124,9 @@ class AetherButton extends StatelessWidget {
         borderColor = Colors.transparent;
     }
 
-    final radius = BorderRadius.circular(AetherRadius.xl);
+    final radius = BorderRadius.circular(
+      size == AetherButtonSize.sm ? AetherRadius.sm + 2 : AetherRadius.md,
+    );
     final child = Container(
       height: height,
       width: expanded ? double.infinity : null,

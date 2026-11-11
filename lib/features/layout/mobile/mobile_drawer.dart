@@ -1,163 +1,164 @@
 import 'package:flutter/material.dart';
+
 import 'package:aetheria/core/providers/library_provider.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
 import 'package:aetheria/core/widgets/aether_icon_button.dart';
 import 'package:aetheria/core/widgets/aether_list_tile.dart';
 import 'package:aetheria/core/widgets/aether_menu.dart';
-import 'package:aetheria/core/widgets/aether_surface.dart';
-import 'package:aetheria/features/layout/mobile/mobile_dialogs.dart';
+import 'package:aetheria/features/library/playlist_actions.dart';
 import 'package:aetheria/src/rust/models/playlist.dart';
 
+/// Mobile navigation drawer: the whole library and the playlists.
 class MobilePlaylistDrawer extends StatelessWidget {
-  final LibraryProvider libraryProvider;
-  final AppThemeConfig cfg;
+  const MobilePlaylistDrawer({super.key, required this.library});
 
-  const MobilePlaylistDrawer({
-    super.key,
-    required this.libraryProvider,
-    required this.cfg,
-  });
+  final LibraryProvider library;
+
+  void _select(BuildContext context, String? playlistId) {
+    library.setActivePlaylist(playlistId);
+    Navigator.of(context).pop();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final playlists = libraryProvider.playlists;
-    final activePlaylistId = libraryProvider.activePlaylistId;
+    final cfg = context.tokens;
+    final activeId = library.activePlaylistId;
 
     return Drawer(
-      backgroundColor: Colors.transparent,
-      child: AetherSurface(
-        level: AetherSurfaceLevel.glass,
-        borderRadius: BorderRadius.zero,
-        child: SafeArea(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(AetherSpace.xxl),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      '我的歌单',
+      backgroundColor: cfg.bgElevated,
+      shape: const RoundedRectangleBorder(),
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AetherSpace.xxl,
+                AetherSpace.xl,
+                AetherSpace.md,
+                AetherSpace.md,
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '音乐库',
                       style: AetherType.titleLgStyle(cfg.textPrimary),
                     ),
-                    AetherIconButton(
-                      icon: Icons.add,
-                      tooltip: '新建歌单',
-                      onPressed: () => mobileShowCreatePlaylistDialog(
-                        context,
-                        libraryProvider,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Divider(height: 1, color: cfg.borderSubtle),
-              Expanded(
-                child: ListView(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: AetherSpace.lg,
-                    vertical: AetherSpace.md,
                   ),
-                  children: [
-                    AetherListTile(
-                      leading: Icon(
-                        Icons.library_music,
-                        color: activePlaylistId == null
-                            ? cfg.accent
-                            : cfg.textSecondary,
-                      ),
-                      title: '全部音乐',
-                      trailing: Text(
-                        '${libraryProvider.songs.length}',
-                        style: AetherType.bodySmStyle(cfg.textSecondary),
-                      ),
-                      selected: activePlaylistId == null,
-                      onTap: () {
-                        libraryProvider.setActivePlaylist(null);
-                        Navigator.of(context).pop();
-                      },
-                    ),
-                    const SizedBox(height: AetherSpace.md),
-                    ...playlists.map((Playlist pl) {
-                      final selected = activePlaylistId == pl.id;
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: AetherSpace.xs),
-                        child: AetherListTile(
-                          leading: Icon(
-                            Icons.queue_music,
-                            color: selected ? cfg.accent : cfg.textSecondary,
-                          ),
-                          title: pl.name,
-                          selected: selected,
-                          onTap: () {
-                            libraryProvider.setActivePlaylist(pl.id);
-                            Navigator.of(context).pop();
-                          },
-                          trailing: Builder(
-                            builder: (btnContext) {
-                              return AetherIconButton(
-                                icon: Icons.more_vert_rounded,
-                                size: 40,
-                                iconSize: AetherIconSize.md,
-                                tooltip: '歌单操作',
-                                onPressed: () async {
-                                  final box =
-                                      btnContext.findRenderObject() as RenderBox?;
-                                  final origin =
-                                      box?.localToGlobal(Offset.zero) ??
-                                          Offset.zero;
-                                  final size = box?.size ?? Size.zero;
-                                  final value = await showAetherMenu<String>(
-                                    context: btnContext,
-                                    globalPosition: Offset(
-                                      origin.dx,
-                                      origin.dy + size.height,
-                                    ),
-                                    items: const [
-                                      AetherMenuItem(
-                                        value: 'rename',
-                                        label: '重命名歌单',
-                                        icon: Icons.edit_rounded,
-                                      ),
-                                      AetherMenuItem(
-                                        value: 'delete',
-                                        label: '删除歌单',
-                                        icon: Icons.delete_forever_rounded,
-                                        destructive: true,
-                                      ),
-                                    ],
-                                  );
-                                  if (!btnContext.mounted) return;
-                                  if (value == 'rename') {
-                                    mobileShowRenamePlaylistDialog(
-                                      btnContext,
-                                      id: pl.id,
-                                      currentName: pl.name,
-                                      provider: libraryProvider,
-                                    );
-                                  } else if (value == 'delete') {
-                                    mobileConfirmDeletePlaylist(
-                                      btnContext,
-                                      id: pl.id,
-                                      name: pl.name,
-                                      provider: libraryProvider,
-                                    );
-                                  }
-                                },
-                              );
-                            },
-                          ),
-                        ),
-                      );
-                    }),
-                  ],
-                ),
+                  AetherIconButton(
+                    icon: Icons.add_rounded,
+                    tooltip: '新建歌单',
+                    onPressed: () => createPlaylistWithDialog(context, library),
+                  ),
+                ],
               ),
-            ],
-          ),
+            ),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AetherSpace.lg,
+                  vertical: AetherSpace.xs,
+                ),
+                children: [
+                  AetherListTile(
+                    icon: Icons.library_music_outlined,
+                    title: '全部歌曲',
+                    trailing: Text(
+                      '${library.songs.length}',
+                      style: AetherType.bodySmStyle(cfg.textTertiary),
+                    ),
+                    selected: activeId == null,
+                    onTap: () => _select(context, null),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      AetherSpace.lg,
+                      AetherSpace.xl,
+                      AetherSpace.lg,
+                      AetherSpace.sm,
+                    ),
+                    child: Text(
+                      '歌单',
+                      style: AetherType.labelStyle(cfg.textTertiary),
+                    ),
+                  ),
+                  if (library.playlists.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AetherSpace.lg,
+                      ),
+                      child: Text(
+                        '点击右上角的 + 新建第一个歌单',
+                        style: AetherType.bodySmStyle(cfg.textTertiary),
+                      ),
+                    ),
+                  for (final playlist in library.playlists)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: AetherSpace.xs),
+                      child: AetherListTile(
+                        icon: Icons.queue_music_rounded,
+                        title: playlist.name,
+                        selected: activeId == playlist.id,
+                        onTap: () => _select(context, playlist.id),
+                        trailing: _PlaylistMenuButton(
+                          playlist: playlist,
+                          library: library,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
+    );
+  }
+}
+
+class _PlaylistMenuButton extends StatelessWidget {
+  const _PlaylistMenuButton({required this.playlist, required this.library});
+
+  final Playlist playlist;
+  final LibraryProvider library;
+
+  Future<void> _open(BuildContext context) async {
+    final box = context.findRenderObject() as RenderBox?;
+    if (box == null) return;
+    final choice = await showAetherMenu<String>(
+      context: context,
+      globalPosition: box.localToGlobal(Offset(0, box.size.height)),
+      items: const [
+        AetherMenuItem(
+          value: 'rename',
+          label: '重命名',
+          icon: Icons.edit_outlined,
+        ),
+        AetherMenuItem(
+          value: 'delete',
+          label: '删除歌单',
+          icon: Icons.delete_outline_rounded,
+          destructive: true,
+        ),
+      ],
+    );
+    if (!context.mounted) return;
+    if (choice == 'rename') {
+      await renamePlaylistWithDialog(context, library, playlist);
+    } else if (choice == 'delete') {
+      await deletePlaylistWithConfirm(context, library, playlist);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AetherIconButton(
+      icon: Icons.more_horiz_rounded,
+      size: 40,
+      iconSize: AetherIconSize.lg,
+      tooltip: '歌单操作',
+      onPressed: () => _open(context),
     );
   }
 }

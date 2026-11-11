@@ -1,34 +1,19 @@
-import 'package:aetheria/core/utils/audio_formats.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:file_picker/file_picker.dart';
+
 import 'package:aetheria/core/providers/library_provider.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
 import 'package:aetheria/core/widgets/aether_button.dart';
 import 'package:aetheria/core/widgets/aether_menu.dart';
-import 'package:aetheria/core/widgets/aether_checkbox.dart';
-import 'package:aetheria/core/widgets/aether_dialog.dart';
-import 'package:aetheria/core/widgets/aether_surface.dart';
 import 'package:aetheria/core/widgets/aether_text_field.dart';
-import 'package:aetheria/core/widgets/aether_toast.dart';
-import 'package:aetheria/features/library/ui/tag_filter.dart';
+import 'package:aetheria/features/library/ui/library_import.dart';
+import 'package:aetheria/features/library/ui/song_list_summary.dart';
 import 'package:aetheria/features/library/ui/song_table.dart';
-import 'package:aetheria/src/rust/api/music.dart' as music;
-import 'package:aetheria/src/rust/models/song.dart' show PreviewInfo;
-import 'package:aetheria/core/widgets/aether_progress.dart';
-import 'package:aetheria/core/widgets/aether_pressable.dart';
+import 'package:aetheria/features/library/ui/tag_filter.dart';
 
-typedef ProgressDialogUpdate =
-    void Function({
-      String? title,
-      String? subtitle,
-      int? current,
-      int? total,
-      bool? indeterminate,
-    });
-
+/// Desktop library page: title, search, import, tag filter and the song table.
 class MainContent extends StatefulWidget {
   final SongTableController? songTableController;
 
@@ -39,444 +24,65 @@ class MainContent extends StatefulWidget {
 }
 
 class _MainContentState extends State<MainContent> {
+  /// Scroll distance over which the tag pool folds away.
+  static const double _tagCollapseDistance = 140;
+
   final TextEditingController _searchController = TextEditingController();
   final ValueNotifier<double> _tagCollapseFactor = ValueNotifier(0);
 
-  Future<T?> _runProgressDialog<T>({
-    required String initialTitle,
-    required String initialSubtitle,
-    required Future<T> Function(ProgressDialogUpdate updateProgress) task,
-  }) async {
-    if (!mounted) return null;
-
-    return showAetherDialog<T>(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) {
-        return _MainContentTaskProgressDialog<T>(
-          initialTitle: initialTitle,
-          initialSubtitle: initialSubtitle,
-          task: task,
-        );
-      },
-    );
+  @override
+  void dispose() {
+    _searchController.dispose();
+    _tagCollapseFactor.dispose();
+    super.dispose();
   }
 
-  Future<void> _importFiles(LibraryProvider provider) async {
-    try {
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: supportedAudioExtensions,
-        allowMultiple: true,
-      );
-
-      final selectedPaths =
-          result?.paths.whereType<String>().toList() ?? const [];
-      if (selectedPaths.isEmpty) return;
-
-      int successCount = 0;
-      int failCount = 0;
-
-      await _runProgressDialog<void>(
-        initialTitle: '正在导入音频文件...',
-        initialSubtitle: '已完成 0 / ${selectedPaths.length} 首歌曲',
-        task: (updateProgress) async {
-          updateProgress(
-            current: 0,
-            total: selectedPaths.length,
-            indeterminate: false,
-          );
-          for (int index = 0; index < selectedPaths.length; index++) {
-            updateProgress(
-              subtitle: '正在导入 ${index + 1} / ${selectedPaths.length} 首歌曲',
-              current: index,
-            );
-            try {
-              await provider.importSong(selectedPaths[index]);
-              successCount++;
-            } catch (_) {
-              failCount++;
-            }
-            updateProgress(
-              subtitle: '已完成 ${index + 1} / ${selectedPaths.length} 首歌曲',
-              current: index + 1,
-            );
-          }
-        },
-      );
-
-      if (!mounted) return;
-      showAetherToast(
-        context,
-        message: '导入完成: 成功 $successCount 首, 失败 $failCount 首',
-        kind: failCount > 0 ? AetherToastKind.warning : AetherToastKind.success,
-      );
-    } catch (e) {
-      if (!mounted) return;
-      showAetherToast(
-        context,
-        message: '导入文件错误: $e',
-        kind: AetherToastKind.error,
+  bool _collapseTagsOnScroll(ScrollUpdateNotification notification) {
+    final delta = notification.scrollDelta ?? 0;
+    final draggingThumb =
+        widget.songTableController?.isScrollbarDragging ?? false;
+    if (notification.metrics.axis == Axis.vertical &&
+        !draggingThumb &&
+        delta > 0 &&
+        _tagCollapseFactor.value < 1) {
+      _tagCollapseFactor.value = math.min(
+        1,
+        _tagCollapseFactor.value + delta / _tagCollapseDistance,
       );
     }
-  }
-
-  Future<void> _importFolder(LibraryProvider provider) async {
-    try {
-      final selectedDirectory = await FilePicker.platform.getDirectoryPath();
-      if (selectedDirectory == null) return;
-
-      final previews = await _runProgressDialog<List<PreviewInfo>>(
-        initialTitle: '正在扫描文件夹...',
-        initialSubtitle: '扫描完成后会继续读取音频元数据。',
-        task: (updateProgress) async {
-          final filepaths = await music.scanDirectoryForPreview(
-            dirPath: selectedDirectory,
-          );
-          if (filepaths.isEmpty) {
-            return const <PreviewInfo>[];
-          }
-
-          updateProgress(
-            title: '正在读取音频元数据...',
-            subtitle: '已处理 0 / ${filepaths.length} 首候选歌曲',
-            current: 0,
-            total: filepaths.length,
-            indeterminate: false,
-          );
-
-          final previews = <PreviewInfo>[];
-          const batchSize = 24;
-          for (int start = 0; start < filepaths.length; start += batchSize) {
-            final end = math.min(start + batchSize, filepaths.length);
-            final batch = await music.previewAudioMetadata(
-              filepaths: filepaths.sublist(start, end),
-            );
-            previews.addAll(batch);
-            updateProgress(
-              subtitle: '已处理 $end / ${filepaths.length} 首候选歌曲',
-              current: end,
-            );
-          }
-
-          return previews;
-        },
-      );
-
-      if (!mounted) return;
-      if (previews == null || previews.isEmpty) {
-        showAetherToast(
-          context,
-          message: '所选文件夹中未找到支持的音频文件',
-          kind: AetherToastKind.info,
-        );
-        return;
-      }
-
-      await _showImportPreviewModal(previews, provider);
-    } catch (e) {
-      if (!mounted) return;
-      showAetherToast(
-        context,
-        message: '扫描文件夹错误: $e',
-        kind: AetherToastKind.error,
-      );
-    }
-  }
-
-  Future<void> _showImportPreviewModal(
-    List<PreviewInfo> previews,
-    LibraryProvider provider,
-  ) async {
-    final checkedItems = List<bool>.filled(previews.length, true);
-
-    final shouldImport = await showAetherDialog<bool>(
-      context: context,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            final cfg = context.tokens;
-            final selectedCount = checkedItems
-                .where((checked) => checked)
-                .length;
-
-            return AetherDialog(
-              title: '导入预览 (共 ${previews.length} 首)',
-              maxWidth: 580,
-              showClose: true,
-              contentPadding: const EdgeInsets.fromLTRB(
-                AetherSpace.xxl,
-                AetherSpace.xs,
-                AetherSpace.xxl,
-                AetherSpace.lg,
-              ),
-              content: SizedBox(
-                height: 360,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Row(
-                      children: [
-                        AetherButton.ghost(
-                          label: '全选',
-                          size: AetherButtonSize.sm,
-                          onPressed: () {
-                            setModalState(() {
-                              checkedItems.fillRange(
-                                0,
-                                checkedItems.length,
-                                true,
-                              );
-                            });
-                          },
-                        ),
-                        const SizedBox(width: AetherSpace.sm),
-                        AetherButton.ghost(
-                          label: '全不选',
-                          size: AetherButtonSize.sm,
-                          onPressed: () {
-                            setModalState(() {
-                              checkedItems.fillRange(
-                                0,
-                                checkedItems.length,
-                                false,
-                              );
-                            });
-                          },
-                        ),
-                        const Spacer(),
-                        Text(
-                          '已选 $selectedCount 首',
-                          style: AetherType.captionStyle(cfg.textSecondary),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: AetherSpace.md),
-                    Expanded(
-                      child: AetherSurface(
-                        level: AetherSurfaceLevel.panel,
-                        borderRadius: BorderRadius.circular(AetherRadius.md),
-                        color: cfg.bgHover,
-                        child: ListView.separated(
-                          padding: const EdgeInsets.symmetric(
-                            vertical: AetherSpace.xs,
-                          ),
-                          itemCount: previews.length,
-                          separatorBuilder: (_, _) =>
-                              Divider(height: 1, color: cfg.borderSubtle),
-                          itemBuilder: (context, index) {
-                            final item = previews[index];
-                            return AetherPressable(
-                              onTap: () {
-                                setModalState(() {
-                                  checkedItems[index] = !checkedItems[index];
-                                });
-                              },
-                              pressScale: 1.0,
-                              hoverColor: cfg.bgHover,
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: AetherSpace.md,
-                                  vertical: AetherSpace.sm,
-                                ),
-                                child: Row(
-                                  children: [
-                                    AetherCheckbox(
-                                      value: checkedItems[index],
-                                      onChanged: (val) {
-                                        setModalState(() {
-                                          checkedItems[index] = val ?? false;
-                                        });
-                                      },
-                                    ),
-                                    const SizedBox(width: AetherSpace.md),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            item.title,
-                                            style:
-                                                AetherType.bodyStyle(
-                                                  cfg.textPrimary,
-                                                ).copyWith(
-                                                  fontWeight: FontWeight.w600,
-                                                ),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                          Text(
-                                            '${item.artist} - ${item.filename}',
-                                            style: AetherType.captionStyle(
-                                              cfg.textSecondary,
-                                            ),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                AetherButton.ghost(
-                  label: '取消',
-                  onPressed: () => Navigator.of(ctx).pop(false),
-                ),
-                AetherButton.primary(
-                  label: '开始导入',
-                  onPressed: () => Navigator.of(ctx).pop(true),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-
-    if (shouldImport != true) return;
-
-    final selectedPreviews = <PreviewInfo>[];
-    for (int index = 0; index < previews.length; index++) {
-      if (checkedItems[index]) {
-        selectedPreviews.add(previews[index]);
-      }
-    }
-
-    if (selectedPreviews.isEmpty) {
-      if (!mounted) return;
-      showAetherToast(
-        context,
-        message: '请至少选择一首歌曲再导入',
-        kind: AetherToastKind.warning,
-      );
-      return;
-    }
-
-    int imported = 0;
-    await _runProgressDialog<void>(
-      initialTitle: '正在导入已选歌曲...',
-      initialSubtitle: '已完成 0 / ${selectedPreviews.length} 首歌曲',
-      task: (updateProgress) async {
-        updateProgress(
-          current: 0,
-          total: selectedPreviews.length,
-          indeterminate: false,
-        );
-        for (int index = 0; index < selectedPreviews.length; index++) {
-          final item = selectedPreviews[index];
-          updateProgress(
-            subtitle: '正在导入 ${index + 1} / ${selectedPreviews.length} 首歌曲',
-            current: index,
-          );
-          try {
-            await provider.importSongWithMetadata(
-              item.filepath,
-              item.title,
-              item.artist,
-            );
-            imported++;
-          } catch (_) {}
-          updateProgress(
-            subtitle: '已完成 ${index + 1} / ${selectedPreviews.length} 首歌曲',
-            current: index + 1,
-          );
-        }
-      },
-    );
-
-    if (!mounted) return;
-    showAetherToast(
-      context,
-      message: '成功导入 $imported 首歌曲',
-      kind: AetherToastKind.success,
-    );
+    return false;
   }
 
   @override
   Widget build(BuildContext context) {
-    final libraryProvider = context.watch<LibraryProvider>();
-    context.watch<UIThemeProvider>();
+    final library = context.watch<LibraryProvider>();
     final cfg = context.tokens;
 
-    return Container(
-      padding: const EdgeInsets.all(AetherSpace.xxxl),
-      decoration: BoxDecoration(
-        color: cfg.bg1,
-        border: Border.all(color: cfg.borderSubtle),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        AetherSpace.xxxl,
+        AetherSpace.xxl,
+        AetherSpace.xxxl,
+        AetherSpace.xl,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
             children: [
-              Expanded(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 420),
-                  child: AetherSearchField(
-                    controller: _searchController,
-                    hintText: '搜索歌曲、歌手、专辑…',
-                    onChanged: libraryProvider.setSearchQuery,
-                    onClear: () => libraryProvider.setSearchQuery(''),
-                  ),
+              Expanded(child: _PageTitle(library: library)),
+              const SizedBox(width: AetherSpace.xl),
+              SizedBox(
+                width: 300,
+                child: AetherSearchField(
+                  controller: _searchController,
+                  hintText: '搜索歌曲、歌手、专辑…',
+                  onChanged: library.setSearchQuery,
+                  onClear: () => library.setSearchQuery(''),
                 ),
               ),
-              const SizedBox(width: AetherSpace.lg),
-              Builder(
-                builder: (buttonContext) {
-                  return AetherButton.primary(
-                    label: '导入歌曲',
-                    icon: Icons.folder_open_rounded,
-                    onPressed: () async {
-                      final box =
-                          buttonContext.findRenderObject() as RenderBox?;
-                      final overlay =
-                          Overlay.of(buttonContext).context.findRenderObject()
-                              as RenderBox?;
-                      if (box == null || overlay == null) return;
-                      final topLeft = box.localToGlobal(
-                        Offset.zero,
-                        ancestor: overlay,
-                      );
-                      final size = box.size;
-                      final selected = await showAetherMenu<String>(
-                        context: buttonContext,
-                        globalPosition: Offset(
-                          topLeft.dx,
-                          topLeft.dy + size.height + 6,
-                        ),
-                        items: const [
-                          AetherMenuItem(
-                            value: 'files',
-                            label: '导入单首/多首音频文件',
-                            icon: Icons.audio_file_rounded,
-                          ),
-                          AetherMenuItem(
-                            value: 'folder',
-                            label: '导入整个文件夹',
-                            icon: Icons.folder_rounded,
-                          ),
-                        ],
-                      );
-                      if (selected == 'files') {
-                        await _importFiles(libraryProvider);
-                      } else if (selected == 'folder') {
-                        await _importFolder(libraryProvider);
-                      }
-                    },
-                  );
-                },
-              ),
+              const SizedBox(width: AetherSpace.md),
+              _ImportButton(library: library),
             ],
           ),
           const SizedBox(height: AetherSpace.xl),
@@ -487,28 +93,20 @@ class _MainContentState extends State<MainContent> {
               onExpandRequested: () => _tagCollapseFactor.value = 0,
             ),
           ),
-          const SizedBox(height: AetherSpace.xl),
+          const SizedBox(height: AetherSpace.lg),
           Expanded(
-            child: AetherSurface(
-              level: AetherSurfaceLevel.panel,
-              borderRadius: BorderRadius.circular(AetherRadius.lg),
-              color: cfg.bg1.withValues(alpha: 0.4),
-              child: NotificationListener<ScrollUpdateNotification>(
-                onNotification: (notification) {
-                  final delta = notification.scrollDelta ?? 0;
-                  if (notification.metrics.axis == Axis.vertical &&
-                      !(widget.songTableController?.isScrollbarDragging ??
-                          false) &&
-                      delta > 0 &&
-                      _tagCollapseFactor.value < 1) {
-                    _tagCollapseFactor.value = math.min(
-                      1,
-                      _tagCollapseFactor.value + delta / 140,
-                    );
-                  }
-                  return false;
-                },
-                child: SongTable(controller: widget.songTableController),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: cfg.bg1,
+                borderRadius: BorderRadius.circular(AetherRadius.lg),
+                border: Border.all(color: cfg.borderSubtle),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(AetherRadius.lg - 1),
+                child: NotificationListener<ScrollUpdateNotification>(
+                  onNotification: _collapseTagsOnScroll,
+                  child: SongTable(controller: widget.songTableController),
+                ),
               ),
             ),
           ),
@@ -516,106 +114,84 @@ class _MainContentState extends State<MainContent> {
       ),
     );
   }
+}
+
+/// Name of the list on screen and how many songs it shows.
+class _PageTitle extends StatelessWidget {
+  const _PageTitle({required this.library});
+
+  final LibraryProvider library;
 
   @override
-  void dispose() {
-    _searchController.dispose();
-    _tagCollapseFactor.dispose();
-    super.dispose();
+  Widget build(BuildContext context) {
+    final cfg = context.tokens;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.baseline,
+      textBaseline: TextBaseline.alphabetic,
+      children: [
+        Flexible(
+          child: Text(
+            songListTitle(library),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: AetherType.displayStyle(cfg.textPrimary),
+          ),
+        ),
+        const SizedBox(width: AetherSpace.lg),
+        Text(
+          songListCount(library),
+          style: AetherType.bodyStyle(cfg.textTertiary),
+        ),
+      ],
+    );
   }
 }
 
-class _MainContentTaskProgressDialog<T> extends StatefulWidget {
-  final String initialTitle;
-  final String initialSubtitle;
-  final Future<T> Function(ProgressDialogUpdate updateProgress) task;
+class _ImportButton extends StatelessWidget {
+  const _ImportButton({required this.library});
 
-  const _MainContentTaskProgressDialog({
-    required this.initialTitle,
-    required this.initialSubtitle,
-    required this.task,
-  });
+  final LibraryProvider library;
 
-  @override
-  State<_MainContentTaskProgressDialog<T>> createState() =>
-      _MainContentTaskProgressDialogState<T>();
-}
+  Future<void> _openMenu(BuildContext context) async {
+    final box = context.findRenderObject() as RenderBox?;
+    final overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox?;
+    if (box == null || overlay == null) return;
+    final belowButton = box.localToGlobal(
+      Offset(0, box.size.height + AetherSpace.sm),
+      ancestor: overlay,
+    );
 
-class _MainContentTaskProgressDialogState<T>
-    extends State<_MainContentTaskProgressDialog<T>> {
-  late String _title = widget.initialTitle;
-  late String _subtitle = widget.initialSubtitle;
-  int _current = 0;
-  int _total = 0;
-  bool _indeterminate = true;
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _execute());
-  }
-
-  Future<void> _execute() async {
-    try {
-      final result = await widget.task(({
-        title,
-        subtitle,
-        current,
-        total,
-        indeterminate,
-      }) {
-        if (!mounted) return;
-        setState(() {
-          if (title != null) _title = title;
-          if (subtitle != null) _subtitle = subtitle;
-          if (current != null) _current = current;
-          if (total != null) _total = total;
-          if (indeterminate != null) _indeterminate = indeterminate;
-        });
-      });
-      if (mounted) {
-        Navigator.of(context, rootNavigator: true).pop(result);
-      }
-    } catch (e) {
-      if (mounted) {
-        Navigator.of(context, rootNavigator: true).pop();
-      }
-      rethrow;
+    final choice = await showAetherMenu<String>(
+      context: context,
+      globalPosition: belowButton,
+      items: const [
+        AetherMenuItem(
+          value: 'files',
+          label: '选择音频文件…',
+          icon: Icons.audio_file_outlined,
+        ),
+        AetherMenuItem(
+          value: 'folder',
+          label: '选择文件夹…',
+          icon: Icons.folder_outlined,
+        ),
+      ],
+    );
+    if (!context.mounted) return;
+    if (choice == 'files') {
+      await importAudioFiles(context, library);
+    } else if (choice == 'folder') {
+      await importAudioFolder(context, library);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final cfg = context.tokens;
-    final progressValue = _indeterminate || _total <= 0
-        ? null
-        : (_current / _total).clamp(0.0, 1.0);
-
-    return AetherDialog(
-      title: _title,
-      maxWidth: 380,
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(_subtitle, style: AetherType.bodySmStyle(cfg.textSecondary)),
-          const SizedBox(height: AetherSpace.xl),
-          AetherProgress.linear(
-            size: 6,
-            value: progressValue,
-            trackColor: cfg.sliderTrack,
-          ),
-          if (_total > 0) ...[
-            const SizedBox(height: AetherSpace.md),
-            Text(
-              '已完成 $_current / $_total 项',
-              style: AetherType.captionStyle(
-                cfg.textPrimary,
-              ).copyWith(fontWeight: FontWeight.w600),
-            ),
-          ],
-        ],
-      ),
+    return AetherButton.primary(
+      label: '导入歌曲',
+      icon: Icons.add_rounded,
+      onPressed: () => _openMenu(context),
     );
   }
 }

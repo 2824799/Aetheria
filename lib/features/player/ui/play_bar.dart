@@ -27,11 +27,11 @@ class PlayBar extends StatelessWidget {
   IconData _playModeIcon(PlayMode mode) {
     switch (mode) {
       case PlayMode.shuffle:
-        return Icons.shuffle;
+        return Icons.shuffle_rounded;
       case PlayMode.single:
-        return Icons.repeat_one;
+        return Icons.repeat_one_rounded;
       case PlayMode.list:
-        return Icons.repeat;
+        return Icons.repeat_rounded;
     }
   }
 
@@ -49,7 +49,6 @@ class PlayBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final audioProvider = context.watch<AudioPlayerProvider>();
-    context.watch<UIThemeProvider>();
     final cfg = context.tokens;
     final playingSong = audioProvider.playingSong;
 
@@ -125,7 +124,7 @@ class PlayBar extends StatelessWidget {
                                     shadow: false,
                                   )
                                 : Icon(
-                                    Icons.music_note,
+                                    Icons.music_note_rounded,
                                     color: cfg.textTertiary,
                                     size: AetherIconSize.xl,
                                   ),
@@ -138,7 +137,7 @@ class PlayBar extends StatelessWidget {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                playingSong?.title ?? '暂无播放',
+                                playingSong?.title ?? '未在播放',
                                 style: AetherType.bodyStyle(
                                   cfg.textPrimary,
                                 ).copyWith(fontWeight: FontWeight.w600),
@@ -147,8 +146,10 @@ class PlayBar extends StatelessWidget {
                               ),
                               const SizedBox(height: AetherSpace.xxs),
                               Text(
-                                playingSong?.artist ?? '…',
-                                style: AetherType.captionStyle(
+                                playingSong == null
+                                    ? '选择一首歌曲开始播放'
+                                    : playingSong.artist ?? '未知歌手',
+                                style: AetherType.bodySmStyle(
                                   cfg.textSecondary,
                                 ),
                                 maxLines: 1,
@@ -201,13 +202,6 @@ class PlayBar extends StatelessWidget {
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
                               color: cfg.accent,
-                              boxShadow: [
-                                BoxShadow(
-                                  color: cfg.accentGlow,
-                                  blurRadius: 10,
-                                  offset: const Offset(0, 3),
-                                ),
-                              ],
                             ),
                             alignment: Alignment.center,
                             // Short crossfade only — state indication, not decoration.
@@ -254,10 +248,12 @@ class PlayBar extends StatelessWidget {
                           valueListenable: audioProvider.positionListenable,
                           builder: (context, position, _) => Text(
                             '${_formatDuration(position)} / ${_formatDuration(audioProvider.totalDuration)}',
-                            style: AetherType.captionStyle(cfg.textSecondary),
+                            style: AetherType.bodySmStyle(cfg.textTertiary).copyWith(
+                              fontFeatures: const [FontFeature.tabularFigures()],
+                            ),
                           ),
                         ),
-                        const SizedBox(width: AetherSpace.lg),
+                        const SizedBox(width: AetherSpace.xl),
                         Icon(
                           audioProvider.volume <= 0.001
                               ? Icons.volume_off_rounded
@@ -265,7 +261,7 @@ class PlayBar extends StatelessWidget {
                               ? Icons.volume_down_rounded
                               : Icons.volume_up_rounded,
                           size: AetherIconSize.md,
-                          color: cfg.textSecondary,
+                          color: cfg.textTertiary,
                         ),
                         const SizedBox(width: AetherSpace.sm),
                         SizedBox(

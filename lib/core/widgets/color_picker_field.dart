@@ -89,24 +89,11 @@ class _ColorPickerFieldState extends State<ColorPickerField> {
       children: [
         if (widget.showPresets)
           for (final value in _presets)
-            AetherPressable(
-              tooltip: pickerColorHex(Color(value)),
+            _Swatch(
+              color: Color(value),
+              selected: selected.toARGB32() == value,
+              cfg: widget.cfg,
               onTap: () => widget.onChanged(pickerColorHex(Color(value))),
-              borderRadius: BorderRadius.circular(AetherRadius.sm),
-              child: Container(
-                width: 30,
-                height: 30,
-                decoration: BoxDecoration(
-                  color: Color(value),
-                  borderRadius: BorderRadius.circular(AetherRadius.sm),
-                  border: Border.all(
-                    color: selected.toARGB32() == value
-                        ? widget.cfg.textPrimary
-                        : widget.cfg.borderSubtle,
-                    width: selected.toARGB32() == value ? 2 : 1,
-                  ),
-                ),
-              ),
             ),
         AetherButton.secondary(
           label:
@@ -116,6 +103,46 @@ class _ColorPickerFieldState extends State<ColorPickerField> {
           onPressed: _open,
         ),
       ],
+    );
+  }
+}
+
+/// A preset colour; the selected one gets a ring separated by a gap, so the
+/// ring stays visible whatever the colour is.
+class _Swatch extends StatelessWidget {
+  const _Swatch({
+    required this.color,
+    required this.selected,
+    required this.cfg,
+    required this.onTap,
+  });
+
+  final Color color;
+  final bool selected;
+  final AppThemeConfig cfg;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return AetherPressable(
+      tooltip: pickerColorHex(color),
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(AetherRadius.full),
+      child: Container(
+        width: 26,
+        height: 26,
+        padding: const EdgeInsets.all(3),
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          border: Border.all(
+            color: selected ? cfg.textPrimary : Colors.transparent,
+            width: 1.5,
+          ),
+        ),
+        child: DecoratedBox(
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+      ),
     );
   }
 }

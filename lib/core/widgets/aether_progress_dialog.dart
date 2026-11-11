@@ -4,6 +4,7 @@ import 'package:aetheria/core/theme/tokens/space.dart';
 import 'package:aetheria/core/theme/tokens/typography.dart';
 import 'package:aetheria/core/widgets/aether_button.dart';
 import 'package:aetheria/core/widgets/aether_dialog.dart';
+import 'package:aetheria/core/widgets/aether_progress.dart';
 
 class AetherProgressUpdate {
   final String title;
@@ -114,15 +115,7 @@ class _AetherProgressDialogBodyState<T>
             Text(_detail!, style: AetherType.bodySmStyle(cfg.textSecondary)),
             const SizedBox(height: AetherSpace.lg),
           ],
-          ClipRRect(
-            borderRadius: BorderRadius.circular(999),
-            child: LinearProgressIndicator(
-              minHeight: 6,
-              value: _value?.clamp(0.0, 1.0),
-              backgroundColor: cfg.sliderTrack,
-              color: cfg.accent,
-            ),
-          ),
+          AetherProgress.linear(size: 6, value: _value?.clamp(0.0, 1.0)),
         ],
       ),
     );

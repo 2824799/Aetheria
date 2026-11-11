@@ -14,7 +14,6 @@ class SettingsLibraryTab extends StatelessWidget {
     required this.cfg,
     required this.libraryProvider,
     required this.isDesktop,
-    required this.settingsImporting,
     required this.onChangeLibraryPath,
     required this.onImportFiles,
     required this.onImportFolder,
@@ -23,7 +22,6 @@ class SettingsLibraryTab extends StatelessWidget {
   final AppThemeConfig cfg;
   final LibraryProvider libraryProvider;
   final bool isDesktop;
-  final bool settingsImporting;
   final VoidCallback onChangeLibraryPath;
   final VoidCallback onImportFiles;
   final VoidCallback onImportFolder;
@@ -79,14 +77,13 @@ class SettingsLibraryTab extends StatelessWidget {
                 label: '导入音频',
                 icon: Icons.audio_file,
                 size: AetherButtonSize.sm,
-                loading: settingsImporting,
-                onPressed: settingsImporting ? null : onImportFiles,
+                onPressed: onImportFiles,
               ),
               AetherButton.secondary(
                 label: '导入目录',
                 icon: Icons.folder_open,
                 size: AetherButtonSize.sm,
-                onPressed: settingsImporting ? null : onImportFolder,
+                onPressed: onImportFolder,
               ),
             ],
           ),
@@ -150,7 +147,7 @@ class SettingsLibraryTab extends StatelessWidget {
                 ? libraryProvider.refreshProgressCurrent /
                     libraryProvider.refreshProgressTotal
                 : null,
-            trackColor: cfg.borderSubtle.withValues(alpha: 0.45),
+            trackColor: cfg.sliderTrack,
           ),
           const SizedBox(height: AetherSpace.md),
           Text(

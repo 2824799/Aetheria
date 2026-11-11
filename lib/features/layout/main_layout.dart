@@ -255,7 +255,7 @@ class _MainLayoutState extends State<MainLayout>
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Sidebar(width: 220),
+                  const Sidebar(width: 232),
                   Expanded(
                     child: Stack(
                       children: [
@@ -298,7 +298,7 @@ class _MainLayoutState extends State<MainLayout>
                                             right: 0,
                                             top: 0,
                                             bottom: 0,
-                                            width: 380,
+                                            width: 400,
                                             child: SlideTransition(
                                               position: _drawerSlide,
                                               child: const RepaintBoundary(
@@ -324,7 +324,7 @@ class _MainLayoutState extends State<MainLayout>
                 ],
               ),
             ),
-            PlayBar(height: 84, onPlayingSongLongPress: _revealPlayingSong),
+            PlayBar(height: 80, onPlayingSongLongPress: _revealPlayingSong),
           ],
         ),
       ],

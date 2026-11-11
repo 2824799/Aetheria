@@ -14,13 +14,16 @@ class AetherTabItem {
 
 /// Underline tab bar for detail sheets and dense tool surfaces.
 ///
-/// Indicator uses a short color change — no layout width animation.
+/// The indicator sits on the edge that touches the content: the bottom edge
+/// by default, the top edge ([indicatorAtTop]) for bars placed under their
+/// content. It changes colour only — no layout width animation.
 class AetherTabBar extends StatelessWidget {
   final List<AetherTabItem> tabs;
   final String value;
   final ValueChanged<String> onChanged;
   final bool expanded;
   final double fontSize;
+  final bool indicatorAtTop;
 
   const AetherTabBar({
     super.key,
@@ -29,6 +32,7 @@ class AetherTabBar extends StatelessWidget {
     required this.onChanged,
     this.expanded = true,
     this.fontSize = AetherType.bodySm,
+    this.indicatorAtTop = false,
   });
 
   @override
@@ -37,6 +41,10 @@ class AetherTabBar extends StatelessWidget {
     final children = <Widget>[];
     for (final tab in tabs) {
       final active = tab.id == value;
+      final indicator = BorderSide(
+        color: active ? cfg.accent : Colors.transparent,
+        width: 2,
+      );
       final child = AetherPressable(
         onTap: () {
           if (tab.id != value) onChanged(tab.id);
@@ -47,15 +55,12 @@ class AetherTabBar extends StatelessWidget {
           curve: AetherMotion.curve(context),
           padding: const EdgeInsets.symmetric(
             horizontal: AetherSpace.sm,
-            vertical: AetherSpace.lg - 2,
+            vertical: AetherSpace.lg - 1,
           ),
           decoration: BoxDecoration(
-            border: Border(
-              top: BorderSide(
-                color: active ? cfg.accent : Colors.transparent,
-                width: 2,
-              ),
-            ),
+            border: indicatorAtTop
+                ? Border(top: indicator)
+                : Border(bottom: indicator),
           ),
           alignment: Alignment.center,
           child: Text(
@@ -66,7 +71,7 @@ class AetherTabBar extends StatelessWidget {
             style: TextStyle(
               fontSize: fontSize,
               height: 1.2,
-              fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+              fontWeight: active ? FontWeight.w600 : FontWeight.w400,
               color: active ? cfg.textPrimary : cfg.textSecondary,
             ),
           ),

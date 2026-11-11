@@ -10,6 +10,7 @@ import 'package:aetheria/core/widgets/aether_tabs.dart';
 import 'package:aetheria/core/widgets/aether_text_field.dart';
 import 'package:aetheria/core/widgets/aether_toast.dart';
 import 'package:aetheria/features/layout/mobile/mobile_detail_tabs.dart';
+import 'package:aetheria/features/player/song_metadata.dart';
 import 'package:aetheria/features/player/ui/song_cover_art.dart';
 import 'package:aetheria/src/rust/models/song.dart';
 
@@ -78,18 +79,17 @@ class _MobileSongDetailSheetState extends State<MobileSongDetailSheet> {
     final newArtistText = artistController.text.trim();
     final newArtist = newArtistText == '未知歌手' ? '' : newArtistText;
 
-    if (newTitle.isNotEmpty &&
-        (newTitle != song.title || newArtist != (song.artist ?? ''))) {
-      try {
-        await libraryProvider.updateSongMetadata(song.id, newTitle, newArtist);
-      } catch (e) {
-        if (!mounted) return;
-        showAetherToast(
-          context,
-          message: '保存元数据失败: $e',
-          kind: AetherToastKind.error,
-        );
-      }
+    // An emptied title is treated as "no change" rather than an error.
+    if (newTitle.isEmpty) return;
+    try {
+      await saveSongMetadata(context, song, title: newTitle, artist: newArtist);
+    } catch (e) {
+      if (!mounted) return;
+      showAetherToast(
+        context,
+        message: '保存失败: $e',
+        kind: AetherToastKind.error,
+      );
     }
   }
 
@@ -212,19 +212,13 @@ class _MobileSongDetailSheetState extends State<MobileSongDetailSheet> {
               ),
             ),
             Expanded(
-              child: buildMobileDetailTabContent(
-                context,
-                song,
-                activeTab,
-                libraryProvider,
-                audioProvider,
-                cfg,
-                () {
-                  setState(() {
-                    activeTab = 'lyric_manager';
-                  });
-                },
-                _buildVersionHeader(song, cfg),
+              child: MobileDetailTab(
+                tab: activeTab,
+                song: song,
+                audio: audioProvider,
+                onOpenLyricManager: () =>
+                    setState(() => activeTab = 'lyric_manager'),
+                versionHeader: _buildVersionHeader(song, cfg),
               ),
             ),
             Divider(height: 1, color: cfg.borderSubtle),
@@ -232,13 +226,14 @@ class _MobileSongDetailSheetState extends State<MobileSongDetailSheet> {
               value: activeTab,
               onChanged: (id) => setState(() => activeTab = id),
               fontSize: AetherType.bodySm,
+              indicatorAtTop: true,
               tabs: [
                 const AetherTabItem(id: 'lyrics', label: '滚动歌词'),
                 const AetherTabItem(id: 'lyric_manager', label: '歌词管理'),
-                AetherTabItem(id: 'tags', label: '关联标签 (${song.tags.length})'),
+                AetherTabItem(id: 'tags', label: '标签 (${song.tags.length})'),
                 AetherTabItem(
                   id: 'versions',
-                  label: '音频源 (${song.versions.length})',
+                  label: '音源 (${song.versions.length})',
                 ),
               ],
             ),
