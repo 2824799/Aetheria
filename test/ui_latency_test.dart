@@ -191,7 +191,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('复制所选歌曲'));
       await tester.pumpAndSettle();
-      expect(library.clipboard!['songIds'], unorderedEquals(['1', '2', '3']));
+      expect(library.clipboard!.songIds, unorderedEquals(['1', '2', '3']));
       final reads = library.displayReads;
       await tester.drag(find.byType(ListView), const Offset(0, -160));
       await tester.pumpAndSettle();

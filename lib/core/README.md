@@ -79,7 +79,6 @@ Primitives for the UI refactor:
 | `AetherEmptyState` | hand-rolled empty views |
 | `showAetherProgressDialog` | blocking progress dialogs |
 | `showAetherToast` | `SnackBar` |
-| `GlassPanel` | thin wrapper over glass `AetherSurface` (compat) |
 
 Import barrel:
 

@@ -118,6 +118,40 @@ int _compareSongsLikeExplorer(Song left, Song right) {
   return left.id.compareTo(right.id);
 }
 
+enum SongClipboardMode { copy, cut }
+
+/// Songs picked up with copy/cut, waiting to be pasted into a playlist.
+class SongClipboard {
+  const SongClipboard({
+    required this.mode,
+    required this.songIds,
+    this.sourcePlaylistId,
+  });
+
+  final SongClipboardMode mode;
+  final List<String> songIds;
+  final String? sourcePlaylistId;
+}
+
+Song _copySong(
+  Song song, {
+  required String? lyrics,
+  required String? coverPath,
+}) {
+  return Song(
+    id: song.id,
+    title: song.title,
+    artist: song.artist,
+    album: song.album,
+    lyrics: lyrics,
+    coverPath: coverPath,
+    rating: song.rating,
+    createdAt: song.createdAt,
+    versions: song.versions,
+    tags: song.tags,
+  );
+}
+
 class LibraryProvider extends ChangeNotifier {
   List<Song> songs = [];
   List<Tag> tags = [];
@@ -133,56 +167,129 @@ class LibraryProvider extends ChangeNotifier {
   String filterMode = 'AND'; // 'AND' or 'OR'
 
   String libraryPath = '';
-  int? audioServerPort;
 
+  /// True only while the very first load is running; later reloads keep the
+  /// current list on screen instead of flashing a loading state.
   bool isLoading = true;
   String? error;
-  Map<String, dynamic>?
-  clipboard; // { 'type': 'copy'/'cut', 'songIds': [...], 'sourcePlaylistId': '...' }
+  SongClipboard? clipboard;
 
-  LibraryProvider() {
-    // Loaded externally in main or layout
+  bool isRefreshingDatabase = false;
+  int refreshProgressCurrent = 0;
+  int refreshProgressTotal = 0;
+  String refreshProgressLabel = '';
+
+  bool _hasLoaded = false;
+  int _loadRequest = 0;
+  int _playlistRequest = 0;
+  List<Song>? _displaySongsCache;
+
+  @override
+  void notifyListeners() {
+    _displaySongsCache = null;
+    super.notifyListeners();
   }
 
+  // ---------------------------------------------------------------------------
+  // Loading
+  // ---------------------------------------------------------------------------
+
   Future<void> loadLibrary() async {
-    isLoading = true;
-    error = null;
-    notifyListeners();
+    final request = ++_loadRequest;
+    final firstLoad = !_hasLoaded;
+    if (isLoading != firstLoad || error != null) {
+      isLoading = firstLoad;
+      error = null;
+      notifyListeners();
+    }
 
     try {
-      final isInit = music.isLibraryInitialized();
-      if (!isInit) {
-        isLoading = false;
-        notifyListeners();
+      if (!music.isLibraryInitialized()) {
         return;
       }
 
-      songs = await music.getSongs();
-      tags = await music.getTags();
-      playlists = await music.getPlaylists();
-      libraryPath = await music.getLibraryPath();
-      songIdsWithLyrics = await _loadSongLyricFlags(songs);
+      final playlistId = activePlaylistId;
+      final (
+        loadedSongs,
+        loadedTags,
+        loadedPlaylists,
+        loadedPath,
+        lyricSongIds,
+        loadedPlaylistSongIds,
+      ) = await (
+        music.getSongs(),
+        music.getTags(),
+        music.getPlaylists(),
+        music.getLibraryPath(),
+        music.getSongIdsWithLyrics(),
+        _playlistSongIdsOrEmpty(playlistId),
+      ).wait;
 
-      if (activePlaylistId != null) {
-        try {
-          playlistSongIds = await music.getPlaylistSongs(
-            playlistId: activePlaylistId!,
-          );
-        } catch (e) {
-          playlistSongIds = [];
-        }
-      } else {
-        playlistSongIds = [];
+      // A newer load started while this one was in flight; its result wins.
+      if (request != _loadRequest) {
+        return;
       }
 
-      isLoading = false;
-      notifyListeners();
+      songs = loadedSongs;
+      tags = loadedTags;
+      playlists = loadedPlaylists;
+      libraryPath = loadedPath;
+      songIdsWithLyrics = lyricSongIds.toSet();
+      if (activePlaylistId == playlistId) {
+        playlistSongIds = loadedPlaylistSongIds;
+      }
     } catch (e) {
-      error = e.toString();
-      isLoading = false;
-      notifyListeners();
+      if (request == _loadRequest) {
+        error = e.toString();
+      }
+    } finally {
+      if (request == _loadRequest) {
+        _hasLoaded = true;
+        isLoading = false;
+        notifyListeners();
+      }
     }
   }
+
+  Future<List<String>> _playlistSongIdsOrEmpty(String? playlistId) async {
+    if (playlistId == null) {
+      return const [];
+    }
+    try {
+      return await music.getPlaylistSongs(playlistId: playlistId);
+    } catch (_) {
+      // The playlist may have been deleted (locally or by a sync).
+      return const [];
+    }
+  }
+
+  Future<void> initializeLibrary(String path) {
+    return _mutate(() => music.initializeLibraryPath(path: path));
+  }
+
+  /// Runs a library mutation, then reloads so every listener sees the result.
+  /// Failures are recorded in [error] and rethrown for the caller to present.
+  Future<void> _mutate(
+    Future<void> Function() action, {
+    bool reload = true,
+  }) async {
+    try {
+      await action();
+      if (reload) {
+        await loadLibrary();
+      } else {
+        notifyListeners();
+      }
+    } catch (e) {
+      error = e.toString();
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Lyrics flags and covers
+  // ---------------------------------------------------------------------------
 
   bool songHasLyrics(Song song) {
     final legacy = song.lyrics?.trim();
@@ -201,27 +308,17 @@ class LibraryProvider extends ChangeNotifier {
     if (songId.isEmpty) {
       return;
     }
-    if (songIdsWithLyrics.contains(songId)) {
-      songIdsWithLyrics = songIdsWithLyrics.where((id) => id != songId).toSet();
-    }
-    songs = songs
-        .map(
-          (entry) => entry.id == songId
-              ? Song(
-                  id: entry.id,
-                  title: entry.title,
-                  artist: entry.artist,
-                  album: entry.album,
-                  lyrics: null,
-                  coverPath: entry.coverPath,
-                  rating: entry.rating,
-                  createdAt: entry.createdAt,
-                  versions: entry.versions,
-                  tags: entry.tags,
-                )
-              : entry,
-        )
-        .toList();
+    songIdsWithLyrics = {
+      for (final id in songIdsWithLyrics)
+        if (id != songId) id,
+    };
+    songs = [
+      for (final song in songs)
+        if (song.id == songId)
+          _copySong(song, lyrics: null, coverPath: song.coverPath)
+        else
+          song,
+    ];
     notifyListeners();
   }
 
@@ -234,84 +331,31 @@ class LibraryProvider extends ChangeNotifier {
       if (coverPath == null || coverPath.trim().isEmpty) {
         return null;
       }
-      if (song.coverPath == coverPath) {
-        return coverPath;
+      if (song.coverPath != coverPath) {
+        songs = [
+          for (final entry in songs)
+            if (entry.id == song.id)
+              _copySong(entry, lyrics: entry.lyrics, coverPath: coverPath)
+            else
+              entry,
+        ];
+        notifyListeners();
       }
-      songs = songs
-          .map(
-            (entry) => entry.id == song.id
-                ? Song(
-                    id: entry.id,
-                    title: entry.title,
-                    artist: entry.artist,
-                    album: entry.album,
-                    lyrics: entry.lyrics,
-                    coverPath: coverPath,
-                    rating: entry.rating,
-                    createdAt: entry.createdAt,
-                    versions: entry.versions,
-                    tags: entry.tags,
-                  )
-                : entry,
-          )
-          .toList();
-      notifyListeners();
       return coverPath;
-    } catch (_) {
+    } catch (e) {
+      debugPrint('ensureSongCover(${song.id}) failed: $e');
       return null;
     }
   }
 
-  Future<Set<String>> _loadSongLyricFlags(List<Song> sourceSongs) async {
-    final result = <String>{};
-    const batchSize = 24;
-    for (var start = 0; start < sourceSongs.length; start += batchSize) {
-      final batch = sourceSongs.skip(start).take(batchSize).toList();
-      final flags = await Future.wait(
-        batch.map((song) async {
-          final legacy = song.lyrics?.trim();
-          if (legacy?.isNotEmpty == true) {
-            return song.id;
-          }
-          try {
-            final lyrics = await music.getLyricsForSong(songId: song.id);
-            return lyrics.any((lyric) => lyric.content.trim().isNotEmpty)
-                ? song.id
-                : null;
-          } catch (_) {
-            return null;
-          }
-        }),
-      );
-      result.addAll(flags.whereType<String>());
-    }
-    return result;
-  }
-
-  Future<void> initializeLibrary(String path) async {
-    isLoading = true;
-    notifyListeners();
-    try {
-      await music.initializeLibraryPath(path: path);
-      await loadLibrary();
-    } catch (e) {
-      error = e.toString();
-      isLoading = false;
-      notifyListeners();
-    }
-  }
-
-  bool isRefreshingDatabase = false;
-  int refreshProgressCurrent = 0;
-  int refreshProgressTotal = 0;
-  String refreshProgressLabel = '';
-
-  bool isSongFullyScanned(Song song) {
-    return song.versions.isNotEmpty &&
-        song.versions.every((version) => version.metadataScanned);
-  }
+  // ---------------------------------------------------------------------------
+  // Metadata refresh
+  // ---------------------------------------------------------------------------
 
   Future<void> refreshDatabase({bool onlyUnscanned = false}) async {
+    if (isRefreshingDatabase) {
+      return;
+    }
     isRefreshingDatabase = true;
     refreshProgressCurrent = 0;
     refreshProgressTotal = 0;
@@ -319,7 +363,7 @@ class LibraryProvider extends ChangeNotifier {
     notifyListeners();
     try {
       final snapshotSongs = songs.isNotEmpty
-          ? List<Song>.from(songs)
+          ? List<Song>.of(songs)
           : await music.getSongs();
       final targetSongs = onlyUnscanned
           ? snapshotSongs
@@ -338,27 +382,31 @@ class LibraryProvider extends ChangeNotifier {
       }
       notifyListeners();
 
-      for (int songIndex = 0; songIndex < targetSongs.length; songIndex++) {
+      String? firstFailure;
+      for (var songIndex = 0; songIndex < targetSongs.length; songIndex++) {
         final song = targetSongs[songIndex];
-        final targetVersions = onlyUnscanned
-            ? song.versions
-                  .where((version) => !version.metadataScanned)
-                  .toList()
-            : song.versions;
         refreshProgressCurrent = songIndex;
         refreshProgressLabel =
             '正在刷新 ${songIndex + 1} / ${targetSongs.length} 首歌曲: ${song.title}';
         notifyListeners();
 
-        for (final version in targetVersions) {
-          await music.refreshAudioFileMetadata(versionId: version.id);
+        for (final version in song.versions) {
+          if (onlyUnscanned && version.metadataScanned) {
+            continue;
+          }
+          try {
+            await music.refreshAudioFileMetadata(versionId: version.id);
+          } catch (e) {
+            // One unreadable file must not abort the rest of the scan.
+            firstFailure ??= '${song.title}: $e';
+          }
         }
-
-        refreshProgressCurrent = songIndex + 1;
-        notifyListeners();
       }
 
       await loadLibrary();
+      if (firstFailure != null) {
+        error = firstFailure;
+      }
     } catch (e) {
       error = e.toString();
     } finally {
@@ -370,112 +418,64 @@ class LibraryProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> importSong(String filepath) async {
-    try {
-      await music.importSong(filepath: filepath);
-      await loadLibrary();
-    } catch (e) {
-      error = e.toString();
-      notifyListeners();
-      rethrow;
-    }
+  // ---------------------------------------------------------------------------
+  // Songs and versions
+  // ---------------------------------------------------------------------------
+
+  Future<void> importSong(String filepath) {
+    return _mutate(() => music.importSong(filepath: filepath));
   }
 
   Future<void> importSongWithMetadata(
     String filepath,
     String title,
     String artist,
-  ) async {
-    try {
-      await music.importSongWithMetadata(
+  ) {
+    return _mutate(
+      () => music.importSongWithMetadata(
         filepath: filepath,
         title: title,
         artist: artist,
-      );
-      await loadLibrary();
-    } catch (e) {
-      error = e.toString();
-      notifyListeners();
-      rethrow;
-    }
+      ),
+    );
   }
 
-  Future<void> importAudioVersionForSong(String songId, String filepath) async {
-    try {
-      await music.importAudioVersionForSong(songId: songId, filepath: filepath);
-      await loadLibrary();
-    } catch (e) {
-      error = e.toString();
-      notifyListeners();
-      rethrow;
-    }
+  Future<void> importAudioVersionForSong(String songId, String filepath) {
+    return _mutate(
+      () => music.importAudioVersionForSong(songId: songId, filepath: filepath),
+    );
   }
 
-  Future<void> setPrimaryVersion(String versionId) async {
-    try {
-      await music.updateVersionStatus(
-        versionId: versionId,
-        isEnabled: true,
-        isPrimary: true,
-      );
-      await loadLibrary();
-    } catch (e) {
-      error = e.toString();
-      notifyListeners();
-      rethrow;
-    }
+  Future<void> setPrimaryVersion(String versionId) {
+    return _mutate(() => music.setPrimaryVersion(versionId: versionId));
   }
 
-  Future<void> updateSongMetadata(
-    String songId,
-    String title,
-    String artist,
-  ) async {
-    try {
-      await music.updateSongMetadata(
+  Future<void> updateSongMetadata(String songId, String title, String artist) {
+    return _mutate(
+      () => music.updateSongMetadata(
         songId: songId,
         title: title,
         artist: artist,
-      );
-      await loadLibrary();
-    } catch (e) {
-      error = e.toString();
-      notifyListeners();
-      rethrow;
-    }
+      ),
+    );
   }
 
-  Future<void> deleteSong(String songId) async {
-    try {
-      await music.deleteSong(songId: songId);
-      await loadLibrary();
-    } catch (e) {
-      error = e.toString();
-      notifyListeners();
-      rethrow;
-    }
+  Future<void> deleteSong(String songId) {
+    return _mutate(() => music.deleteSong(songId: songId));
   }
 
-  Future<void> deleteAudioVersion(String versionId) async {
-    try {
-      await music.deleteAudioVersion(versionId: versionId);
-      await loadLibrary();
-    } catch (e) {
-      error = e.toString();
-      notifyListeners();
-      rethrow;
-    }
+  Future<void> deleteAudioVersion(String versionId) {
+    return _mutate(() => music.deleteAudioVersion(versionId: versionId));
   }
 
-  Future<void> addTag(String name, String? color, String? category) async {
-    try {
-      await music.addTag(name: name, color: color, category: category);
-      await loadLibrary();
-    } catch (e) {
-      error = e.toString();
-      notifyListeners();
-      rethrow;
-    }
+  // ---------------------------------------------------------------------------
+  // Tags
+  // ---------------------------------------------------------------------------
+
+  Future<void> addTag(String name, String? color, String? category) {
+    return _mutate(
+      () => music.addTag(name: name, color: color, category: category),
+    );
   }
 
   Future<void> updateTag(
@@ -483,273 +483,211 @@ class LibraryProvider extends ChangeNotifier {
     String name,
     String? color,
     String? category,
-  ) async {
-    try {
-      await music.updateTag(
+  ) {
+    return _mutate(
+      () => music.updateTag(
         tagId: tagId,
         name: name,
         color: color,
         category: category,
-      );
-      await loadLibrary();
-    } catch (e) {
-      error = e.toString();
-      notifyListeners();
-      rethrow;
-    }
+      ),
+    );
   }
 
-  Future<void> deleteTag(PlatformInt64 tagId) async {
-    try {
+  Future<void> deleteTag(PlatformInt64 tagId) {
+    return _mutate(() async {
       await music.deleteTag(tagId: tagId);
-      await loadLibrary();
-    } catch (e) {
-      error = e.toString();
-      notifyListeners();
-      rethrow;
-    }
+      // A deleted tag must not keep filtering the list invisibly.
+      selectedTags.remove(tagId);
+      excludedTags.remove(tagId);
+    });
   }
 
-  Future<void> tagSong(String songId, PlatformInt64 tagId, bool bind) async {
-    try {
-      await music.tagSong(songId: songId, tagId: tagId, bind: bind);
-      await loadLibrary();
-    } catch (e) {
-      error = e.toString();
-      notifyListeners();
-      rethrow;
-    }
+  Future<void> tagSong(String songId, PlatformInt64 tagId, bool bind) {
+    return _mutate(
+      () => music.tagSong(songId: songId, tagId: tagId, bind: bind),
+    );
   }
 
-  Future<void> createPlaylist(String name) async {
-    try {
-      await music.createPlaylist(name: name);
-      await loadLibrary();
-    } catch (e) {
-      error = e.toString();
-      notifyListeners();
-      rethrow;
-    }
+  // ---------------------------------------------------------------------------
+  // Playlists
+  // ---------------------------------------------------------------------------
+
+  Future<void> createPlaylist(String name) {
+    return _mutate(() => music.createPlaylist(name: name));
   }
 
-  Future<void> deletePlaylist(String id) async {
-    try {
+  Future<void> deletePlaylist(String id) {
+    return _mutate(() async {
       await music.deletePlaylist(id: id);
       if (activePlaylistId == id) {
         activePlaylistId = null;
+        playlistSongIds = [];
       }
-      await loadLibrary();
-    } catch (e) {
-      error = e.toString();
-      notifyListeners();
-      rethrow;
-    }
+      if (clipboard?.sourcePlaylistId == id) {
+        clipboard = null;
+      }
+    });
   }
 
-  Future<void> renamePlaylist(String id, String name) async {
-    try {
-      await music.renamePlaylist(id: id, name: name);
-      await loadLibrary();
-    } catch (e) {
-      error = e.toString();
-      notifyListeners();
-      rethrow;
-    }
+  Future<void> renamePlaylist(String id, String name) {
+    return _mutate(() => music.renamePlaylist(id: id, name: name));
   }
 
-  Future<void> addSongsToPlaylist(
-    String playlistId,
-    List<String> songIds,
-  ) async {
-    try {
+  Future<void> addSongsToPlaylist(String playlistId, List<String> songIds) {
+    return _mutate(() async {
       await music.addSongsToPlaylist(playlistId: playlistId, songIds: songIds);
-      if (activePlaylistId == playlistId) {
-        playlistSongIds = await music.getPlaylistSongs(playlistId: playlistId);
-      }
-      notifyListeners();
-    } catch (e) {
-      error = e.toString();
-      notifyListeners();
-      rethrow;
-    }
+      await _reloadActivePlaylistSongs(playlistId);
+    }, reload: false);
   }
 
   Future<void> removeSongsFromPlaylist(
     String playlistId,
     List<String> songIds,
-  ) async {
-    try {
+  ) {
+    return _mutate(() async {
       await music.removeSongsFromPlaylist(
         playlistId: playlistId,
         songIds: songIds,
       );
-      if (activePlaylistId == playlistId) {
-        playlistSongIds = await music.getPlaylistSongs(playlistId: playlistId);
-      }
-      notifyListeners();
-    } catch (e) {
-      error = e.toString();
-      notifyListeners();
-      rethrow;
+      await _reloadActivePlaylistSongs(playlistId);
+    }, reload: false);
+  }
+
+  Future<void> _reloadActivePlaylistSongs(String playlistId) async {
+    if (activePlaylistId != playlistId) {
+      return;
+    }
+    final ids = await music.getPlaylistSongs(playlistId: playlistId);
+    if (activePlaylistId == playlistId) {
+      playlistSongIds = ids;
     }
   }
-
-  Future<void> resetLibrary() async {
-    try {
-      await music.resetLibrary();
-      activePlaylistId = null;
-      selectedTags.clear();
-      excludedTags.clear();
-      searchQuery = '';
-      await loadLibrary();
-    } catch (e) {
-      error = e.toString();
-      notifyListeners();
-      rethrow;
-    }
-  }
-
-  void setSearchQuery(String query) {
-    if (searchQuery == query) return;
-    searchQuery = query;
-    notifyListeners();
-  }
-
-  void toggleTag(PlatformInt64 tagId) {
-    if (selectedTags.contains(tagId)) {
-      selectedTags.remove(tagId);
-      excludedTags.add(tagId);
-    } else if (excludedTags.contains(tagId)) {
-      excludedTags.remove(tagId);
-    } else {
-      selectedTags.add(tagId);
-    }
-    notifyListeners();
-  }
-
-  void setFilterMode(String mode) {
-    filterMode = mode;
-    notifyListeners();
-  }
-
-  int _playlistRequest = 0;
 
   Future<void> setActivePlaylist(String? playlistId) async {
     final request = ++_playlistRequest;
     activePlaylistId = playlistId;
     playlistSongIds = [];
     notifyListeners();
-    if (playlistId == null) return;
-    List<String> ids;
-    try {
-      ids = await music.getPlaylistSongs(playlistId: playlistId);
-    } catch (_) {
-      ids = [];
+    if (playlistId == null) {
+      return;
     }
-    if (request != _playlistRequest) return;
+    final ids = await _playlistSongIdsOrEmpty(playlistId);
+    if (request != _playlistRequest) {
+      return;
+    }
     playlistSongIds = ids;
     notifyListeners();
   }
 
-  List<Song>? _displaySongsCache;
-
-  @override
-  void notifyListeners() {
-    _displaySongsCache = null;
-    super.notifyListeners();
-  }
-
-  List<Song> get displaySongs {
-    final cached = _displaySongsCache;
-    if (cached != null) return cached;
-    var list = List<Song>.from(songs);
-
-    // Filter by playlist
-    if (activePlaylistId != null) {
-      final byId = {for (final song in songs) song.id: song};
-      list = [for (final id in playlistSongIds) ?byId[id]];
-    }
-
-    // Filter by search
-    if (searchQuery.isNotEmpty) {
-      final q = searchQuery.toLowerCase();
-      list = list
-          .where(
-            (song) =>
-                song.title.toLowerCase().contains(q) ||
-                (song.artist?.toLowerCase().contains(q) ?? false) ||
-                (song.album?.toLowerCase().contains(q) ?? false),
-          )
-          .toList();
-    }
-
-    // Filter by tags
-    if (selectedTags.isNotEmpty || excludedTags.isNotEmpty) {
-      list = list.where((song) {
-        final songTagIds = song.tags.map((t) => t.id).toSet();
-
-        if (excludedTags.isNotEmpty) {
-          final hasExcluded = excludedTags.any((id) => songTagIds.contains(id));
-          if (hasExcluded) return false;
-        }
-
-        if (selectedTags.isNotEmpty) {
-          if (filterMode == 'AND') {
-            return selectedTags.every((id) => songTagIds.contains(id));
-          } else {
-            return selectedTags.any((id) => songTagIds.contains(id));
-          }
-        }
-
-        return true;
-      }).toList();
-    }
-
-    // Playlist order is user-defined. Every other list uses one shared natural
-    // ordering so desktop and mobile never depend on their native platform.
-    if (activePlaylistId == null) {
-      list.sort(_compareSongsLikeExplorer);
-    }
-
-    return _displaySongsCache = List<Song>.unmodifiable(list);
-  }
+  // ---------------------------------------------------------------------------
+  // Clipboard
+  // ---------------------------------------------------------------------------
 
   void setClipboard(
-    String type,
+    SongClipboardMode mode,
     List<String> songIds,
     String? sourcePlaylistId,
   ) {
-    clipboard = {
-      'type': type,
-      'songIds': songIds,
-      'sourcePlaylistId': sourcePlaylistId,
-    };
-    notifyListeners();
-  }
-
-  void clearClipboard() {
-    clipboard = null;
+    clipboard = SongClipboard(
+      mode: mode,
+      songIds: List<String>.unmodifiable(songIds),
+      sourcePlaylistId: sourcePlaylistId,
+    );
     notifyListeners();
   }
 
   Future<void> pasteSongs(String targetPlaylistId) async {
-    if (clipboard == null) return;
-    final type = clipboard!['type'] as String;
-    final songIds = List<String>.from(clipboard!['songIds'] as List);
-    final sourcePlaylistId = clipboard!['sourcePlaylistId'] as String?;
-
-    try {
-      await addSongsToPlaylist(targetPlaylistId, songIds);
-      if (type == 'cut' &&
-          sourcePlaylistId != null &&
-          sourcePlaylistId != targetPlaylistId) {
-        await removeSongsFromPlaylist(sourcePlaylistId, songIds);
-      }
-      clearClipboard();
-    } catch (e) {
-      error = e.toString();
-      notifyListeners();
-      rethrow;
+    final pending = clipboard;
+    if (pending == null) {
+      return;
     }
+    await addSongsToPlaylist(targetPlaylistId, pending.songIds);
+    final source = pending.sourcePlaylistId;
+    if (pending.mode == SongClipboardMode.cut &&
+        source != null &&
+        source != targetPlaylistId) {
+      await removeSongsFromPlaylist(source, pending.songIds);
+    }
+    clipboard = null;
+    notifyListeners();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Filtering
+  // ---------------------------------------------------------------------------
+
+  void setSearchQuery(String query) {
+    if (searchQuery == query) {
+      return;
+    }
+    searchQuery = query;
+    notifyListeners();
+  }
+
+  /// Cycles a tag through: unselected → required → excluded → unselected.
+  void toggleTag(PlatformInt64 tagId) {
+    if (selectedTags.remove(tagId)) {
+      excludedTags.add(tagId);
+    } else if (!excludedTags.remove(tagId)) {
+      selectedTags.add(tagId);
+    }
+    notifyListeners();
+  }
+
+  void setFilterMode(String mode) {
+    if (filterMode == mode) {
+      return;
+    }
+    filterMode = mode;
+    notifyListeners();
+  }
+
+  List<Song> get displaySongs {
+    final cached = _displaySongsCache;
+    if (cached != null) {
+      return cached;
+    }
+
+    Iterable<Song> list = songs;
+    final inPlaylist = activePlaylistId != null;
+    if (inPlaylist) {
+      final byId = {for (final song in songs) song.id: song};
+      list = [for (final id in playlistSongIds) ?byId[id]];
+    }
+
+    if (searchQuery.isNotEmpty) {
+      final query = searchQuery.toLowerCase();
+      list = list.where(
+        (song) =>
+            song.title.toLowerCase().contains(query) ||
+            (song.artist?.toLowerCase().contains(query) ?? false) ||
+            (song.album?.toLowerCase().contains(query) ?? false),
+      );
+    }
+
+    if (selectedTags.isNotEmpty || excludedTags.isNotEmpty) {
+      final matchAll = filterMode == 'AND';
+      list = list.where((song) {
+        final songTagIds = {for (final tag in song.tags) tag.id};
+        if (excludedTags.any(songTagIds.contains)) {
+          return false;
+        }
+        if (selectedTags.isEmpty) {
+          return true;
+        }
+        return matchAll
+            ? selectedTags.every(songTagIds.contains)
+            : selectedTags.any(songTagIds.contains);
+      });
+    }
+
+    final result = list.toList();
+    // Playlist order is user-defined. Every other list uses one shared natural
+    // ordering so desktop and mobile never depend on their native platform.
+    if (!inPlaylist) {
+      result.sort(_compareSongsLikeExplorer);
+    }
+    return _displaySongsCache = List<Song>.unmodifiable(result);
   }
 }

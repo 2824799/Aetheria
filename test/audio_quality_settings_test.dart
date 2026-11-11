@@ -8,7 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class _AudioApi extends Fake implements RustLibApi {
   @override
-  Future<void> crateApiMusicStopRustPlayback() async {}
+  Future<void> crateApiPlaybackStopPlayback() async {}
 }
 
 void main() {

@@ -18,7 +18,8 @@
       * `LibraryProvider` : 管理扫描音乐目录、导入文件、同步 Rust 端 SQLite 数据库状态。
       * `AudioPlayerProvider` : 管理音频播放器状态（播放、暂停、进度条拖拽、音量、循环与随机模式）。
 * `/rust` : 底层 Rust 代码
-  * `rust/src/api/` : 暴露给 Dart 的 FRB v2 API 接口（如音乐导入、数据库查询等）。
+  * `rust/src/api/` : 暴露给 Dart 的 FRB v2 API 接口（`music.rs` 音乐库、`playback.rs` 播放控制），只做转发。
+  * `rust/src/library/` : 音乐库业务逻辑（导入、歌曲/版本、标签、歌单、歌词、维护）。
   * `rust/src/database/` : 底层 SQLite 数据库初始化、版本迁移和 SQL 交互。
   * `rust/src/models/` : 对应数据库的歌曲 (`Song`)、播放列表 (`Playlist`) 数据模型。
 * `/rust_builder` : `cargokit` 自动构建套件，负责在不同平台上交叉编译 Rust 代码为共享库。
@@ -73,5 +74,5 @@ subprojects {
 ## 4. 后续 UI 调整与 Bug 修复注意事项
 
 1. **主题变量统一**：所有的 UI 组件应当通过 `ref.watch(uiThemeProvider)` 获取当前主题的 CSS 对应变量（如 `bgApp`、`textNormal` 等），严禁在组件内硬编码颜色值。
-2. **音频状态联动**：如果遇到播放进度条、音量或播放状态不一致的 bug，应优先排查 `lib/features/library/providers/audio_player_provider.dart` 的状态监听逻辑。
+2. **音频状态联动**：如果遇到播放进度条、音量或播放状态不一致的 bug，应优先排查 `lib/core/providers/audio_player_provider.dart` 的状态监听逻辑。
 3. **新增 Rust 接口**：如果修改了 `rust/src/api/` 下的 Rust 函数，请务必在根目录运行 `flutter_rust_bridge_codegen` 重新生成 Dart 桥接代码。

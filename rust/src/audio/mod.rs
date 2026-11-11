@@ -1,11 +1,10 @@
-//! Local audio decoding, DSP, device output, profiling and HTTP file serving.
+//! Local audio decoding, DSP, device output and profiling.
 
 pub mod dsp;
 pub mod player;
 pub mod profiler;
 pub mod rubberband;
 mod sample;
-pub mod server;
 
 #[cfg(test)]
-mod test_support;
+pub(crate) mod test_support;

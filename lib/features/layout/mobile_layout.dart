@@ -288,7 +288,6 @@ class _MobileLayoutState extends State<MobileLayout>
         song,
         libraryProvider.displaySongs,
         libraryProvider.libraryPath,
-        audioServerPort: libraryProvider.audioServerPort,
       );
     } catch (e) {
       if (!context.mounted) return;

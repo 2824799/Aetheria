@@ -1,14 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
 
-Color songTableParseHexColor(String hex, Color defaultColor) {
-  final clean = hex.replaceAll('#', '');
-  if (clean.length == 6) {
-    return Color(int.parse('FF$clean', radix: 16));
-  }
-  return defaultColor;
-}
-
 class SongTableLrcBadge extends StatelessWidget {
   const SongTableLrcBadge({super.key, required this.cfg});
 

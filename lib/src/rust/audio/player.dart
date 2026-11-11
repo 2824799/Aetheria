@@ -64,3 +64,27 @@ class AudioOutputInfo {
           clippedSamples == other.clippedSamples &&
           peakDb == other.peakDb;
 }
+
+/// Current playback position in seconds, derived from samples actually consumed by the
+/// hardware (not samples queued in the buffer), so it stays accurate regardless of
+/// buffering or pitch shifting.
+/// Snapshot polled by the UI progress timer.
+class PlaybackProgress {
+  final double positionSecs;
+
+  /// The stream reached its end and every queued sample has been played.
+  final bool finished;
+
+  const PlaybackProgress({required this.positionSecs, required this.finished});
+
+  @override
+  int get hashCode => positionSecs.hashCode ^ finished.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is PlaybackProgress &&
+          runtimeType == other.runtimeType &&
+          positionSecs == other.positionSecs &&
+          finished == other.finished;
+}

@@ -1,10 +1,7 @@
-//! Database Module
+//! SQLite access: connection setup and schema migration.
 //!
-//! Handles SQLite database connection, schema migration, and basic query utilities.
-//!
-//! # High Cohesion & Loose Coupling
-//! - Encapsulates `rusqlite` dependencies.
-//! - Uses standard generic errors rather than UI-specific ones.
+//! Queries live next to the domain logic in `crate::library`; this module only
+//! knows how to open the database and bring its schema up to date.
 
 pub mod connection;
 pub mod schema;

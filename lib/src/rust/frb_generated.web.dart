@@ -7,7 +7,7 @@
 // ignore_for_file: argument_type_not_assignable
 
 import 'api/music.dart';
-import 'api/simple.dart';
+import 'api/playback.dart';
 import 'audio/player.dart';
 import 'dart:async';
 import 'dart:convert';
@@ -76,9 +76,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw);
 
   @protected
-  List<SavedLyric> dco_decode_list_saved_lyric(dynamic raw);
-
-  @protected
   List<Song> dco_decode_list_song(dynamic raw);
 
   @protected
@@ -100,6 +97,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   SavedLyric? dco_decode_opt_box_autoadd_saved_lyric(dynamic raw);
 
   @protected
+  PlaybackProgress dco_decode_playback_progress(dynamic raw);
+
+  @protected
   Playlist dco_decode_playlist(dynamic raw);
 
   @protected
@@ -113,9 +113,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   Tag dco_decode_tag(dynamic raw);
-
-  @protected
-  int dco_decode_u_16(dynamic raw);
 
   @protected
   int dco_decode_u_32(dynamic raw);
@@ -185,9 +182,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer);
 
   @protected
-  List<SavedLyric> sse_decode_list_saved_lyric(SseDeserializer deserializer);
-
-  @protected
   List<Song> sse_decode_list_song(SseDeserializer deserializer);
 
   @protected
@@ -213,6 +207,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  PlaybackProgress sse_decode_playback_progress(SseDeserializer deserializer);
+
+  @protected
   Playlist sse_decode_playlist(SseDeserializer deserializer);
 
   @protected
@@ -226,9 +223,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   Tag sse_decode_tag(SseDeserializer deserializer);
-
-  @protected
-  int sse_decode_u_16(SseDeserializer deserializer);
 
   @protected
   int sse_decode_u_32(SseDeserializer deserializer);
@@ -312,12 +306,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  void sse_encode_list_saved_lyric(
-    List<SavedLyric> self,
-    SseSerializer serializer,
-  );
-
-  @protected
   void sse_encode_list_song(List<Song> self, SseSerializer serializer);
 
   @protected
@@ -345,6 +333,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_playback_progress(
+    PlaybackProgress self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_playlist(Playlist self, SseSerializer serializer);
 
   @protected
@@ -358,9 +352,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_tag(Tag self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_u_16(int self, SseSerializer serializer);
 
   @protected
   void sse_encode_u_32(int self, SseSerializer serializer);

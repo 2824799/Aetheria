@@ -1,3 +1,4 @@
+import 'package:aetheria/core/utils/audio_formats.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -519,7 +520,7 @@ class _SettingsModalState extends State<SettingsModal> {
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
-        allowedExtensions: ['mp3', 'wav', 'flac', 'm4a', 'ogg', 'aac'],
+        allowedExtensions: supportedAudioExtensions,
         allowMultiple: true,
       );
       final paths = result?.paths.whereType<String>().toList() ?? const [];

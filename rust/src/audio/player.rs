@@ -325,16 +325,6 @@ impl DecodePipeline {
                     *vocal_only_shifter = None;
                     dsp::pitch_shift_resample(&block, pitch_factor)
                 }
-                "ola" => {
-                    *rubberband_shifter = None;
-                    *vocal_only_shifter = None;
-                    dsp::pitch_shift_ola(&block, pitch_factor)
-                }
-                "wsola" => {
-                    *rubberband_shifter = None;
-                    *vocal_only_shifter = None;
-                    dsp::pitch_shift_wsola(&block, pitch_factor)
-                }
                 _ => {
                     if vocal_only_active {
                         *rubberband_shifter = None;
@@ -1238,21 +1228,26 @@ pub fn get_output_info() -> AudioOutputInfo {
 /// Current playback position in seconds, derived from samples actually consumed by the
 /// hardware (not samples queued in the buffer), so it stays accurate regardless of
 /// buffering or pitch shifting.
-pub fn get_position() -> f64 {
-    let _scope = profiler::scope("audio::player::get_position");
-    let state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
-    let frames = state.frames_played.load(Ordering::Relaxed);
-    if state.sample_rate == 0 {
-        0.0
-    } else {
-        frames as f64 / state.sample_rate as f64
-    }
+/// Snapshot polled by the UI progress timer.
+#[derive(Clone, Copy, Debug)]
+pub struct PlaybackProgress {
+    pub position_secs: f64,
+    /// The stream reached its end and every queued sample has been played.
+    pub finished: bool,
 }
 
-pub fn is_finished() -> bool {
-    let _scope = profiler::scope("audio::player::is_finished");
+pub fn get_progress() -> PlaybackProgress {
+    let _scope = profiler::scope("audio::player::get_progress");
     let state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
-    state.stream_finished.load(Ordering::Relaxed)
+    let frames = state.frames_played.load(Ordering::Relaxed);
+    PlaybackProgress {
+        position_secs: if state.sample_rate == 0 {
+            0.0
+        } else {
+            frames as f64 / state.sample_rate as f64
+        },
+        finished: state.stream_finished.load(Ordering::Relaxed),
+    }
 }
 
 fn normalize_rubberband_window(value: &str) -> String {

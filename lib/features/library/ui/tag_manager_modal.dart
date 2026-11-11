@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:provider/provider.dart';
+import 'package:aetheria/core/utils/formatting.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
 import 'package:aetheria/core/providers/library_provider.dart';
 import 'package:aetheria/core/widgets/aether_button.dart';
@@ -39,14 +40,6 @@ class _TagManagerModalState extends State<TagManagerModal> {
   String _selectedColor = '#3b82f6';
   bool _isCustomCategory = false;
   PlatformInt64? _editingTagId;
-
-  Color _parseHexColor(String hex) {
-    final clean = hex.replaceAll('#', '');
-    if (clean.length == 6) {
-      return Color(int.parse('FF$clean', radix: 16));
-    }
-    return AetherFallbackColors.neutral;
-  }
 
   @override
   void dispose() {
@@ -267,9 +260,7 @@ class _TagManagerModalState extends State<TagManagerModal> {
               ),
               itemBuilder: (context, index) {
                 final tag = libraryProvider.tags[index];
-                final tagColor = tag.color != null
-                    ? _parseHexColor(tag.color!)
-                    : cfg.textPrimary;
+                final tagColor = parseTagColor(tag.color, cfg.textPrimary);
                 return Padding(
                   padding: const EdgeInsets.symmetric(
                     horizontal: AetherSpace.lg,

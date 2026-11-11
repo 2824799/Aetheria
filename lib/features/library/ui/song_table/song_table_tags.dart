@@ -1,5 +1,5 @@
+import 'package:aetheria/core/utils/formatting.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
-import 'package:aetheria/features/library/ui/song_table/song_table_widgets.dart';
 import 'package:aetheria/features/library/ui/song_table/song_table_text.dart';
 import 'package:aetheria/src/rust/models/song.dart';
 import 'package:flutter/material.dart';
@@ -67,9 +67,7 @@ class SongTableTags extends StatelessWidget {
   }
 
   Widget _chip(Tag tag) {
-    final color = tag.color == null
-        ? cfg.accent
-        : songTableParseHexColor(tag.color!, cfg.accent);
+    final color = parseTagColor(tag.color, cfg.accent);
     return Container(
       margin: const EdgeInsets.only(right: AetherSpace.sm),
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),

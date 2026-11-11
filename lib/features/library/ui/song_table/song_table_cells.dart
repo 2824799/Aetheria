@@ -245,7 +245,7 @@ class SongTableCellBuilder {
         );
       case SongColumnKey.spec:
         final specText = audioQualityText(primaryVersion);
-        final badgeColor = audioQualityColor(primaryVersion, cfg.textSecondary);
+        final badgeColor = audioQualityColor(primaryVersion, cfg);
 
         return SizedBox(
           width: width,

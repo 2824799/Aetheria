@@ -11,7 +11,7 @@ import 'package:aetheria/core/widgets/aether_switch.dart';
 import 'package:aetheria/core/widgets/aether_toast.dart';
 import 'package:aetheria/features/library/ui/settings/settings_shared_widgets.dart';
 import 'package:aetheria/services/native_audio_helper.dart';
-import 'package:aetheria/src/rust/api/music.dart' as music;
+import 'package:aetheria/src/rust/api/playback.dart' as playback;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -56,7 +56,7 @@ class _SettingsDeveloperTabState extends State<SettingsDeveloperTab> {
       return;
     }
     try {
-      final decoded = jsonDecode(music.getAudioPerformanceReportJson());
+      final decoded = jsonDecode(playback.getAudioPerformanceReportJson());
       if (decoded is Map) {
         setState(() {
           _report = Map<String, dynamic>.from(decoded);
@@ -80,13 +80,13 @@ class _SettingsDeveloperTabState extends State<SettingsDeveloperTab> {
   }
 
   void _resetStats() {
-    music.resetAudioPerformanceStats();
+    playback.resetAudioPerformanceStats();
     _refreshReport();
     showAetherToast(context, message: '性能统计已清零', kind: AetherToastKind.success);
   }
 
   Future<void> _copyJson() async {
-    final report = music.getAudioPerformanceReportJson();
+    final report = playback.getAudioPerformanceReportJson();
     await Clipboard.setData(ClipboardData(text: report));
     if (!mounted) {
       return;
@@ -99,7 +99,7 @@ class _SettingsDeveloperTabState extends State<SettingsDeveloperTab> {
   }
 
   Future<void> _exportReport() async {
-    final report = music.exportAudioPerformanceReportMarkdown();
+    final report = playback.exportAudioPerformanceReportMarkdown();
     final stamp = DateTime.now()
         .toIso8601String()
         .replaceAll(':', '')

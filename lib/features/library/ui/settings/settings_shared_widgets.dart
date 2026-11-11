@@ -378,11 +378,6 @@ class SettingsSliderRow extends StatelessWidget {
   }
 }
 
-String settingsColorToHex(Color color) {
-  final rgb = color.toARGB32() & 0xFFFFFF;
-  return '#${rgb.toRadixString(16).padLeft(6, '0').toUpperCase()}';
-}
-
 Color settingsColorFromHex(String hex, {int alpha = 0xFF}) {
   final clean = hex.replaceAll('#', '').toUpperCase();
   if (RegExp(r'^[0-9A-F]{6}$').hasMatch(clean)) {

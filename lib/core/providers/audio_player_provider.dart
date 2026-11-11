@@ -1,23 +1,30 @@
-import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show ValueListenable;
-import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:async';
+import 'dart:io';
+import 'dart:math' as math;
+
+import 'package:aetheria/services/native_audio_helper.dart';
+import 'package:aetheria/src/rust/api/playback.dart' as playback;
 import 'package:aetheria/src/rust/audio/player.dart' show AudioOutputInfo;
 import 'package:aetheria/src/rust/models/song.dart';
-import 'package:aetheria/src/rust/api/music.dart' as music;
-import 'package:aetheria/services/native_audio_helper.dart';
-import 'dart:io';
-import 'dart:async';
-import 'dart:math' as math;
+import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 enum PlayMode { list, single, shuffle }
 
+/// Owns playback state (queue, position, DSP settings) and drives the Rust
+/// audio engine.
 class AudioPlayerProvider extends ChangeNotifier {
   static const String _playbackSongIdKey = 'aetheria-playback-song-id';
   static const String _playbackVersionIdKey = 'aetheria-playback-version-id';
   static const String _playbackPositionMsKey = 'aetheria-playback-position-ms';
   static const String _playbackQueueIdsKey = 'aetheria-playback-queue-ids';
   static const String _volumeKey = 'aetheria-playback-volume';
+  static const String _playAlongsideKey = 'play-alongside';
+  static const String _volumeBalanceEnabledKey = 'volume-balance-enabled';
+  static const String _volumeBalanceStrengthKey = 'volume-balance-strength';
   static const String _pitchEnabledKey = 'pitch-enabled';
+  static const String _pitchSemitonesKey = 'pitch-semitones';
+  static const String _pitchAlgorithmKey = 'pitch-algorithm';
   static const String _pitchBufferMsKey = 'pitch-buffer-ms';
   static const String _peakProtectionKey = 'peak-protection-enabled';
   static const String _ditherEnabledKey = 'dither-enabled';
@@ -27,6 +34,14 @@ class AudioPlayerProvider extends ChangeNotifier {
   static const String _resamplerQualityKey = 'resampler-quality';
   static const String _outputLatencyModeKey = 'output-latency-mode';
   static const String _developerModeKey = 'developer-mode-enabled';
+
+  /// Loudness assumed for versions that have not been measured, in dBFS.
+  static const double _defaultLoudnessDb = -15.0;
+
+  static const Duration _positionPollInterval = Duration(milliseconds: 250);
+
+  /// Consecutive unchanged position polls near the end that count as EOF.
+  static const int _stallTicksAtEnd = 6;
 
   Song? activeSong;
   Song? playingSong;
@@ -64,8 +79,8 @@ class AudioPlayerProvider extends ChangeNotifier {
   bool isDetailOpen = false;
   String activeTab = 'lyrics';
 
-  String _cachedLibraryPath = '';
-  int? _cachedAudioServerPort;
+  final math.Random _random = math.Random();
+  String _libraryPath = '';
   Timer? _positionTimer;
   Timer? _outputInfoTimer;
   Timer? _audioRouteChangeDebounce;
@@ -74,10 +89,18 @@ class AudioPlayerProvider extends ChangeNotifier {
   int _stallTicks = 0;
   bool _isHandlingPlaybackEnd = false;
   bool _pollingPosition = false;
+  bool _disposed = false;
+
+  /// Whether the engine holds a stream for [playingVersion]. False after a
+  /// restore or a failed start, in which case "play" opens the stream first.
   bool _hasPreparedPlayback = false;
   Duration? _pendingRestorePosition;
   String? _lastDefaultOutputDeviceName;
   bool _isCheckingOutputDeviceChange = false;
+
+  /// Identifies the newest stream start; older ones abandon their work.
+  int _streamRequest = 0;
+  Future<void> _streamStart = Future<void>.value();
 
   AudioPlayerProvider() {
     NativeAudioHelper.setNotificationActionHandler(_handleNotificationAction);
@@ -85,84 +108,290 @@ class AudioPlayerProvider extends ChangeNotifier {
     loadSettings();
   }
 
-  void _startPositionTimer() {
-    _positionTimer?.cancel();
-    _lastPositionMs = -1;
-    _lastPersistedSecond = -1;
-    _stallTicks = 0;
-    _isHandlingPlaybackEnd = false;
-    _positionTimer = Timer.periodic(const Duration(milliseconds: 250), (
-      timer,
-    ) async {
-      if (!isPlaying || _isHandlingPlaybackEnd || _pollingPosition) return;
-      _pollingPosition = true;
-      try {
-        final posSec = await music.getRustPlaybackPosition();
-        final streamFinished = await music.isRustPlaybackFinished();
-        if (!timer.isActive || !isPlaying) return;
-        currentPosition = Duration(milliseconds: (posSec * 1000).round());
-
-        final reachedEnd =
-            currentPosition >= totalDuration && totalDuration > Duration.zero;
-
-        // Fallback for EOF: the Rust position is derived from samples the hardware
-        // actually consumed, so if the stored duration is slightly overestimated the
-        // position will plateau just below totalDuration once the stream ends. Detect
-        // that stall and advance as well.
-        final posMs = currentPosition.inMilliseconds;
-        if (posMs == _lastPositionMs) {
-          _stallTicks += 1;
-        } else {
-          _stallTicks = 0;
-          _lastPositionMs = posMs;
-        }
-        final nearEnd =
-            totalDuration > Duration.zero &&
-            currentPosition >= totalDuration - const Duration(seconds: 2);
-        final stalledAtEnd =
-            _stallTicks >= 6 && currentPosition > Duration.zero && nearEnd;
-
-        if (streamFinished || reachedEnd || stalledAtEnd) {
-          await _handlePlaybackEnded();
-          return;
-        }
-        if (currentPosition.inSeconds != _lastPersistedSecond) {
-          _lastPersistedSecond = currentPosition.inSeconds;
-          unawaited(_persistPlaybackPosition());
-          _updateNotification();
-        }
-      } finally {
-        _pollingPosition = false;
-      }
-    });
-  }
-
-  Future<void> _handlePlaybackEnded() async {
-    if (_isHandlingPlaybackEnd) return;
-    _isHandlingPlaybackEnd = true;
-    _positionTimer?.cancel();
-
-    try {
-      if (playMode == PlayMode.single &&
-          playingSong != null &&
-          playingVersion != null) {
-        currentPosition = Duration.zero;
-        _hasPreparedPlayback = false;
-        await _startCurrentVersionPlayback(
-          startPosition: Duration.zero,
-          startPaused: false,
-        );
-        return;
-      }
-
-      playNext();
-    } finally {
-      _isHandlingPlaybackEnd = false;
+  @override
+  void notifyListeners() {
+    // Async work (settings load, engine calls) can finish after disposal.
+    if (!_disposed) {
+      super.notifyListeners();
     }
   }
 
-  void _stopPositionTimer() {
-    _positionTimer?.cancel();
+  // ---- Settings ----
+
+  Future<void> loadSettings() async {
+    try {
+      if (Platform.isAndroid) {
+        await NativeAudioHelper.requestNotificationPermission();
+      }
+      final prefs = await SharedPreferences.getInstance();
+      await _readPreferences(prefs);
+      notifyListeners();
+      await _pushSettingsToEngine();
+      await refreshAudioOutputInfo();
+    } catch (error) {
+      debugPrint('Failed to load audio settings: $error');
+    }
+  }
+
+  Future<void> _readPreferences(SharedPreferences prefs) async {
+    playAlongside = prefs.getBool(_playAlongsideKey) ?? false;
+    volume = (prefs.getDouble(_volumeKey) ?? volume).clamp(0.0, 1.0).toDouble();
+    volumeBalanceEnabled = prefs.getBool(_volumeBalanceEnabledKey) ?? false;
+    volumeBalanceStrength = prefs.getDouble(_volumeBalanceStrengthKey) ?? 0.5;
+    pitchEnabled = prefs.getBool(_pitchEnabledKey) ?? false;
+    pitchSemitones = prefs.getDouble(_pitchSemitonesKey) ?? 0.0;
+    final savedAlgorithm = prefs.getString(_pitchAlgorithmKey);
+    pitchAlgorithm = _normalizePitchAlgorithm(savedAlgorithm);
+    if (savedAlgorithm != pitchAlgorithm) {
+      // Migrates algorithms removed from the engine to the default.
+      await prefs.setString(_pitchAlgorithmKey, pitchAlgorithm);
+    }
+    pitchBufferMs = prefs.getInt(_pitchBufferMsKey) ?? 240;
+    peakProtectionEnabled = prefs.getBool(_peakProtectionKey) ?? true;
+    ditherEnabled = prefs.getBool(_ditherEnabledKey) ?? true;
+    rubberbandWindow = _normalizeRubberbandWindow(
+      prefs.getString(_rubberbandWindowKey),
+    );
+    rubberbandFormantPreserved = prefs.getBool(_rubberbandFormantKey) ?? false;
+    rubberbandVocalOnlyPitch = prefs.getBool(_rubberbandVocalOnlyKey) ?? false;
+    resamplerQuality = _normalizeResamplerQuality(
+      prefs.getString(_resamplerQualityKey),
+    );
+    outputLatencyMode = _normalizeOutputLatencyMode(
+      prefs.getString(_outputLatencyModeKey),
+    );
+    developerModeEnabled = prefs.getBool(_developerModeKey) ?? false;
+  }
+
+  Future<void> _pushSettingsToEngine() async {
+    playback.setAudioPerformanceProfilingEnabled(enabled: developerModeEnabled);
+    await playback.setOutputBufferMs(ms: pitchBufferMs);
+    await playback.setOutputLatencyMode(mode: outputLatencyMode);
+    await playback.setVolume(volume: volume);
+    await _pushQualitySettings();
+    await _pushPitch();
+  }
+
+  /// Announces a changed setting, persists it and forwards it to the engine.
+  ///
+  /// Settings are best-effort: a failure keeps the in-memory value so the UI
+  /// stays responsive, and the next engine start picks it up.
+  Future<void> _applySetting({
+    required Future<Object?> Function(SharedPreferences prefs) persist,
+    Future<void> Function()? push,
+    bool restartStream = false,
+  }) async {
+    notifyListeners();
+    try {
+      await persist(await SharedPreferences.getInstance());
+      await push?.call();
+      if (restartStream) {
+        await _restartStream();
+      }
+    } catch (error) {
+      debugPrint('Failed to apply audio setting: $error');
+    }
+  }
+
+  Future<void> setPlayAlongside(bool value) {
+    playAlongside = value;
+    return _applySetting(
+      persist: (prefs) => prefs.setBool(_playAlongsideKey, value),
+    );
+  }
+
+  Future<void> setVolumeBalanceEnabled(bool value) {
+    volumeBalanceEnabled = value;
+    return _applySetting(
+      persist: (prefs) => prefs.setBool(_volumeBalanceEnabledKey, value),
+      restartStream: true,
+    );
+  }
+
+  Future<void> setVolumeBalanceStrength(double value) {
+    volumeBalanceStrength = value;
+    return _applySetting(
+      persist: (prefs) => prefs.setDouble(_volumeBalanceStrengthKey, value),
+      restartStream: true,
+    );
+  }
+
+  Future<void> setPitchSemitones(double value) {
+    pitchSemitones = value;
+    return _applySetting(
+      persist: (prefs) => prefs.setDouble(_pitchSemitonesKey, value),
+      push: _pushPitch,
+    );
+  }
+
+  Future<void> setPitchAlgorithm(String value) {
+    pitchAlgorithm = _normalizePitchAlgorithm(value);
+    return _applySetting(
+      persist: (prefs) => prefs.setString(_pitchAlgorithmKey, pitchAlgorithm),
+      push: _pushPitch,
+    );
+  }
+
+  Future<void> setPitchEnabled(bool value) {
+    pitchEnabled = value;
+    return _applySetting(
+      persist: (prefs) => prefs.setBool(_pitchEnabledKey, value),
+      push: _pushPitch,
+      restartStream: true,
+    );
+  }
+
+  Future<void> setPitchBufferMs(int value) {
+    pitchBufferMs = value;
+    return _applySetting(
+      persist: (prefs) => prefs.setInt(_pitchBufferMsKey, value),
+      push: () => playback.setOutputBufferMs(ms: value),
+      restartStream: true,
+    );
+  }
+
+  Future<void> setPeakProtectionEnabled(bool value) {
+    peakProtectionEnabled = value;
+    return _applySetting(
+      persist: (prefs) => prefs.setBool(_peakProtectionKey, value),
+      push: _pushQualitySettings,
+    );
+  }
+
+  Future<void> setDitherEnabled(bool value) {
+    ditherEnabled = value;
+    return _applySetting(
+      persist: (prefs) => prefs.setBool(_ditherEnabledKey, value),
+      push: _pushQualitySettings,
+    );
+  }
+
+  Future<void> setRubberbandWindow(String value) {
+    rubberbandWindow = _normalizeRubberbandWindow(value);
+    return _applySetting(
+      persist: (prefs) =>
+          prefs.setString(_rubberbandWindowKey, rubberbandWindow),
+      push: _pushQualitySettings,
+      restartStream: true,
+    );
+  }
+
+  Future<void> setRubberbandFormantPreserved(bool value) {
+    rubberbandFormantPreserved = value;
+    return _applySetting(
+      persist: (prefs) => prefs.setBool(_rubberbandFormantKey, value),
+      push: _pushQualitySettings,
+    );
+  }
+
+  Future<void> setRubberbandVocalOnlyPitch(bool value) {
+    rubberbandVocalOnlyPitch = value;
+    return _applySetting(
+      persist: (prefs) => prefs.setBool(_rubberbandVocalOnlyKey, value),
+      push: _pushQualitySettings,
+      restartStream: true,
+    );
+  }
+
+  Future<void> setResamplerQuality(String value) {
+    resamplerQuality = _normalizeResamplerQuality(value);
+    return _applySetting(
+      persist: (prefs) =>
+          prefs.setString(_resamplerQualityKey, resamplerQuality),
+      push: _pushQualitySettings,
+      restartStream: true,
+    );
+  }
+
+  Future<void> setOutputLatencyMode(String value) async {
+    outputLatencyMode = _normalizeOutputLatencyMode(value);
+    await _applySetting(
+      persist: (prefs) =>
+          prefs.setString(_outputLatencyModeKey, outputLatencyMode),
+      push: () => playback.setOutputLatencyMode(mode: outputLatencyMode),
+      restartStream: true,
+    );
+    await refreshAudioOutputInfo();
+  }
+
+  Future<void> setDeveloperModeEnabled(bool value) async {
+    if (developerModeEnabled == value) {
+      return;
+    }
+    developerModeEnabled = value;
+    playback.setAudioPerformanceProfilingEnabled(enabled: value);
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_developerModeKey, value);
+  }
+
+  void setVolume(double value) {
+    volume = value.clamp(0.0, 1.0).toDouble();
+    notifyListeners();
+    unawaited(_applyVolume());
+    _updateNotification();
+  }
+
+  Future<void> _applyVolume() async {
+    try {
+      await playback.setVolume(volume: volume);
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setDouble(_volumeKey, volume);
+    } catch (error) {
+      debugPrint('Failed to apply volume: $error');
+    }
+  }
+
+  double get _effectivePitchSemitones => pitchEnabled ? pitchSemitones : 0.0;
+
+  Future<void> _pushPitch() {
+    return playback.setPitch(
+      pitch: _effectivePitchSemitones,
+      algo: pitchAlgorithm,
+    );
+  }
+
+  Future<void> _pushQualitySettings() {
+    return playback.setAudioQualitySettings(
+      peakProtectionEnabled: peakProtectionEnabled,
+      ditherEnabled: ditherEnabled,
+      rubberbandWindow: rubberbandWindow,
+      rubberbandFormantPreserved: rubberbandFormantPreserved,
+      rubberbandVocalOnlyPitch: rubberbandVocalOnlyPitch,
+      resamplerQuality: resamplerQuality,
+    );
+  }
+
+  static String _normalizePitchAlgorithm(String? value) {
+    return value == 'resample' ? 'resample' : 'rubberband';
+  }
+
+  static String _normalizeRubberbandWindow(String? value) {
+    return value == 'quality' ? 'quality' : 'latency';
+  }
+
+  static String _normalizeResamplerQuality(String? value) {
+    return value == 'standard' ? 'standard' : 'high';
+  }
+
+  static String _normalizeOutputLatencyMode(String? value) {
+    return value == 'shared-low-latency' || value == 'shared-stable'
+        ? value!
+        : 'shared-default';
+  }
+
+  // ---- Output device ----
+
+  Future<void> refreshAudioOutputInfo() async {
+    try {
+      final next = await playback.getAudioOutputInfo();
+      if (audioOutputInfo != next) {
+        audioOutputInfo = next;
+        notifyListeners();
+      }
+    } catch (_) {
+      // The info panel simply keeps its last snapshot.
+    }
   }
 
   void _startOutputInfoTimer() {
@@ -177,231 +406,12 @@ class AudioPlayerProvider extends ChangeNotifier {
     _outputInfoTimer?.cancel();
   }
 
-  Future<void> loadSettings() async {
-    try {
-      if (Platform.isAndroid) {
-        await NativeAudioHelper.requestNotificationPermission();
-      }
-      final prefs = await SharedPreferences.getInstance();
-      playAlongside = prefs.getBool('play-alongside') ?? false;
-      volume = (prefs.getDouble(_volumeKey) ?? volume)
-          .clamp(0.0, 1.0)
-          .toDouble();
-      volumeBalanceEnabled = prefs.getBool('volume-balance-enabled') ?? false;
-      volumeBalanceStrength = prefs.getDouble('volume-balance-strength') ?? 0.5;
-      pitchEnabled = prefs.getBool(_pitchEnabledKey) ?? false;
-      pitchSemitones = prefs.getDouble('pitch-semitones') ?? 0.0;
-      pitchAlgorithm = _normalizePitchAlgorithm(
-        prefs.getString('pitch-algorithm'),
-      );
-      if (prefs.getString('pitch-algorithm') != pitchAlgorithm) {
-        await prefs.setString('pitch-algorithm', pitchAlgorithm);
-      }
-      pitchBufferMs = prefs.getInt(_pitchBufferMsKey) ?? 240;
-      peakProtectionEnabled = prefs.getBool(_peakProtectionKey) ?? true;
-      ditherEnabled = prefs.getBool(_ditherEnabledKey) ?? true;
-      rubberbandWindow = _normalizeRubberbandWindow(
-        prefs.getString(_rubberbandWindowKey),
-      );
-      rubberbandFormantPreserved =
-          prefs.getBool(_rubberbandFormantKey) ?? false;
-      rubberbandVocalOnlyPitch =
-          prefs.getBool(_rubberbandVocalOnlyKey) ?? false;
-      resamplerQuality = _normalizeResamplerQuality(
-        prefs.getString(_resamplerQualityKey),
-      );
-      outputLatencyMode = _normalizeOutputLatencyMode(
-        prefs.getString(_outputLatencyModeKey),
-      );
-      developerModeEnabled = prefs.getBool(_developerModeKey) ?? false;
-      music.setAudioPerformanceProfilingEnabled(enabled: developerModeEnabled);
-      await music.setRustOutputBufferMs(ms: pitchBufferMs);
-      await music.setRustOutputLatencyMode(mode: outputLatencyMode);
-      await music.setRustVolume(vol: volume);
-      await _syncAudioQualitySettings();
-      await music.setRustPitch(
-        pitch: _effectivePitchSemitones,
-        algo: pitchAlgorithm,
-      );
-      await refreshAudioOutputInfo();
-      notifyListeners();
-    } catch (_) {}
-  }
-
-  Future<void> setPlayAlongside(bool value) async {
-    playAlongside = value;
-    notifyListeners();
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool('play-alongside', value);
-    } catch (_) {}
-  }
-
-  Future<void> setVolumeBalanceEnabled(bool value) async {
-    volumeBalanceEnabled = value;
-    notifyListeners();
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool('volume-balance-enabled', value);
-      await _hotReloadDSP();
-    } catch (_) {}
-  }
-
-  Future<void> setVolumeBalanceStrength(double value) async {
-    volumeBalanceStrength = value;
-    notifyListeners();
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setDouble('volume-balance-strength', value);
-      await _hotReloadDSP();
-    } catch (_) {}
-  }
-
-  Future<void> setPitchSemitones(double value) async {
-    pitchSemitones = value;
-    notifyListeners();
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setDouble('pitch-semitones', value);
-      await music.setRustPitch(
-        pitch: _effectivePitchSemitones,
-        algo: pitchAlgorithm,
-      );
-    } catch (_) {}
-  }
-
-  Future<void> setPitchAlgorithm(String value) async {
-    final normalized = _normalizePitchAlgorithm(value);
-    pitchAlgorithm = normalized;
-    notifyListeners();
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('pitch-algorithm', normalized);
-      await music.setRustPitch(
-        pitch: _effectivePitchSemitones,
-        algo: normalized,
-      );
-    } catch (_) {}
-  }
-
-  Future<void> setPitchEnabled(bool value) async {
-    pitchEnabled = value;
-    notifyListeners();
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool(_pitchEnabledKey, value);
-      await music.setRustPitch(
-        pitch: _effectivePitchSemitones,
-        algo: pitchAlgorithm,
-      );
-      await _hotReloadDSP();
-    } catch (_) {}
-  }
-
-  Future<void> setPitchBufferMs(int value) async {
-    pitchBufferMs = value;
-    notifyListeners();
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setInt(_pitchBufferMsKey, value);
-      await music.setRustOutputBufferMs(ms: value);
-      await _hotReloadDSP();
-    } catch (_) {}
-  }
-
-  Future<void> setPeakProtectionEnabled(bool value) async {
-    peakProtectionEnabled = value;
-    notifyListeners();
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool(_peakProtectionKey, value);
-      await _syncAudioQualitySettings();
-    } catch (_) {}
-  }
-
-  Future<void> setDitherEnabled(bool value) async {
-    ditherEnabled = value;
-    notifyListeners();
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool(_ditherEnabledKey, value);
-      await _syncAudioQualitySettings();
-    } catch (_) {}
-  }
-
-  Future<void> setRubberbandWindow(String value) async {
-    final normalized = _normalizeRubberbandWindow(value);
-    rubberbandWindow = normalized;
-    notifyListeners();
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_rubberbandWindowKey, normalized);
-      await _syncAudioQualitySettings();
-      await _hotReloadDSP();
-    } catch (_) {}
-  }
-
-  Future<void> setRubberbandFormantPreserved(bool value) async {
-    rubberbandFormantPreserved = value;
-    notifyListeners();
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool(_rubberbandFormantKey, value);
-      await _syncAudioQualitySettings();
-    } catch (_) {}
-  }
-
-  Future<void> setRubberbandVocalOnlyPitch(bool value) async {
-    rubberbandVocalOnlyPitch = value;
-    notifyListeners();
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool(_rubberbandVocalOnlyKey, value);
-      await _syncAudioQualitySettings();
-      await _hotReloadDSP();
-    } catch (_) {}
-  }
-
-  Future<void> setResamplerQuality(String value) async {
-    final normalized = _normalizeResamplerQuality(value);
-    resamplerQuality = normalized;
-    notifyListeners();
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_resamplerQualityKey, normalized);
-      await _syncAudioQualitySettings();
-      await _hotReloadDSP();
-    } catch (_) {}
-  }
-
-  Future<void> setOutputLatencyMode(String value) async {
-    final normalized = _normalizeOutputLatencyMode(value);
-    outputLatencyMode = normalized;
-    notifyListeners();
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_outputLatencyModeKey, normalized);
-      await music.setRustOutputLatencyMode(mode: normalized);
-      await _hotReloadDSP();
-      await refreshAudioOutputInfo();
-    } catch (_) {}
-  }
-
-  Future<void> refreshAudioOutputInfo() async {
-    try {
-      final next = await music.getRustAudioOutputInfo();
-      if (audioOutputInfo != next) {
-        audioOutputInfo = next;
-        notifyListeners();
-      }
-    } catch (_) {}
-  }
-
   Future<void> _refreshOutputInfoAndDeviceChange() async {
     await refreshAudioOutputInfo();
     await _handleDefaultOutputDeviceChange();
   }
 
+  /// Desktop: follows the system default device when the user switches it.
   Future<void> _handleDefaultOutputDeviceChange() async {
     if (Platform.isAndroid || Platform.isIOS || _isCheckingOutputDeviceChange) {
       return;
@@ -409,38 +419,20 @@ class AudioPlayerProvider extends ChangeNotifier {
 
     _isCheckingOutputDeviceChange = true;
     try {
-      final defaultDeviceName = await music.getRustDefaultOutputDeviceName();
-      if (defaultDeviceName.isEmpty) {
+      final deviceName = await playback.getDefaultOutputDeviceName();
+      if (deviceName.isEmpty || deviceName == _lastDefaultOutputDeviceName) {
         return;
       }
-
-      if (_lastDefaultOutputDeviceName == null) {
-        _lastDefaultOutputDeviceName = defaultDeviceName;
-        return;
+      final isFirstProbe = _lastDefaultOutputDeviceName == null;
+      _lastDefaultOutputDeviceName = deviceName;
+      if (!isFirstProbe) {
+        await _restartStream();
       }
-
-      if (_lastDefaultOutputDeviceName == defaultDeviceName) {
-        return;
-      }
-
-      _lastDefaultOutputDeviceName = defaultDeviceName;
-      await _restartPlaybackOnDefaultOutputDevice();
     } catch (_) {
       // Device probing can fail transiently while Windows is switching endpoints.
     } finally {
       _isCheckingOutputDeviceChange = false;
     }
-  }
-
-  Future<void> setDeveloperModeEnabled(bool value) async {
-    if (developerModeEnabled == value) {
-      return;
-    }
-    developerModeEnabled = value;
-    music.setAudioPerformanceProfilingEnabled(enabled: value);
-    notifyListeners();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_developerModeKey, value);
   }
 
   Future<void> _handleAudioRouteChanged() async {
@@ -460,7 +452,7 @@ class AudioPlayerProvider extends ChangeNotifier {
     }
     _isCheckingOutputDeviceChange = true;
     try {
-      await _restartPlaybackOnDefaultOutputDevice();
+      await _restartStream();
       await refreshAudioOutputInfo();
     } catch (_) {
       // Android can emit several transient route events while switching.
@@ -469,66 +461,236 @@ class AudioPlayerProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> _restartPlaybackOnDefaultOutputDevice() async {
-    if (playingSong == null ||
-        playingVersion == null ||
-        !_hasPreparedPlayback ||
-        _cachedLibraryPath.isEmpty) {
-      return;
-    }
+  // ---- Engine stream ----
 
-    final wasPlaying = isPlaying;
-    final position = currentPosition;
-    _hasPreparedPlayback = false;
-    await _startCurrentVersionPlayback(
-      startPosition: position,
-      startPaused: !wasPlaying,
-    );
+  String _audioPath(AudioVersion version) {
+    return '$_libraryPath/${version.filepath}'.replaceAll('\\', '/');
   }
 
-  double _computeNormalizationGain(AudioVersion version) {
+  /// Gain that pulls louder tracks down towards the quietest primary version
+  /// in the queue, scaled by [volumeBalanceStrength].
+  double _normalizationGain(AudioVersion version) {
     if (!volumeBalanceEnabled) {
       return 1.0;
     }
-    final lMin = getLMin();
-    final lSong = version.loudness ?? -15.0;
-    if (lSong <= lMin) {
+    final target = _quietestPrimaryLoudness();
+    final loudness = version.loudness ?? _defaultLoudnessDb;
+    if (loudness <= target) {
       return 1.0;
     }
-    final deltaDb = volumeBalanceStrength * (lMin - lSong);
+    final deltaDb = volumeBalanceStrength * (target - loudness);
     return math.pow(10, deltaDb / 20).toDouble();
   }
 
-  double get _effectivePitchSemitones => pitchEnabled ? pitchSemitones : 0.0;
-
-  String _normalizePitchAlgorithm(String? value) {
-    return value == 'resample' ? 'resample' : 'rubberband';
+  double _quietestPrimaryLoudness() {
+    double? quietest;
+    for (final song in currentQueue) {
+      for (final version in song.versions) {
+        final loudness = version.loudness;
+        if (version.isPrimary &&
+            loudness != null &&
+            (quietest == null || loudness < quietest)) {
+          quietest = loudness;
+        }
+      }
+    }
+    return quietest ?? _defaultLoudnessDb;
   }
 
-  String _normalizeRubberbandWindow(String? value) {
-    return value == 'quality' ? 'quality' : 'latency';
+  /// Reopens the current stream at the current position so settings that are
+  /// fixed at stream start (device, buffer, gain, resampler) take effect.
+  Future<void> _restartStream() async {
+    if (playingSong == null ||
+        playingVersion == null ||
+        !_hasPreparedPlayback ||
+        _libraryPath.isEmpty) {
+      return;
+    }
+    await _startStream(startPosition: currentPosition, startPaused: !isPlaying);
   }
 
-  String _normalizeResamplerQuality(String? value) {
-    return value == 'standard' ? 'standard' : 'high';
+  /// Opens an engine stream for [playingVersion].
+  ///
+  /// Starts are serialized and only the newest one proceeds, so skipping
+  /// quickly through songs can never leave an older song playing or seek the
+  /// new song to a stale position.
+  Future<void> _startStream({
+    required Duration startPosition,
+    required bool startPaused,
+  }) async {
+    final request = ++_streamRequest;
+    final previous = _streamStart;
+    final done = Completer<void>();
+    _streamStart = done.future;
+    try {
+      await previous;
+      if (request == _streamRequest) {
+        await _openStream(request, startPosition, startPaused);
+      }
+    } finally {
+      done.complete();
+    }
   }
 
-  String _normalizeOutputLatencyMode(String? value) {
-    return value == 'shared-low-latency' || value == 'shared-stable'
-        ? value!
-        : 'shared-default';
+  Future<void> _openStream(
+    int request,
+    Duration startPosition,
+    bool startPaused,
+  ) async {
+    bool superseded() => request != _streamRequest || _disposed;
+
+    final version = playingVersion;
+    if (version == null) {
+      throw Exception('当前没有可播放的音频版本。');
+    }
+    final duration = Duration(milliseconds: (version.duration * 1000).round());
+    final position = duration > Duration.zero && startPosition > duration
+        ? duration
+        : startPosition;
+    final path = _audioPath(version);
+
+    _hasPreparedPlayback = false;
+    try {
+      if (!await File(path).exists()) {
+        throw Exception('音频文件不存在: $path');
+      }
+      if (superseded()) return;
+      await playback.startPlayback(
+        path: path,
+        volume: volume,
+        pitch: _effectivePitchSemitones,
+        algo: pitchAlgorithm,
+        normalizationGain: _normalizationGain(version),
+      );
+      if (superseded()) return;
+      if (position > Duration.zero) {
+        await playback.seekPlayback(secs: position.inMilliseconds / 1000.0);
+      }
+      if (startPaused) {
+        await playback.pausePlayback();
+      }
+    } catch (_) {
+      if (!superseded()) {
+        await _haltAfterFailedStart();
+      }
+      rethrow;
+    }
+    if (superseded()) return;
+
+    isPlaying = !startPaused;
+    if (startPaused) {
+      _stopPositionTimer();
+      unawaited(refreshAudioOutputInfo());
+    } else {
+      _startPositionTimer();
+      _startOutputInfoTimer();
+    }
+    currentPosition = position;
+    totalDuration = duration;
+    _hasPreparedPlayback = true;
+    _pendingRestorePosition = null;
+    _publishPlaybackState();
   }
 
-  Future<void> _syncAudioQualitySettings() {
-    return music.setRustAudioQualitySettings(
-      peakProtectionEnabled: peakProtectionEnabled,
-      ditherEnabled: ditherEnabled,
-      rubberbandWindow: rubberbandWindow,
-      rubberbandFormantPreserved: rubberbandFormantPreserved,
-      rubberbandVocalOnlyPitch: rubberbandVocalOnlyPitch,
-      resamplerQuality: resamplerQuality,
-    );
+  /// Leaves a consistent "selected but not playing" state when a stream could
+  /// not be opened; pressing play retries.
+  Future<void> _haltAfterFailedStart() async {
+    try {
+      await playback.stopPlayback();
+    } catch (_) {
+      // Nothing more can be done; the UI state below is still accurate.
+    }
+    isPlaying = false;
+    _stopPositionTimer();
+    _stopOutputInfoTimer();
+    notifyListeners();
+    _updateNotification();
   }
+
+  // ---- Position tracking ----
+
+  void _startPositionTimer() {
+    _positionTimer?.cancel();
+    _lastPositionMs = -1;
+    _lastPersistedSecond = -1;
+    _stallTicks = 0;
+    _isHandlingPlaybackEnd = false;
+    _positionTimer = Timer.periodic(_positionPollInterval, _pollPosition);
+  }
+
+  void _stopPositionTimer() {
+    _positionTimer?.cancel();
+  }
+
+  Future<void> _pollPosition(Timer timer) async {
+    if (!isPlaying || _isHandlingPlaybackEnd || _pollingPosition) return;
+    _pollingPosition = true;
+    try {
+      final progress = await playback.getPlaybackProgress();
+      if (!timer.isActive || !isPlaying) return;
+      currentPosition = Duration(
+        milliseconds: (progress.positionSecs * 1000).round(),
+      );
+
+      final hasDuration = totalDuration > Duration.zero;
+      final reachedEnd = hasDuration && currentPosition >= totalDuration;
+
+      // The engine position counts samples the hardware consumed, so when the
+      // stored duration is slightly too long the position plateaus just short
+      // of it once the stream ends. Treat that stall as the end as well.
+      final positionMs = currentPosition.inMilliseconds;
+      if (positionMs == _lastPositionMs) {
+        _stallTicks += 1;
+      } else {
+        _stallTicks = 0;
+        _lastPositionMs = positionMs;
+      }
+      final nearEnd =
+          hasDuration &&
+          currentPosition >= totalDuration - const Duration(seconds: 2);
+      final stalledAtEnd =
+          _stallTicks >= _stallTicksAtEnd &&
+          currentPosition > Duration.zero &&
+          nearEnd;
+
+      if (progress.finished || reachedEnd || stalledAtEnd) {
+        await _handlePlaybackEnded();
+        return;
+      }
+      if (currentPosition.inSeconds != _lastPersistedSecond) {
+        _lastPersistedSecond = currentPosition.inSeconds;
+        unawaited(_persistPlaybackPosition());
+        _updateNotification();
+      }
+    } catch (error) {
+      debugPrint('Failed to poll playback position: $error');
+    } finally {
+      _pollingPosition = false;
+    }
+  }
+
+  Future<void> _handlePlaybackEnded() async {
+    if (_isHandlingPlaybackEnd) return;
+    _isHandlingPlaybackEnd = true;
+    _positionTimer?.cancel();
+
+    try {
+      if (playMode == PlayMode.single &&
+          playingSong != null &&
+          playingVersion != null) {
+        currentPosition = Duration.zero;
+        await _startStream(startPosition: Duration.zero, startPaused: false);
+      } else {
+        playNext();
+      }
+    } catch (error) {
+      debugPrint('Failed to continue playback: $error');
+    } finally {
+      _isHandlingPlaybackEnd = false;
+    }
+  }
+
+  // ---- Persistence ----
 
   Future<void> _clearPersistedPlaybackState(SharedPreferences prefs) async {
     await prefs.remove(_playbackSongIdKey);
@@ -544,37 +706,39 @@ class AudioPlayerProvider extends ChangeNotifier {
         _playbackPositionMsKey,
         currentPosition.inMilliseconds,
       );
-    } catch (_) {}
+    } catch (_) {
+      // Losing one position sample is harmless.
+    }
   }
 
   Future<void> _persistPlaybackState() async {
+    final song = playingSong;
+    final version = playingVersion;
+    final positionMs = currentPosition.inMilliseconds;
+    final queueIds = currentQueue
+        .map((entry) => entry.id)
+        .toList(growable: false);
     try {
       final prefs = await SharedPreferences.getInstance();
-      final song = playingSong;
-      final version = playingVersion;
       if (song == null || version == null) {
         await _clearPersistedPlaybackState(prefs);
         return;
       }
-
       await prefs.setString(_playbackSongIdKey, song.id);
       await prefs.setString(_playbackVersionIdKey, version.id);
-      await prefs.setInt(
-        _playbackPositionMsKey,
-        currentPosition.inMilliseconds,
-      );
-      await prefs.setStringList(
-        _playbackQueueIdsKey,
-        currentQueue.map((entry) => entry.id).toList(growable: false),
-      );
-    } catch (_) {}
+      await prefs.setInt(_playbackPositionMsKey, positionMs);
+      await prefs.setStringList(_playbackQueueIdsKey, queueIds);
+    } catch (_) {
+      // Resume-after-restart is a convenience; never fail playback over it.
+    }
   }
 
+  /// Restores the song, version, queue and position saved by the last
+  /// session. The stream itself is opened lazily on the first "play".
   Future<void> restorePlaybackState(
     List<Song> librarySongs,
-    String libraryPath, {
-    int? audioServerPort,
-  }) async {
+    String libraryPath,
+  ) async {
     if (librarySongs.isEmpty || libraryPath.isEmpty) {
       return;
     }
@@ -587,271 +751,106 @@ class AudioPlayerProvider extends ChangeNotifier {
         return;
       }
 
-      Song? restoredSong;
-      for (final song in librarySongs) {
-        if (song.id == songId) {
-          restoredSong = song;
-          break;
-        }
-      }
-      if (restoredSong == null) {
-        await _clearPersistedPlaybackState(prefs);
-        return;
-      }
-
-      AudioVersion? restoredVersion;
-      for (final version in restoredSong.versions) {
-        if (version.id == versionId) {
-          restoredVersion = version;
-          break;
-        }
-      }
-      if (restoredVersion == null) {
-        await _clearPersistedPlaybackState(prefs);
-        return;
-      }
-      final restoredSongValue = restoredSong;
-      final restoredVersionValue = restoredVersion;
-
-      final savedQueueIds =
-          prefs.getStringList(_playbackQueueIdsKey) ?? const <String>[];
       final songsById = {for (final song in librarySongs) song.id: song};
-      final restoredQueue = <Song>[];
-      for (final id in savedQueueIds) {
-        final queueSong = songsById[id];
-        if (queueSong != null &&
-            !restoredQueue.any((entry) => entry.id == id)) {
-          restoredQueue.add(queueSong);
-        }
-      }
-      if (!restoredQueue.any((entry) => entry.id == restoredSongValue.id)) {
-        restoredQueue.insert(0, restoredSongValue);
+      final song = songsById[songId];
+      final version = song?.versions
+          .where((version) => version.id == versionId)
+          .firstOrNull;
+      if (song == null || version == null) {
+        await _clearPersistedPlaybackState(prefs);
+        return;
       }
 
-      activeSong = restoredSongValue;
-      playingSong = restoredSongValue;
-      playingVersion = restoredVersionValue;
-      currentQueue = restoredQueue;
-      _cachedLibraryPath = libraryPath;
-      _cachedAudioServerPort = audioServerPort;
+      final queueIds = <String>{...?prefs.getStringList(_playbackQueueIdsKey)};
+      final queue = <Song>[
+        if (!queueIds.contains(song.id)) song,
+        for (final id in queueIds) ?songsById[id],
+      ];
 
-      final savedPositionMs = prefs.getInt(_playbackPositionMsKey) ?? 0;
-      totalDuration = Duration(
-        milliseconds: (restoredVersionValue.duration * 1000).round(),
+      activeSong = song;
+      playingSong = song;
+      playingVersion = version;
+      currentQueue = queue;
+      _libraryPath = libraryPath;
+
+      totalDuration = Duration(milliseconds: (version.duration * 1000).round());
+      final savedPosition = Duration(
+        milliseconds: prefs.getInt(_playbackPositionMsKey) ?? 0,
       );
-      currentPosition = Duration(milliseconds: savedPositionMs);
-      if (totalDuration > Duration.zero && currentPosition > totalDuration) {
-        currentPosition = totalDuration;
-      }
+      currentPosition =
+          totalDuration > Duration.zero && savedPosition > totalDuration
+          ? totalDuration
+          : savedPosition;
 
       isPlaying = false;
       _hasPreparedPlayback = false;
       _pendingRestorePosition = currentPosition;
       notifyListeners();
       _updateNotification();
-    } catch (_) {}
+    } catch (error) {
+      debugPrint('Failed to restore playback state: $error');
+    }
   }
 
-  Future<void> _startCurrentVersionPlayback({
-    required Duration startPosition,
-    required bool startPaused,
-  }) async {
-    final version = playingVersion;
-    if (version == null) {
-      throw Exception('当前没有可播放的音频版本。');
-    }
+  // ---- Transport ----
 
-    final path = '$_cachedLibraryPath/${version.filepath}'.replaceAll(
-      '\\',
-      '/',
-    );
-    final file = File(path);
-    if (!await file.exists()) {
-      throw Exception('音频文件不存在: $path');
-    }
+  Future<void> playPause() => isPlaying ? pause() : resume();
 
-    final clampedPosition =
-        totalDuration > Duration.zero && startPosition > totalDuration
-        ? totalDuration
-        : startPosition;
-
-    await music.startRustPlayback(
-      path: path,
-      volume: volume,
-      pitch: _effectivePitchSemitones,
-      algo: pitchAlgorithm,
-      normalizationGain: _computeNormalizationGain(version),
-    );
-    if (clampedPosition > Duration.zero) {
-      await music.seekRustPlayback(
-        secs: clampedPosition.inMilliseconds / 1000.0,
-      );
-    }
-
-    if (startPaused) {
-      await music.pauseRustPlayback();
-      isPlaying = false;
-      _stopPositionTimer();
-    } else {
-      isPlaying = true;
-      _startPositionTimer();
-      _startOutputInfoTimer();
-    }
-
-    currentPosition = clampedPosition;
-    totalDuration = Duration(milliseconds: (version.duration * 1000).round());
-    _hasPreparedPlayback = true;
-    _pendingRestorePosition = null;
-    notifyListeners();
-    _updateNotification();
-    unawaited(_persistPlaybackState());
-  }
-
-  double getLMin() {
-    double lMin = -15.0; // Moderate default loudness
-    bool found = false;
-    for (final song in currentQueue) {
-      for (final v in song.versions) {
-        if (v.isPrimary && v.loudness != null) {
-          if (!found || v.loudness! < lMin) {
-            lMin = v.loudness!;
-            found = true;
-          }
-        }
-      }
-    }
-    return lMin;
-  }
-
-  Future<void> _hotReloadDSP() async {
-    if (playingSong == null ||
-        playingVersion == null ||
-        !_hasPreparedPlayback) {
+  Future<void> pause() async {
+    if (!isPlaying) {
       return;
     }
-
-    final wasPlaying = isPlaying;
-    final pos = currentPosition;
-    final path = '$_cachedLibraryPath/${playingVersion!.filepath}'.replaceAll(
-      '\\',
-      '/',
-    );
-
-    await music.startRustPlayback(
-      path: path,
-      volume: volume,
-      pitch: _effectivePitchSemitones,
-      algo: pitchAlgorithm,
-      normalizationGain: _computeNormalizationGain(playingVersion!),
-    );
-    await music.seekRustPlayback(secs: pos.inMilliseconds / 1000.0);
-    if (wasPlaying) {
-      _startOutputInfoTimer();
-    } else {
-      await music.pauseRustPlayback();
-      await refreshAudioOutputInfo();
-    }
-  }
-
-  void setVolume(double vol) {
-    final normalized = vol.clamp(0.0, 1.0).toDouble();
-    volume = normalized;
-    unawaited(music.setRustVolume(vol: normalized));
-    notifyListeners();
-    unawaited(_persistVolume());
-    _updateNotification();
-  }
-
-  Future<void> _persistVolume() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setDouble(_volumeKey, volume);
-    } catch (_) {}
-  }
-
-  void togglePlayMode() {
-    if (playMode == PlayMode.list) {
-      playMode = PlayMode.shuffle;
-    } else if (playMode == PlayMode.shuffle) {
-      playMode = PlayMode.single;
-    } else {
-      playMode = PlayMode.list;
-    }
-    notifyListeners();
-  }
-
-  Future<void> playPause() async {
-    if (isPlaying) {
-      await music.pauseRustPlayback();
-      isPlaying = false;
-      _stopPositionTimer();
-      _stopOutputInfoTimer();
-    } else {
-      if (playingSong != null && playingVersion != null) {
-        if (!_hasPreparedPlayback) {
-          await _startCurrentVersionPlayback(
-            startPosition: _pendingRestorePosition ?? currentPosition,
-            startPaused: false,
-          );
-          return;
-        }
-        await _handleDefaultOutputDeviceChange();
-        await music.resumeRustPlayback();
-        isPlaying = true;
-        _startPositionTimer();
-        _startOutputInfoTimer();
-      }
-    }
-    notifyListeners();
-    _updateNotification();
-    unawaited(_persistPlaybackState());
+    await playback.pausePlayback();
+    isPlaying = false;
+    _stopPositionTimer();
+    _stopOutputInfoTimer();
+    _publishPlaybackState();
   }
 
   Future<void> resume() async {
-    if (!isPlaying && playingSong != null && playingVersion != null) {
-      if (!_hasPreparedPlayback) {
-        await _startCurrentVersionPlayback(
-          startPosition: _pendingRestorePosition ?? currentPosition,
-          startPaused: false,
-        );
-        return;
-      }
-      await _handleDefaultOutputDeviceChange();
-      await music.resumeRustPlayback();
-      isPlaying = true;
-      _startPositionTimer();
-      _startOutputInfoTimer();
-      notifyListeners();
-      _updateNotification();
-      unawaited(_persistPlaybackState());
+    if (isPlaying || playingSong == null || playingVersion == null) {
+      return;
     }
+    if (!_hasPreparedPlayback) {
+      await _startStream(
+        startPosition: _pendingRestorePosition ?? currentPosition,
+        startPaused: false,
+      );
+      return;
+    }
+    await _handleDefaultOutputDeviceChange();
+    await playback.resumePlayback();
+    isPlaying = true;
+    _startPositionTimer();
+    _startOutputInfoTimer();
+    _publishPlaybackState();
   }
 
   Future<void> seek(Duration position) async {
-    final targetPosition =
-        totalDuration > Duration.zero && position > totalDuration
+    final target = totalDuration > Duration.zero && position > totalDuration
         ? totalDuration
         : position;
     if (!_hasPreparedPlayback &&
         playingSong != null &&
         playingVersion != null) {
-      currentPosition = targetPosition;
-      _pendingRestorePosition = targetPosition;
+      // No stream yet (restored session): remember where to start instead.
+      currentPosition = target;
+      _pendingRestorePosition = target;
       notifyListeners();
       unawaited(_persistPlaybackState());
       return;
     }
-    await music.seekRustPlayback(secs: targetPosition.inMilliseconds / 1000.0);
-    currentPosition = targetPosition;
-    notifyListeners();
-    _updateNotification();
-    unawaited(_persistPlaybackState());
+    await playback.seekPlayback(secs: target.inMilliseconds / 1000.0);
+    currentPosition = target;
+    _publishPlaybackState();
   }
 
+  /// Releases every audio file before LAN sync replaces the library on disk.
   Future<void> stopForLibrarySync() async {
+    _streamRequest++;
     _stopPositionTimer();
     _stopOutputInfoTimer();
-    await music.stopRustPlayback();
+    await playback.stopPlayback();
     isPlaying = false;
     _hasPreparedPlayback = false;
     playingSong = null;
@@ -861,166 +860,123 @@ class AudioPlayerProvider extends ChangeNotifier {
     currentPosition = Duration.zero;
     totalDuration = Duration.zero;
     _pendingRestorePosition = null;
-    notifyListeners();
-    _updateNotification();
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await _clearPersistedPlaybackState(prefs);
-    } catch (_) {}
+    _publishPlaybackState();
   }
 
-  Future<void> playSong(
-    Song song,
-    List<Song> queue,
-    String libraryPath, {
-    int? audioServerPort,
-  }) async {
+  /// Plays the primary version of [song] with [queue] as the play queue.
+  Future<void> playSong(Song song, List<Song> queue, String libraryPath) async {
     currentQueue = queue;
     activeSong = song;
-
-    // Find target version
-    AudioVersion? targetVersion;
-    for (var v in song.versions) {
-      if (v.isPrimary) {
-        targetVersion = v;
-        break;
-      }
-    }
-
-    targetVersion ??= song.versions.isNotEmpty ? song.versions.first : null;
-
-    if (targetVersion == null) {
+    final version =
+        song.versions.where((version) => version.isPrimary).firstOrNull ??
+        song.versions.firstOrNull;
+    if (version == null) {
       throw Exception('该歌曲暂无可播放的音源版本。');
     }
-
-    await playSongVersion(
-      song,
-      targetVersion,
-      libraryPath,
-      audioServerPort: audioServerPort,
-    );
+    await playSongVersion(song, version, libraryPath);
   }
 
   Future<void> playSongVersion(
     Song song,
     AudioVersion version,
-    String libraryPath, {
-    int? audioServerPort,
-  }) async {
-    activeSong = song;
-    playingSong = song;
-    playingVersion = version;
-    _cachedLibraryPath = libraryPath;
-    _cachedAudioServerPort = audioServerPort;
+    String libraryPath,
+  ) {
+    _selectVersion(song, version, libraryPath);
     currentPosition = Duration.zero;
-    totalDuration = Duration(milliseconds: (version.duration * 1000).round());
-    _hasPreparedPlayback = false;
-    _pendingRestorePosition = null;
-    await _startCurrentVersionPlayback(
-      startPosition: Duration.zero,
-      startPaused: false,
-    );
+    return _startStream(startPosition: Duration.zero, startPaused: false);
   }
 
+  /// Switches the playing song to another of its versions, keeping the
+  /// position unless [startPosition] says otherwise.
   Future<void> switchToVersion(
     Song song,
     AudioVersion version,
     String libraryPath, {
-    int? audioServerPort,
     Duration? startPosition,
     bool startPaused = false,
-  }) async {
-    activeSong = song;
-    playingSong = song;
-    playingVersion = version;
-    currentQueue = currentQueue
-        .map((entry) => entry.id == song.id ? song : entry)
-        .toList(growable: false);
-    if (!currentQueue.any((entry) => entry.id == song.id)) {
-      currentQueue = <Song>[song];
-    }
-    _cachedLibraryPath = libraryPath;
-    _cachedAudioServerPort = audioServerPort;
-    totalDuration = Duration(milliseconds: (version.duration * 1000).round());
-    _hasPreparedPlayback = false;
-    _pendingRestorePosition = null;
-    await _startCurrentVersionPlayback(
+  }) {
+    currentQueue = currentQueue.any((entry) => entry.id == song.id)
+        ? _queueWith(song)
+        : <Song>[song];
+    _selectVersion(song, version, libraryPath);
+    return _startStream(
       startPosition: startPosition ?? currentPosition,
       startPaused: startPaused,
     );
   }
 
-  void syncSongSnapshot(Song song) {
-    var changed = false;
-    if (activeSong?.id == song.id) {
-      activeSong = song;
-      changed = true;
-    }
-    if (playingSong?.id == song.id) {
-      playingSong = song;
-      changed = true;
-    }
-    final nextQueue = currentQueue
+  void _selectVersion(Song song, AudioVersion version, String libraryPath) {
+    activeSong = song;
+    playingSong = song;
+    playingVersion = version;
+    _libraryPath = libraryPath;
+    totalDuration = Duration(milliseconds: (version.duration * 1000).round());
+    _hasPreparedPlayback = false;
+    _pendingRestorePosition = null;
+  }
+
+  List<Song> _queueWith(Song song) {
+    return currentQueue
         .map((entry) => entry.id == song.id ? song : entry)
         .toList(growable: false);
-    if (nextQueue.length == currentQueue.length) {
-      currentQueue = nextQueue;
+  }
+
+  /// Replaces stale copies of [song] after the library edited it.
+  void syncSongSnapshot(Song song) {
+    currentQueue = _queueWith(song);
+    final isActive = activeSong?.id == song.id;
+    final isPlayingSong = playingSong?.id == song.id;
+    if (isActive) {
+      activeSong = song;
     }
-    if (changed) {
-      notifyListeners();
-      _updateNotification();
-      unawaited(_persistPlaybackState());
+    if (isPlayingSong) {
+      playingSong = song;
+    }
+    if (isActive || isPlayingSong) {
+      _publishPlaybackState();
     }
   }
 
-  void playNext() {
-    if (currentQueue.isEmpty || playingSong == null) return;
+  void playNext() => _skip(forward: true);
 
-    int index = currentQueue.indexWhere((s) => s.id == playingSong!.id);
+  void playPrevious() => _skip(forward: false);
+
+  void _skip({required bool forward}) {
+    final current = playingSong;
+    if (current == null) return;
+    final index = currentQueue.indexWhere((song) => song.id == current.id);
     if (index == -1) return;
 
-    if (playMode == PlayMode.shuffle) {
-      final randomIdx = DateTime.now().millisecond % currentQueue.length;
-      final nextSong = currentQueue[randomIdx];
-      playSong(
-        nextSong,
-        currentQueue,
-        _cachedLibraryPath,
-        audioServerPort: _cachedAudioServerPort,
-      ).catchError((_) {});
+    final length = currentQueue.length;
+    final int target;
+    if (forward && playMode == PlayMode.shuffle && length > 1) {
+      // Draw from the other songs so shuffle never repeats the current one.
+      final offset = 1 + _random.nextInt(length - 1);
+      target = (index + offset) % length;
     } else {
-      int nextIdx = index + 1;
-      if (nextIdx >= currentQueue.length) {
-        nextIdx = 0;
-      }
-      final nextSong = currentQueue[nextIdx];
-      playSong(
-        nextSong,
-        currentQueue,
-        _cachedLibraryPath,
-        audioServerPort: _cachedAudioServerPort,
-      ).catchError((_) {});
+      target = (index + (forward ? 1 : -1)) % length;
+    }
+    unawaited(_playFromQueue(currentQueue[target]));
+  }
+
+  Future<void> _playFromQueue(Song song) async {
+    try {
+      await playSong(song, currentQueue, _libraryPath);
+    } catch (error) {
+      debugPrint('Failed to play "${song.title}": $error');
     }
   }
 
-  void playPrevious() {
-    if (currentQueue.isEmpty || playingSong == null) return;
-
-    int index = currentQueue.indexWhere((s) => s.id == playingSong!.id);
-    if (index == -1) return;
-
-    int prevIdx = index - 1;
-    if (prevIdx < 0) {
-      prevIdx = currentQueue.length - 1;
-    }
-    final prevSong = currentQueue[prevIdx];
-    playSong(
-      prevSong,
-      currentQueue,
-      _cachedLibraryPath,
-      audioServerPort: _cachedAudioServerPort,
-    ).catchError((_) {});
+  void togglePlayMode() {
+    playMode = switch (playMode) {
+      PlayMode.list => PlayMode.shuffle,
+      PlayMode.shuffle => PlayMode.single,
+      PlayMode.single => PlayMode.list,
+    };
+    notifyListeners();
   }
+
+  // ---- Detail pane ----
 
   void setActiveSong(Song? song) {
     activeSong = song;
@@ -1037,18 +993,12 @@ class AudioPlayerProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  bool _hasPreviousInQueue() {
-    if (currentQueue.isEmpty || playingSong == null) {
-      return false;
-    }
-    return currentQueue.length > 1;
-  }
+  // ---- System notification (Android) ----
 
-  bool _hasNextInQueue() {
-    if (currentQueue.isEmpty || playingSong == null) {
-      return false;
-    }
-    return currentQueue.length > 1;
+  void _publishPlaybackState() {
+    notifyListeners();
+    _updateNotification();
+    unawaited(_persistPlaybackState());
   }
 
   Future<void> _handleNotificationAction(String action) async {
@@ -1063,43 +1013,33 @@ class AudioPlayerProvider extends ChangeNotifier {
     switch (action) {
       case 'previous':
         playPrevious();
-        break;
       case 'toggle':
         await playPause();
-        break;
       case 'next':
         playNext();
-        break;
-      default:
-        break;
     }
-  }
-
-  String? _currentPlayingAudioPath() {
-    final version = playingVersion;
-    if (version == null || _cachedLibraryPath.isEmpty) {
-      return null;
-    }
-    return '$_cachedLibraryPath/${version.filepath}'.replaceAll('\\', '/');
   }
 
   void _updateNotification() {
-    if (Platform.isAndroid && playingSong != null) {
-      final audioPath = _currentPlayingAudioPath();
-      final payload = <String, dynamic>{
-        'title': playingSong!.title,
-        'artist': playingSong!.artist ?? '未知歌手',
+    final song = playingSong;
+    if (!Platform.isAndroid || song == null) {
+      return;
+    }
+    final version = playingVersion;
+    final canSkip = currentQueue.length > 1;
+    unawaited(
+      NativeAudioHelper.showNotification(<String, dynamic>{
+        'title': song.title,
+        'artist': song.artist ?? '未知歌手',
         'isPlaying': isPlaying,
         'positionMs': currentPosition.inMilliseconds,
         'durationMs': totalDuration.inMilliseconds,
-        'hasPrevious': _hasPreviousInQueue(),
-        'hasNext': _hasNextInQueue(),
-      };
-      if (audioPath != null) {
-        payload['audioPath'] = audioPath;
-      }
-      unawaited(NativeAudioHelper.showNotification(payload));
-    }
+        'hasPrevious': canSkip,
+        'hasNext': canSkip,
+        if (version != null && _libraryPath.isNotEmpty)
+          'audioPath': _audioPath(version),
+      }),
+    );
   }
 
   @override
@@ -1111,7 +1051,8 @@ class AudioPlayerProvider extends ChangeNotifier {
     if (Platform.isAndroid) {
       NativeAudioHelper.hideNotification();
     }
-    music.stopRustPlayback();
+    unawaited(playback.stopPlayback());
+    _disposed = true;
     _position.dispose();
     super.dispose();
   }

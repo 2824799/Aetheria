@@ -315,7 +315,6 @@ class _SongTableState extends State<SongTable> {
         song,
         songs,
         libraryProvider.libraryPath,
-        audioServerPort: libraryProvider.audioServerPort,
       );
     } catch (e) {
       if (!mounted) {
@@ -439,9 +438,7 @@ class _SongTableState extends State<SongTable> {
       }
     }
 
-    final clipboardCount = provider.clipboard == null
-        ? null
-        : (provider.clipboard!['songIds'] as List).length;
+    final clipboardCount = provider.clipboard?.songIds.length;
     if (provider.activePlaylistId != null && clipboardCount != null) {
       items.add(const AetherMenuItem.divider());
       items.add(
@@ -463,11 +460,19 @@ class _SongTableState extends State<SongTable> {
   ) async {
     final activePlaylistId = provider.activePlaylistId;
     if (cmd == 'copy') {
-      provider.setClipboard('copy', targetSongIds, activePlaylistId);
+      provider.setClipboard(
+        SongClipboardMode.copy,
+        targetSongIds,
+        activePlaylistId,
+      );
       return;
     }
     if (cmd == 'cut') {
-      provider.setClipboard('cut', targetSongIds, activePlaylistId);
+      provider.setClipboard(
+        SongClipboardMode.cut,
+        targetSongIds,
+        activePlaylistId,
+      );
       return;
     }
     if (cmd == 'delete') {
@@ -912,9 +917,6 @@ class _SongTableState extends State<SongTable> {
                                                           songs,
                                                           libraryProvider
                                                               .libraryPath,
-                                                          audioServerPort:
-                                                              libraryProvider
-                                                                  .audioServerPort,
                                                         );
                                                       } catch (e) {
                                                         if (!context.mounted) {

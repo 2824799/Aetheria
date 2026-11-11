@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:aetheria/core/utils/formatting.dart';
 import 'package:aetheria/core/providers/library_provider.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
 import 'package:aetheria/core/widgets/aether_button.dart';
@@ -22,14 +23,6 @@ class TagFilter extends StatefulWidget {
 
 class _TagFilterState extends State<TagFilter> {
   bool _isExpanded = true;
-
-  Color _parseHexColor(String hex, Color defaultColor) {
-    final clean = hex.replaceAll('#', '');
-    if (clean.length == 6) {
-      return Color(int.parse('FF$clean', radix: 16));
-    }
-    return defaultColor;
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -212,9 +205,7 @@ class _TagFilterState extends State<TagFilter> {
               final isSelected = libraryProvider.selectedTags.contains(tag.id);
               final isExcluded = libraryProvider.excludedTags.contains(tag.id);
 
-              Color tagColor = tag.color != null
-                  ? _parseHexColor(tag.color!, cfg.textSecondary)
-                  : cfg.textSecondary;
+              Color tagColor = parseTagColor(tag.color, cfg.textSecondary);
               if (isExcluded) {
                 tagColor = cfg.danger;
               }

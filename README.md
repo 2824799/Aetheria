@@ -1167,7 +1167,6 @@ Aetheria
 │  ├─ 音乐导入、元数据读取、封面提取
 │  ├─ 歌曲、版本、标签、歌词、歌单持久化
 │  ├─ 音频解码、输出、DSP、设备信息
-│  ├─ 本地 HTTP Range 音频服务
 │  └─ 通过 flutter_rust_bridge 暴露 API
 │
 ├─ Android Native
@@ -1200,14 +1199,15 @@ Aetheria
 
 | 模块 | 文件 | 职责 |
 | --- | --- | --- |
-| API | `rust/src/api/music.rs` | 暴露给 Dart 的主要业务接口 |
-| Simple API | `rust/src/api/simple.rs` | 简单桥接示例 |
+| 音乐库 API | `rust/src/api/music.rs` | 暴露给 Dart 的音乐库接口，只做参数转发 |
+| 播放 API | `rust/src/api/playback.rs` | 暴露给 Dart 的播放控制、输出设置与性能统计接口 |
+| 初始化 API | `rust/src/api/simple.rs` | FRB 初始化入口 `init_app` |
+| 音乐库领域层 | `rust/src/library/` | 导入、歌曲与版本、标签、歌单、歌词、维护、路径校验、元数据探测 |
 | 数据库连接 | `rust/src/database/connection.rs` | 库目录、文件目录、SQLite 连接 |
 | 数据库结构 | `rust/src/database/schema.rs` | 建表、迁移、默认标签 |
 | 音频播放 | `rust/src/audio/player.rs` | cpal 输出、解码管线、缓冲、播放控制 |
 | DSP | `rust/src/audio/dsp.rs` | 响度、流式解码、重采样、变调 |
 | Rubber Band | `rust/src/audio/rubberband.rs` | Rubber Band LiveShifter FFI 封装 |
-| 音频 HTTP 服务 | `rust/src/audio/server.rs` | 本地 Range 请求服务 |
 | 性能统计 | `rust/src/audio/profiler.rs` | 调用树性能报告 |
 | 模型 | `rust/src/models/` | Song、AudioVersion、Tag、SavedLyric、Playlist |
 
@@ -1658,6 +1658,7 @@ Rust API 入口：
 
 ```text
 rust/src/api/music.rs
+rust/src/api/playback.rs
 rust/src/api/simple.rs
 ```
 
@@ -1713,38 +1714,6 @@ Rust 使用 `StreamDecoder` 分包解码音频，避免一次性把整个文件�
 - f32 输出格式。
 
 如果设备默认不是 f32，会回退到设备默认格式，并在整数格式输出前按设置加入 dither。
-
-### 本地 HTTP Range 音频服务
-
-Rust 还包含一个本地 HTTP Range 服务：
-
-```text
-127.0.0.1:16860-16865
-```
-
-如果固定端口不可用，会让系统分配随机端口。
-
-服务支持：
-
-- `GET`
-- `HEAD`
-- `OPTIONS`
-- `Range` 请求。
-- `206 Partial Content`。
-- CORS 头。
-- 音频 MIME 推断。
-
-支持 MIME 包括：
-
-- `mp3` -> `audio/mpeg`
-- `flac` -> `audio/flac`
-- `wav` -> `audio/wav`
-- `m4a` -> `audio/mp4`
-- `ogg` -> `audio/ogg`
-- `aac` -> `audio/aac`
-- `wma` -> `audio/x-ms-wma`
-
-当前主要播放链路使用 Rust 原生输出；这个服务保留为本地音频流式访问能力。
 
 ## 局域网同步协议说明
 
