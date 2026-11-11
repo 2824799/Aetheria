@@ -4,8 +4,9 @@ Rules for all Flutter UI in this repo. Prefer fixing at the primitive layer over
 
 ## Colors
 - Read colors only from `AppThemeConfig` / `context.tokens`.
-- Prefer semantic names: `textPrimary`, `textSecondary`, `borderSubtle`, `bg0`–`bg3`.
-- Legacy aliases (`textMain`, `textSub`, `border`, `bgPanel`) remain for compatibility; do not introduce new usages.
+- Prefer semantic names: `textPrimary`, `textSecondary`, `textTertiary`, `bg1`, `bgElevated`, `bgPopover`, `divider`, `borderSubtle`.
+- `textMain`, `textSub`, `border`, `bgPanel` are the same values under older names; do not introduce new usages.
+- Do not call `withValues(alpha:)` on line or state colours (`divider`, `borderSubtle`, `bgHover`, …): they are already translucent and the call replaces their alpha. Pick the token of the right weight instead.
 - Hardcoded `Color(0x…)` is allowed only in theme/palette definitions.
 
 ## Space / Type / Radius / Icons

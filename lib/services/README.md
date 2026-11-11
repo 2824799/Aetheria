@@ -1,11 +1,11 @@
 # Services Layer
 
-This layer is responsible for interacting with external systems, APIs, or the Rust backend.
+Code that talks to things outside the Flutter app, other than the Rust core.
 
-## Contents
-- **Rust Bridge Wrappers**: Helper classes that wrap the raw generated `rust.dart` functions with error handling and logging.
-- **Audio Service**: Abstraction over the audio player package (e.g. `just_audio` or `audioplayers`).
+| File | Role |
+| --- | --- |
+| `lyric_search_service.dart` | Finds lyric candidates: embedded tags and local `.lrc` files (through the Rust core), then NetEase, QQ, Kugou and LRCLIB |
+| `native_audio_helper.dart` | Platform channel `com.aetheria.app/notification`: media notification, floating lyrics and SuperLyric, saving to Downloads, multicast lock for LAN sync, device name, desktop window info |
 
-## Guidelines
-- Service instances should be provided via Dependency Injection or State Management (e.g., Riverpod Providers).
-- UI code should NEVER call `rust.dart` directly; it must go through a Service.
+The Rust core is called through the generated bindings in `lib/src/rust/`,
+mostly from the providers in `lib/core/providers/`.

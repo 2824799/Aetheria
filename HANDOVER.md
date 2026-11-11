@@ -11,12 +11,16 @@
 ### 目录结构说明
 * `/lib` : Flutter 前端代码
   * `lib/main.dart` : 应用入口，初始化了 Rust 桥接接口、应用路由与主题提供者。
-  * `lib/core/theme/` : UI 主题管理。包含 `UIThemeProvider`，内置 `Dark`、`Light`、`Pink` 三套与原 React 版本 1:1 对应的颜色变量及毛玻璃特效控制。
-  * `lib/features/library/` : 音乐库核心业务模块
-    * `ui/` : 前端 UI 组件（`main_layout.dart`、`sidebar.dart`、`tag_filter.dart`、`song_table.dart`、`play_bar.dart`、`detail_pane.dart` 等）。
-    * `providers/` : 状态管理（Riverpod）
-      * `LibraryProvider` : 管理扫描音乐目录、导入文件、同步 Rust 端 SQLite 数据库状态。
-      * `AudioPlayerProvider` : 管理音频播放器状态（播放、暂停、进度条拖拽、音量、循环与随机模式）。
+  * `lib/core/theme/` : UI 主题管理。包含 `UIThemeProvider`，内置 `dark`、`light`、`pink`、`pinkDark` 四套配色（`app_theme_config.dart`），规范见 `UI_CONTRACT.md`。
+  * `lib/core/providers/` : 状态管理（`provider` + `ChangeNotifier`）
+    * `LibraryProvider` : 歌曲、标签、歌单、筛选与导入，同步 Rust 端 SQLite 数据库状态。
+    * `AudioPlayerProvider` : 播放器状态（播放、暂停、进度、音量、循环与随机模式、音频处理设置）。
+    * `SyncProvider` : 局域网镜像同步。
+  * `lib/features/` : 按功能划分的 UI（详见 `lib/features/README.md`）
+    * `layout/` : 桌面端外壳 `main_layout.dart` 与移动端 `mobile_layout.dart`。
+    * `library/` : 歌曲表格、标签筛选与管理、导入、设置。
+    * `player/` : 播放条、详情抽屉、歌词面板、音源版本操作。
+    * `sidebar/` : 桌面端侧边导航。
 * `/rust` : 底层 Rust 代码
   * `rust/src/api/` : 暴露给 Dart 的 FRB v2 API 接口（`music.rs` 音乐库、`playback.rs` 播放控制），只做转发。
   * `rust/src/library/` : 音乐库业务逻辑（导入、歌曲/版本、标签、歌单、歌词、维护）。
