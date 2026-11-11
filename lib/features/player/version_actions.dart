@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:aetheria/core/providers/audio_player_provider.dart';
 import 'package:aetheria/core/providers/library_provider.dart';
 import 'package:aetheria/core/utils/audio_formats.dart';
+import 'package:aetheria/core/utils/audio_quality.dart';
 import 'package:aetheria/core/utils/formatting.dart';
 import 'package:aetheria/core/widgets/aether_dialog.dart';
 import 'package:aetheria/core/widgets/aether_progress_dialog.dart';
@@ -24,13 +25,10 @@ AudioVersion? displayVersionForSong(Song song, AudioPlayerProvider audio) {
   if (audio.playingSong?.id == song.id && playingVersion != null) {
     return playingVersion;
   }
-  for (final version in song.versions) {
-    if (version.isPrimary) return version;
-  }
-  return song.versions.isNotEmpty ? song.versions.first : null;
+  return primaryVersionOf(song);
 }
 
-/// `FLAC | 320kbps | 44.1kHz | 3:05 | 12.3 MB`
+/// `FLAC · 320kbps · 44.1kHz · 3:05 · 12.3 MB`
 String formatVersionSpecs(AudioVersion version) {
   final sampleRate = version.sampleRate;
   return [
@@ -39,7 +37,7 @@ String formatVersionSpecs(AudioVersion version) {
     '${sampleRate == null ? '未知' : (sampleRate / 1000).toStringAsFixed(1)}kHz',
     formatDurationSeconds(version.duration),
     formatFileSize(version.fileSize.toInt()),
-  ].join(' | ');
+  ].join(' · ');
 }
 
 /// Runs [task] behind a progress dialog. Returns whether it completed; a

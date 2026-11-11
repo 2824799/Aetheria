@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
 import 'package:aetheria/core/providers/library_provider.dart';
-import 'package:aetheria/core/providers/audio_player_provider.dart';
 import 'package:aetheria/core/providers/sync_provider.dart';
 import 'package:aetheria/core/theme/theme.dart';
 import 'package:aetheria/core/widgets/aether_button.dart';
@@ -10,30 +9,20 @@ import 'package:aetheria/core/widgets/aether_section.dart';
 import 'package:aetheria/core/widgets/aether_surface.dart';
 import 'package:aetheria/features/library/ui/settings/settings_shared_widgets.dart';
 
-typedef SettingsSyncPullHandler = Future<void> Function(
-  BuildContext context,
-  AppThemeConfig cfg,
-  SyncDevice device,
-  LibraryProvider libraryProvider,
-  AudioPlayerProvider audioProvider,
-  SyncProvider syncProvider,
-);
 
 class SettingsSyncTab extends StatelessWidget {
   const SettingsSyncTab({
     super.key,
     required this.cfg,
     required this.libraryProvider,
-    required this.audioProvider,
     required this.syncProvider,
     required this.onPullDevice,
   });
 
   final AppThemeConfig cfg;
   final LibraryProvider libraryProvider;
-  final AudioPlayerProvider audioProvider;
   final SyncProvider syncProvider;
-  final SettingsSyncPullHandler onPullDevice;
+  final ValueChanged<SyncDevice> onPullDevice;
 
   @override
   Widget build(BuildContext context) {
@@ -150,7 +139,7 @@ class SettingsSyncTab extends StatelessWidget {
           AetherProgress.linear(
             size: 6,
             value: syncProvider.progress,
-            trackColor: cfg.borderSubtle.withValues(alpha: 0.45),
+            trackColor: cfg.sliderTrack,
           ),
         ],
         const AetherDivider(),
@@ -171,10 +160,8 @@ class SettingsSyncTab extends StatelessWidget {
             SettingsSyncDeviceTile(
               cfg: cfg,
               device: device,
-              libraryProvider: libraryProvider,
-              audioProvider: audioProvider,
-              syncProvider: syncProvider,
-              onPull: onPullDevice,
+              canPull: !syncProvider.isSyncing,
+              onPull: () => onPullDevice(device),
             ),
             const SizedBox(height: AetherSpace.lg - 2),
           ],
@@ -193,18 +180,14 @@ class SettingsSyncDeviceTile extends StatelessWidget {
     super.key,
     required this.cfg,
     required this.device,
-    required this.libraryProvider,
-    required this.audioProvider,
-    required this.syncProvider,
+    required this.canPull,
     required this.onPull,
   });
 
   final AppThemeConfig cfg;
   final SyncDevice device;
-  final LibraryProvider libraryProvider;
-  final AudioPlayerProvider audioProvider;
-  final SyncProvider syncProvider;
-  final SettingsSyncPullHandler onPull;
+  final bool canPull;
+  final VoidCallback onPull;
 
   @override
   Widget build(BuildContext context) {
@@ -262,16 +245,7 @@ class SettingsSyncDeviceTile extends StatelessWidget {
             label: '同步到本机',
             icon: Icons.download,
             size: AetherButtonSize.sm,
-            onPressed: syncProvider.isSyncing
-                ? null
-                : () => onPull(
-                    context,
-                    cfg,
-                    device,
-                    libraryProvider,
-                    audioProvider,
-                    syncProvider,
-                  ),
+            onPressed: canPull ? onPull : null,
           ),
         ],
       ),

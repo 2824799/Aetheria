@@ -1,16 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+
 import 'package:aetheria/core/providers/library_provider.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
-import 'package:aetheria/core/widgets/aether_button.dart';
-import 'package:aetheria/core/widgets/aether_dialog.dart';
 import 'package:aetheria/core/widgets/aether_icon_button.dart';
 import 'package:aetheria/core/widgets/aether_menu.dart';
 import 'package:aetheria/core/widgets/aether_pressable.dart';
-import 'package:aetheria/core/widgets/aether_text_field.dart';
-import 'package:aetheria/core/widgets/aether_toast.dart';
+import 'package:aetheria/features/library/playlist_actions.dart';
 import 'package:aetheria/features/library/ui/settings_modal.dart';
+import 'package:aetheria/src/rust/models/playlist.dart';
 
+/// Desktop navigation: the whole library, the playlists, and settings.
 class Sidebar extends StatelessWidget {
   final double width;
 
@@ -18,8 +18,7 @@ class Sidebar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final libraryProvider = context.watch<LibraryProvider>();
-    context.watch<UIThemeProvider>();
+    final library = context.watch<LibraryProvider>();
     final cfg = context.tokens;
 
     return Container(
@@ -31,122 +30,70 @@ class Sidebar extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-              AetherSpace.xxl,
-              AetherSpace.xxl,
-              AetherSpace.xxl,
-              AetherSpace.lg,
-            ),
-            child: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(AetherSpace.md),
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [cfg.accent, cfg.accentHover],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                    borderRadius: BorderRadius.circular(AetherRadius.md),
-                    boxShadow: [
-                      BoxShadow(
-                        color: cfg.accentGlow,
-                        blurRadius: 12,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: Icon(
-                    Icons.music_note_rounded,
-                    color: cfg.onAccent,
-                    size: AetherIconSize.xxl,
-                  ),
-                ),
-                const SizedBox(width: AetherSpace.lg),
-                Expanded(
-                  child: Text(
-                    'Aetheria',
-                    style: AetherType.titleLgStyle(cfg.textPrimary).copyWith(
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.4,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            ),
-          ),
+          const _Brand(),
           Expanded(
             child: ListView(
               padding: const EdgeInsets.symmetric(horizontal: AetherSpace.lg),
               children: [
-                _SidebarSectionLabel(label: '音乐库', cfgColor: cfg.textTertiary),
-                _SidebarNavItem(
-                  icon: Icons.library_music_rounded,
+                _NavItem(
+                  icon: Icons.library_music_outlined,
                   title: '全部歌曲',
-                  count: libraryProvider.songs.length,
-                  isActive: libraryProvider.activePlaylistId == null,
-                  onTap: () => libraryProvider.setActivePlaylist(null),
+                  count: library.songs.length,
+                  isActive: library.activePlaylistId == null,
+                  onTap: () => library.setActivePlaylist(null),
                 ),
                 const SizedBox(height: AetherSpace.xxl),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _SidebarSectionLabel(
-                        label: '歌单',
-                        cfgColor: cfg.textTertiary,
+                Padding(
+                  padding: const EdgeInsets.only(
+                    left: AetherSpace.lg,
+                    bottom: AetherSpace.xs,
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '歌单',
+                          style: AetherType.labelStyle(cfg.textTertiary),
+                        ),
                       ),
-                    ),
-                    AetherIconButton(
-                      icon: Icons.add_rounded,
-                      onPressed: () =>
-                          _showCreatePlaylistDialog(context, libraryProvider),
-                      size: 28,
-                      iconSize: AetherIconSize.md,
-                      tooltip: '新建歌单',
-                    ),
-                  ],
+                      AetherIconButton(
+                        icon: Icons.add_rounded,
+                        onPressed: () =>
+                            createPlaylistWithDialog(context, library),
+                        size: 28,
+                        iconSize: AetherIconSize.md,
+                        tooltip: '新建歌单',
+                      ),
+                    ],
+                  ),
                 ),
-                const SizedBox(height: AetherSpace.sm),
-                if (libraryProvider.playlists.isEmpty)
+                if (library.playlists.isEmpty)
                   Padding(
                     padding: const EdgeInsets.symmetric(
-                      horizontal: AetherSpace.md,
+                      horizontal: AetherSpace.lg,
                       vertical: AetherSpace.sm,
                     ),
                     child: Text(
-                      '还没有歌单，点右上角 + 新建',
-                      style: AetherType.captionStyle(cfg.textTertiary),
+                      '点击 + 新建第一个歌单',
+                      style: AetherType.bodySmStyle(cfg.textTertiary),
                     ),
-                  )
-                else
-                  ...libraryProvider.playlists.map(
-                    (p) => _SidebarNavItem(
-                      icon: Icons.queue_music_rounded,
-                      title: p.name,
-                      isActive: libraryProvider.activePlaylistId == p.id,
-                      onTap: () => libraryProvider.setActivePlaylist(p.id),
-                      onSecondaryTapUp: (details) {
-                        _showPlaylistContextMenu(
-                          context,
-                          details.globalPosition,
-                          p.id,
-                          p.name,
-                          libraryProvider,
-                        );
-                      },
-                    ),
+                  ),
+                for (final playlist in library.playlists)
+                  _NavItem(
+                    icon: Icons.queue_music_rounded,
+                    title: playlist.name,
+                    isActive: library.activePlaylistId == playlist.id,
+                    onTap: () => library.setActivePlaylist(playlist.id),
+                    onContextMenu: (position) =>
+                        _showPlaylistMenu(context, position, playlist, library),
                   ),
               ],
             ),
           ),
-          Divider(height: 1, color: cfg.borderSubtle),
           Padding(
             padding: const EdgeInsets.all(AetherSpace.lg),
-            child: _SidebarNavItem(
-              icon: Icons.settings_rounded,
+            child: _NavItem(
+              icon: Icons.settings_outlined,
               title: '设置',
               isActive: false,
               onTap: () => SettingsModal.show(context),
@@ -157,65 +104,21 @@ class Sidebar extends StatelessWidget {
     );
   }
 
-  Future<void> _showCreatePlaylistDialog(
-    BuildContext context,
-    LibraryProvider provider,
-  ) async {
-    final controller = TextEditingController();
-    final created = await showAetherDialog<bool>(
-      context: context,
-      builder: (ctx) {
-        return AetherDialog(
-          title: '新建歌单',
-          content: AetherTextField(
-            controller: controller,
-            hintText: '歌单名称',
-            autofocus: true,
-            onSubmitted: (_) => Navigator.of(ctx).pop(true),
-          ),
-          actions: [
-            AetherButton.ghost(
-              label: '取消',
-              onPressed: () => Navigator.of(ctx).pop(false),
-            ),
-            AetherButton.primary(
-              label: '创建',
-              onPressed: () => Navigator.of(ctx).pop(true),
-            ),
-          ],
-        );
-      },
-    );
-
-    final name = controller.text.trim();
-    controller.dispose();
-    if (created != true || name.isEmpty) return;
-
-    try {
-      await provider.createPlaylist(name);
-    } catch (e) {
-      if (context.mounted) {
-        showAetherToast(
-          context,
-          message: '创建失败: $e',
-          kind: AetherToastKind.error,
-        );
-      }
-    }
-  }
-
-  Future<void> _showPlaylistContextMenu(
+  Future<void> _showPlaylistMenu(
     BuildContext context,
     Offset position,
-    String playlistId,
-    String currentName,
-    LibraryProvider provider,
+    Playlist playlist,
+    LibraryProvider library,
   ) async {
-    final val = await showAetherMenu<String>(
+    final choice = await showAetherMenu<String>(
       context: context,
       globalPosition: position,
       items: const [
-        AetherMenuItem(value: 'rename', label: '重命名歌单', icon: Icons.edit_rounded),
+        AetherMenuItem(
+          value: 'rename',
+          label: '重命名',
+          icon: Icons.edit_outlined,
+        ),
         AetherMenuItem(
           value: 'delete',
           label: '删除歌单',
@@ -224,166 +127,95 @@ class Sidebar extends StatelessWidget {
         ),
       ],
     );
-
     if (!context.mounted) return;
-    if (val == 'rename') {
-      await _showRenamePlaylistDialog(
-        context,
-        playlistId,
-        currentName,
-        provider,
-      );
-    } else if (val == 'delete') {
-      await _confirmDeletePlaylist(context, playlistId, currentName, provider);
-    }
-  }
-
-  Future<void> _showRenamePlaylistDialog(
-    BuildContext context,
-    String id,
-    String currentName,
-    LibraryProvider provider,
-  ) async {
-    final controller = TextEditingController(text: currentName);
-    final renamed = await showAetherDialog<bool>(
-      context: context,
-      builder: (ctx) {
-        return AetherDialog(
-          title: '重命名歌单',
-          content: AetherTextField(
-            controller: controller,
-            hintText: '新歌单名称',
-            autofocus: true,
-            onSubmitted: (_) => Navigator.of(ctx).pop(true),
-          ),
-          actions: [
-            AetherButton.ghost(
-              label: '取消',
-              onPressed: () => Navigator.of(ctx).pop(false),
-            ),
-            AetherButton.primary(
-              label: '重命名',
-              onPressed: () => Navigator.of(ctx).pop(true),
-            ),
-          ],
-        );
-      },
-    );
-
-    final name = controller.text.trim();
-    controller.dispose();
-    if (renamed != true || name.isEmpty) return;
-
-    try {
-      await provider.renamePlaylist(id, name);
-    } catch (e) {
-      if (context.mounted) {
-        showAetherToast(
-          context,
-          message: '命名失败: $e',
-          kind: AetherToastKind.error,
-        );
-      }
-    }
-  }
-
-  Future<void> _confirmDeletePlaylist(
-    BuildContext context,
-    String id,
-    String name,
-    LibraryProvider provider,
-  ) async {
-    final confirmed = await showAetherConfirmDialog(
-      context: context,
-      title: '删除歌单？',
-      message: '确定删除歌单“$name”吗？这不会删除音乐库中的歌曲。',
-      confirmLabel: '删除',
-      dangerous: true,
-    );
-    if (!confirmed) return;
-
-    try {
-      await provider.deletePlaylist(id);
-    } catch (e) {
-      if (context.mounted) {
-        showAetherToast(
-          context,
-          message: '删除失败: $e',
-          kind: AetherToastKind.error,
-        );
-      }
+    if (choice == 'rename') {
+      await renamePlaylistWithDialog(context, library, playlist);
+    } else if (choice == 'delete') {
+      await deletePlaylistWithConfirm(context, library, playlist);
     }
   }
 }
 
-class _SidebarSectionLabel extends StatelessWidget {
-  final String label;
-  final Color cfgColor;
-
-  const _SidebarSectionLabel({
-    required this.label,
-    required this.cfgColor,
-  });
+class _Brand extends StatelessWidget {
+  const _Brand();
 
   @override
   Widget build(BuildContext context) {
+    final cfg = context.tokens;
     return Padding(
-      padding: const EdgeInsets.only(
-        left: AetherSpace.md,
-        bottom: AetherSpace.sm,
-        top: 2,
+      padding: const EdgeInsets.fromLTRB(
+        AetherSpace.xxl,
+        AetherSpace.xxl,
+        AetherSpace.xxl,
+        AetherSpace.xxl,
       ),
-      child: Text(
-        label,
-        style: AetherType.captionStyle(cfgColor).copyWith(
-          fontWeight: FontWeight.w600,
-          letterSpacing: 1.1,
-        ),
+      child: Row(
+        children: [
+          Container(
+            width: 30,
+            height: 30,
+            decoration: BoxDecoration(
+              color: cfg.accent,
+              borderRadius: BorderRadius.circular(AetherRadius.md - 2),
+            ),
+            child: Icon(
+              Icons.graphic_eq_rounded,
+              color: cfg.onAccent,
+              size: AetherIconSize.lg,
+            ),
+          ),
+          const SizedBox(width: AetherSpace.lg),
+          Expanded(
+            child: Text(
+              'Aetheria',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AetherType.titleStyle(
+                cfg.textPrimary,
+              ).copyWith(fontWeight: FontWeight.w700, letterSpacing: 0.2),
+            ),
+          ),
+        ],
       ),
     );
   }
 }
 
-class _SidebarNavItem extends StatelessWidget {
+class _NavItem extends StatelessWidget {
+  const _NavItem({
+    required this.icon,
+    required this.title,
+    required this.isActive,
+    required this.onTap,
+    this.count,
+    this.onContextMenu,
+  });
+
   final IconData icon;
   final String title;
   final int? count;
   final bool isActive;
   final VoidCallback onTap;
-  final GestureTapUpCallback? onSecondaryTapUp;
-
-  const _SidebarNavItem({
-    required this.icon,
-    required this.title,
-    this.count,
-    required this.isActive,
-    required this.onTap,
-    this.onSecondaryTapUp,
-  });
+  final ValueChanged<Offset>? onContextMenu;
 
   @override
   Widget build(BuildContext context) {
     final cfg = context.tokens;
     final radius = BorderRadius.circular(AetherRadius.md);
+    final count = this.count;
+    final onContextMenu = this.onContextMenu;
 
     final item = AetherPressable(
       onTap: onTap,
       borderRadius: radius,
       pressScale: AetherMotion.pressScaleSubtle,
       hoverColor: isActive ? null : cfg.bgHover,
-      child: AnimatedContainer(
-        duration: AetherMotion.duration(context, AetherMotion.fast),
-        curve: AetherMotion.out,
-        padding: const EdgeInsets.symmetric(
-          horizontal: AetherSpace.lg,
-          vertical: 9,
-        ),
+      child: Container(
+        height: 36,
+        padding: const EdgeInsets.symmetric(horizontal: AetherSpace.lg),
         decoration: BoxDecoration(
-          color: isActive ? cfg.accentMuted : Colors.transparent,
+          color: isActive ? cfg.accentMuted : null,
           borderRadius: radius,
-          border: isActive
-              ? Border(left: BorderSide(color: cfg.accent, width: 3))
-              : Border(left: BorderSide(color: Colors.transparent, width: 3)),
         ),
         child: Row(
           children: [
@@ -396,30 +228,34 @@ class _SidebarNavItem extends StatelessWidget {
             Expanded(
               child: Text(
                 title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: AetherType.bodyStyle(
                   isActive ? cfg.textPrimary : cfg.textSecondary,
                 ).copyWith(
-                  fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
+                  fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
                 ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
               ),
             ),
             if (count != null)
               Text(
-                count.toString(),
-                style: AetherType.captionStyle(cfg.textTertiary),
+                '$count',
+                style: AetherType.bodySmStyle(cfg.textTertiary),
               ),
           ],
         ),
       ),
     );
 
-    if (onSecondaryTapUp == null) return item;
-
-    return GestureDetector(
-      onSecondaryTapUp: onSecondaryTapUp,
-      child: item,
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AetherSpace.xxs),
+      child: onContextMenu == null
+          ? item
+          : GestureDetector(
+              onSecondaryTapUp: (details) =>
+                  onContextMenu(details.globalPosition),
+              child: item,
+            ),
     );
   }
 }

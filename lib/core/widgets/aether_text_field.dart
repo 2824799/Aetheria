@@ -102,7 +102,7 @@ class AetherTextField extends StatelessWidget {
     );
     final outlinedDisabled = OutlineInputBorder(
       borderRadius: radius,
-      borderSide: BorderSide(color: cfg.borderSubtle.withValues(alpha: 0.5)),
+      borderSide: BorderSide(color: cfg.divider),
     );
 
     final field = TextField(

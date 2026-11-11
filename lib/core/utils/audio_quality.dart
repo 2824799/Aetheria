@@ -5,6 +5,14 @@ import 'package:aetheria/src/rust/models/song.dart';
 
 const _losslessFormats = {'flac', 'wav', 'alac', 'ape'};
 
+/// The version used for playback: the primary one, else the first.
+AudioVersion? primaryVersionOf(Song song) {
+  for (final version in song.versions) {
+    if (version.isPrimary) return version;
+  }
+  return song.versions.isEmpty ? null : song.versions.first;
+}
+
 String audioQualityText(AudioVersion? version) {
   if (version == null) {
     return '无源';

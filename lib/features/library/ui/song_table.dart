@@ -5,23 +5,21 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:aetheria/core/providers/audio_player_provider.dart';
 import 'package:aetheria/core/providers/library_provider.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
-import 'package:aetheria/core/widgets/aether_dialog.dart';
-import 'package:aetheria/core/widgets/aether_empty_state.dart';
-import 'package:aetheria/core/widgets/aether_icon_button.dart';
-import 'package:aetheria/core/widgets/aether_pressable.dart';
 import 'package:aetheria/core/widgets/aether_toast.dart';
-import 'package:aetheria/core/widgets/aether_menu.dart';
-import 'package:aetheria/features/library/ui/song_table/song_columns.dart';
+import 'package:aetheria/features/library/ui/song_list_summary.dart';
+import 'package:aetheria/features/library/ui/song_table/song_table_actions.dart';
 import 'package:aetheria/features/library/ui/song_table/song_table_cells.dart';
-import 'package:aetheria/features/library/ui/song_table/song_table_scrollbar.dart';
+import 'package:aetheria/features/library/ui/song_table/song_table_column_layout.dart';
+import 'package:aetheria/features/library/ui/song_table/song_table_header.dart';
+import 'package:aetheria/features/library/ui/song_table/song_table_row.dart';
 import 'package:aetheria/features/library/ui/song_table/song_table_scroll_controller.dart';
+import 'package:aetheria/features/library/ui/song_table/song_table_scrollbar.dart';
+import 'package:aetheria/features/library/ui/song_table/song_table_selection.dart';
 import 'package:aetheria/features/library/ui/song_table/song_table_text.dart';
-import 'package:aetheria/src/rust/models/playlist.dart';
 import 'package:aetheria/src/rust/models/song.dart';
 
 /// Max interval between two primary taps to count as open/play double-tap.
@@ -32,17 +30,12 @@ class SongTableController {
 
   bool get isScrollbarDragging => _state?._isScrollbarDragging ?? false;
 
+  /// Scrolls [songId] into view. Returns false when it is not in the list.
   Future<bool> revealSong(String songId) async {
-    final state = _state;
-    if (state == null) {
-      return false;
-    }
-    return state._revealSong(songId);
+    return await _state?._revealSong(songId) ?? false;
   }
 
-  void _attach(_SongTableState state) {
-    _state = state;
-  }
+  void _attach(_SongTableState state) => _state = state;
 
   void _detach(_SongTableState state) {
     if (identical(_state, state)) {
@@ -51,6 +44,7 @@ class SongTableController {
   }
 }
 
+/// Desktop song list: resizable columns, multi-selection and a context menu.
 class SongTable extends StatefulWidget {
   final SongTableController? controller;
 
@@ -61,265 +55,110 @@ class SongTable extends StatefulWidget {
 }
 
 class _SongTableState extends State<SongTable> {
-  static const double _headerHeight = 46;
+  static const double _headerHeight = 44;
   static const double _rowHeight = 52;
   static const double _leadingColumnWidth = 52;
-  static const double _dragThreshold = 6;
   static const double _scrollbarHitTestWidth = 18;
-  static const String _columnOrderKey = 'aetheria-song-table-column-order';
-  static const String _columnWidthPrefix = 'aetheria-song-table-column-width-';
 
   final SongTableTextCache _textCache = SongTableTextCache();
   final SongTableScrollController _verticalController =
       SongTableScrollController();
-  final Set<String> _selectedSongIds = <String>{};
-  final ValueNotifier<int> _selectionChanges = ValueNotifier(0);
-  final ValueNotifier<Rect?> _selectionRect = ValueNotifier(null);
-  final Map<SongColumnKey, double> _columnWidths = {
-    for (final column in SongColumnKey.values) column: column.defaultWidth,
-  };
-
-  List<SongColumnKey> _columnOrder = List<SongColumnKey>.from(
-    SongColumnKey.values,
-  );
-  int _lastSelectedIndex = -1;
-  Offset? _selectionOrigin;
-  Offset? _selectionCurrent;
-  Set<String> _selectionBaseIds = <String>{};
-  bool _isBoxSelecting = false;
-  bool _isScrollbarDragging = false;
-  bool _isPointerDownForSelection = false;
-  bool _boxSelectionAdditive = false;
-  DateTime? _lastPrimaryTapAt;
-  String? _lastPrimaryTapSongId;
-  bool _suppressRowTap = false;
-  int _selectionFirst = -1;
-  int _selectionLast = -1;
-  double _viewportWidth = 0;
-
-  SongTableCellBuilder get _cellBuilder => SongTableCellBuilder(
+  final SongTableSelection _selection = SongTableSelection();
+  final SongTableColumnLayout _layout = SongTableColumnLayout();
+  late final SongTableCells _cells = SongTableCells(
     textCache: _textCache,
-    columnWidths: _columnWidths,
-    columnOrder: _columnOrder,
-    onResize: _resizeColumn,
-    onResizeEnd: _saveColumnLayout,
-    onReorder: _reorderColumn,
-    headerHeight: _headerHeight,
+    layout: _layout,
   );
+
+  bool _isScrollbarDragging = false;
+  DateTime? _lastTapAt;
+  String? _lastTapSongId;
+  double _viewportWidth = 0;
 
   @override
   void initState() {
     super.initState();
     widget.controller?._attach(this);
     _verticalController.addListener(_textCache.deferWarmup);
-    _loadColumnLayout();
-  }
-
-  @override
-  void dispose() {
-    _textCache.dispose();
-    widget.controller?._detach(this);
-    _verticalController.dispose();
-    _selectionChanges.dispose();
-    _selectionRect.dispose();
-    super.dispose();
+    _layout
+      ..addListener(_onLayoutChanged)
+      ..load();
   }
 
   @override
   void didUpdateWidget(covariant SongTable oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.controller == widget.controller) {
-      return;
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller?._detach(this);
+      widget.controller?._attach(this);
     }
-    oldWidget.controller?._detach(this);
-    widget.controller?._attach(this);
+  }
+
+  @override
+  void dispose() {
+    widget.controller?._detach(this);
+    _layout.dispose();
+    _textCache.dispose();
+    _verticalController.dispose();
+    _selection.dispose();
+    super.dispose();
+  }
+
+  void _onLayoutChanged() {
+    if (mounted) setState(() {});
   }
 
   Future<bool> _revealSong(String songId) async {
-    if (!mounted) {
-      return false;
-    }
+    if (!mounted) return false;
 
     final songs = context.read<LibraryProvider>().displaySongs;
     final index = songs.indexWhere((song) => song.id == songId);
-    if (index < 0) {
-      return false;
-    }
+    if (index < 0) return false;
 
     if (!_verticalController.hasClients) {
       await WidgetsBinding.instance.endOfFrame;
     }
-    if (!mounted || !_verticalController.hasClients) {
-      return false;
-    }
+    if (!mounted || !_verticalController.hasClients) return false;
 
     final position = _verticalController.position;
-    final targetOffset =
+    final target =
         (index * _rowHeight - (position.viewportDimension - _rowHeight) / 2)
             .clamp(position.minScrollExtent, position.maxScrollExtent)
             .toDouble();
-
-    if ((position.pixels - targetOffset).abs() < 0.5) {
-      return true;
-    }
+    if ((position.pixels - target).abs() < 0.5) return true;
 
     if (AetherMotion.reduce(context)) {
-      _verticalController.jumpTo(targetOffset);
-    } else {
-      // Long lists need a duration that scales with distance; a fixed 280ms
-      // over hundreds of rows makes the scroll feel like a slideshow.
-      final distanceRows = (targetOffset - position.pixels).abs() / _rowHeight;
-      final scrollDuration = Duration(
-        milliseconds: (AetherMotion.normal.inMilliseconds + distanceRows * 18)
-            .clamp(AetherMotion.normal.inMilliseconds, 900)
-            .round(),
-      );
-      await _verticalController.animateTo(
-        targetOffset,
-        duration: scrollDuration,
-        curve: AetherMotion.out,
-      );
+      _verticalController.jumpTo(target);
+      return true;
     }
+    // Scale the duration with distance: a fixed short duration over hundreds
+    // of rows reads as a jump cut rather than a scroll.
+    final rows = (target - position.pixels).abs() / _rowHeight;
+    final base = AetherMotion.normal.inMilliseconds;
+    await _verticalController.animateTo(
+      target,
+      duration: Duration(
+        milliseconds: (base + rows * 18).clamp(base, 900).round(),
+      ),
+      curve: AetherMotion.out,
+    );
     return true;
   }
 
-  Future<void> _loadColumnLayout() async {
-    final prefs = await SharedPreferences.getInstance();
-    final savedOrder = prefs.getStringList(_columnOrderKey);
-    if (savedOrder != null && savedOrder.isNotEmpty) {
-      final resolved = <SongColumnKey>[];
-      for (final name in savedOrder) {
-        for (final column in SongColumnKey.values) {
-          if (column.name == name && !resolved.contains(column)) {
-            resolved.add(column);
-            break;
-          }
-        }
-      }
-      for (final column in SongColumnKey.values) {
-        if (!resolved.contains(column)) {
-          resolved.add(column);
-        }
-      }
-      _columnOrder = resolved;
-    }
+  bool get _multiSelectModifierPressed =>
+      HardwareKeyboard.instance.isControlPressed ||
+      HardwareKeyboard.instance.isMetaPressed;
 
-    for (final column in SongColumnKey.values) {
-      final stored = prefs.getDouble('$_columnWidthPrefix${column.name}');
-      if (stored != null) {
-        _columnWidths[column] = stored.clamp(column.minWidth, 600).toDouble();
-      }
-    }
-
-    if (mounted) {
-      setState(() {});
-    }
-  }
-
-  Future<void> _saveColumnLayout() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList(
-      _columnOrderKey,
-      _columnOrder.map((column) => column.name).toList(),
-    );
-    for (final entry in _columnWidths.entries) {
-      await prefs.setDouble(
-        '$_columnWidthPrefix${entry.key.name}',
-        entry.value,
-      );
-    }
-  }
-
-  bool _isMultiSelectModifierPressed() {
-    return HardwareKeyboard.instance.isControlPressed ||
-        HardwareKeyboard.instance.isMetaPressed;
-  }
-
-  void _handleRowClick(
-    Song song,
-    int index,
-    bool isCtrlPressed,
-    bool isShiftPressed,
-    List<Song> songs,
-  ) {
-    void updateSelection() {
-      if (isCtrlPressed) {
-        if (_selectedSongIds.contains(song.id)) {
-          _selectedSongIds.remove(song.id);
-        } else {
-          _selectedSongIds.add(song.id);
-        }
-        _lastSelectedIndex = index;
-        return;
-      }
-
-      if (isShiftPressed && _lastSelectedIndex != -1) {
-        final start = math.min(index, _lastSelectedIndex);
-        final end = math.max(index, _lastSelectedIndex);
-        _selectedSongIds
-          ..clear()
-          ..addAll(songs.sublist(start, end + 1).map((item) => item.id));
-        return;
-      }
-
-      _selectedSongIds
-        ..clear()
-        ..add(song.id);
-      _lastSelectedIndex = index;
-    }
-
-    updateSelection();
-    _selectionChanges.value++;
-  }
-
-  Future<void> _handleRowPrimaryTap(
-    Song song,
-    int index,
-    List<Song> songs,
-    LibraryProvider libraryProvider,
-    AudioPlayerProvider audioProvider,
-  ) async {
-    if (_suppressRowTap) {
-      return;
-    }
-
-    final isCtrlPressed = _isMultiSelectModifierPressed();
-    final isShiftPressed = HardwareKeyboard.instance.isShiftPressed;
-
-    _handleRowClick(song, index, isCtrlPressed, isShiftPressed, songs);
-
-    if (isCtrlPressed || isShiftPressed) {
-      _lastPrimaryTapAt = null;
-      _lastPrimaryTapSongId = null;
-      return;
-    }
-
-    audioProvider.setActiveSong(song);
-    audioProvider.setDetailOpen(true);
-
-    final now = DateTime.now();
-    final isDoubleTap =
-        _lastPrimaryTapSongId == song.id &&
-        _lastPrimaryTapAt != null &&
-        now.difference(_lastPrimaryTapAt!) < kSongTablePrimaryTapInterval;
-
-    _lastPrimaryTapSongId = song.id;
-    _lastPrimaryTapAt = now;
-
-    if (!isDoubleTap) {
-      return;
-    }
-
+  Future<void> _play(Song song, List<Song> queue) async {
+    final library = context.read<LibraryProvider>();
     try {
-      await audioProvider.playSong(
+      await context.read<AudioPlayerProvider>().playSong(
         song,
-        songs,
-        libraryProvider.libraryPath,
+        queue,
+        library.libraryPath,
       );
     } catch (e) {
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
       showAetherToast(
         context,
         message: e.toString(),
@@ -328,408 +167,137 @@ class _SongTableState extends State<SongTable> {
     }
   }
 
-  Future<void> _showContextMenu(
-    BuildContext context,
-    Offset position,
-    Song song,
-    LibraryProvider provider,
-  ) async {
-    final isRowAlreadySelected = _selectedSongIds.contains(song.id);
-    if (!isRowAlreadySelected) {
-      _selectedSongIds
-        ..clear()
-        ..add(song.id);
-      _lastSelectedIndex = provider.displaySongs.indexWhere(
-        (entry) => entry.id == song.id,
-      );
-      _selectionChanges.value++;
+  /// Single click selects the row and opens its details; a second click
+  /// within [kSongTablePrimaryTapInterval] also starts playback.
+  Future<void> _handleRowTap(Song song, int index, List<Song> songs) async {
+    if (_selection.suppressRowTap) return;
+
+    final toggle = _multiSelectModifierPressed;
+    final range = HardwareKeyboard.instance.isShiftPressed;
+    _selection.click(song, index, songs, toggle: toggle, range: range);
+    if (toggle || range) {
+      _lastTapAt = null;
+      _lastTapSongId = null;
+      return;
     }
 
-    final targetSongIds = isRowAlreadySelected
-        ? List<String>.from(_selectedSongIds)
-        : <String>[song.id];
-    final result = await showAetherMenu<String>(
+    context.read<AudioPlayerProvider>()
+      ..setActiveSong(song)
+      ..setDetailOpen(true);
+
+    final now = DateTime.now();
+    final previousTap = _lastTapAt;
+    final isDoubleTap =
+        _lastTapSongId == song.id &&
+        previousTap != null &&
+        now.difference(previousTap) < kSongTablePrimaryTapInterval;
+    _lastTapSongId = song.id;
+    _lastTapAt = now;
+
+    if (isDoubleTap) {
+      await _play(song, songs);
+    }
+  }
+
+  void _handlePlayPressed(Song song, List<Song> songs, bool isLoaded) {
+    if (isLoaded) {
+      context.read<AudioPlayerProvider>().playPause();
+    } else {
+      _play(song, songs);
+    }
+  }
+
+  void _openContextMenu(Offset position, Song song, int index) {
+    // Right-clicking outside the selection retargets it to that row.
+    if (!_selection.contains(song.id)) {
+      _selection.selectOnly(song.id, index);
+    }
+    showSongTableContextMenu(
       context: context,
-      globalPosition: position,
-      items: _buildContextMenuItems(provider),
+      position: position,
+      songIds: _selection.ids,
+      library: context.read<LibraryProvider>(),
+      onDeleted: _selection.clear,
     );
-
-    if (!mounted || result == null) {
-      return;
-    }
-
-    if (result.startsWith('playlist:')) {
-      final playlistId = result.substring('playlist:'.length);
-      Playlist? playlist;
-      for (final entry in provider.playlists) {
-        if (entry.id == playlistId) {
-          playlist = entry;
-          break;
-        }
-      }
-      if (playlist == null) {
-        return;
-      }
-      try {
-        await provider.addSongsToPlaylist(playlist.id, targetSongIds);
-        if (!context.mounted) {
-          return;
-        }
-        showAetherToast(
-          context,
-          message: '已成功添加至歌单: ${playlist.name}',
-          kind: AetherToastKind.success,
-        );
-      } catch (e) {
-        if (!context.mounted) {
-          return;
-        }
-        showAetherToast(
-          context,
-          message: '添加失败: $e',
-          kind: AetherToastKind.error,
-        );
-      }
-      return;
-    }
-
-    await _handleCommand(result, targetSongIds, provider);
-  }
-
-  List<AetherMenuItem<String>> _buildContextMenuItems(
-    LibraryProvider provider,
-  ) {
-    final items = <AetherMenuItem<String>>[
-      const AetherMenuItem(value: 'copy', label: '复制所选歌曲', icon: Icons.copy),
-      const AetherMenuItem(
-        value: 'cut',
-        label: '剪切所选歌曲',
-        icon: Icons.content_cut,
-      ),
-      const AetherMenuItem(
-        value: 'delete',
-        label: '彻底删除歌曲',
-        icon: Icons.delete_forever,
-        destructive: true,
-      ),
-    ];
-
-    if (provider.activePlaylistId != null) {
-      items.add(
-        const AetherMenuItem(
-          value: 'remove_playlist',
-          label: '从当前歌单移除',
-          icon: Icons.playlist_remove,
-          warning: true,
-        ),
-      );
-    }
-
-    if (provider.playlists.isNotEmpty) {
-      items.add(const AetherMenuItem.divider());
-      for (final playlist in provider.playlists) {
-        items.add(
-          AetherMenuItem(
-            value: 'playlist:${playlist.id}',
-            label: '添加到歌单 · ${playlist.name}',
-            icon: Icons.playlist_add,
-          ),
-        );
-      }
-    }
-
-    final clipboardCount = provider.clipboard?.songIds.length;
-    if (provider.activePlaylistId != null && clipboardCount != null) {
-      items.add(const AetherMenuItem.divider());
-      items.add(
-        AetherMenuItem(
-          value: 'paste',
-          label: '粘贴歌曲 ($clipboardCount 首)',
-          icon: Icons.paste,
-        ),
-      );
-    }
-
-    return items;
-  }
-
-  Future<void> _handleCommand(
-    String cmd,
-    List<String> targetSongIds,
-    LibraryProvider provider,
-  ) async {
-    final activePlaylistId = provider.activePlaylistId;
-    if (cmd == 'copy') {
-      provider.setClipboard(
-        SongClipboardMode.copy,
-        targetSongIds,
-        activePlaylistId,
-      );
-      return;
-    }
-    if (cmd == 'cut') {
-      provider.setClipboard(
-        SongClipboardMode.cut,
-        targetSongIds,
-        activePlaylistId,
-      );
-      return;
-    }
-    if (cmd == 'delete') {
-      await _confirmDeleteSongs(context, targetSongIds, provider);
-      return;
-    }
-    if (cmd == 'remove_playlist' && activePlaylistId != null) {
-      await provider.removeSongsFromPlaylist(activePlaylistId, targetSongIds);
-      return;
-    }
-    if (cmd == 'paste' && activePlaylistId != null) {
-      await provider.pasteSongs(activePlaylistId);
-    }
-  }
-
-  String _deleteSongSummary(List<String> songIds, LibraryProvider provider) {
-    final songsById = {for (final song in provider.songs) song.id: song};
-    final titles = songIds
-        .map((id) => songsById[id]?.title)
-        .whereType<String>()
-        .toList();
-    if (songIds.length == 1) {
-      return titles.isNotEmpty ? '《${titles.first}》' : '这首歌曲';
-    }
-    if (titles.isEmpty) {
-      return '这 ${songIds.length} 首歌曲';
-    }
-    final preview = titles.take(3).map((title) => '《$title》').join('、');
-    final suffix = songIds.length > 3 ? ' 等 ${songIds.length} 首歌曲' : '';
-    return '$preview$suffix';
-  }
-
-  Future<void> _confirmDeleteSongs(
-    BuildContext context,
-    List<String> songIds,
-    LibraryProvider provider,
-  ) async {
-    final summary = _deleteSongSummary(songIds, provider);
-    final confirmed = await showAetherConfirmDialog(
-      context: context,
-      title: '删除歌曲？',
-      message: '即将从音乐库中删除 $summary，并同时删除本地物理音频文件。',
-      confirmLabel: '继续删除',
-      cancelLabel: '取消',
-      dangerous: true,
-      doubleConfirm: true,
-      doubleConfirmMessage: '最后确认：$summary 的数据库记录和本地音频文件都会被删除，此操作不可撤销。',
-      doubleConfirmLabel: '彻底删除',
-    );
-
-    if (!confirmed || !context.mounted) {
-      return;
-    }
-
-    try {
-      for (final id in songIds) {
-        await provider.deleteSong(id);
-      }
-      if (!mounted || !context.mounted) {
-        return;
-      }
-      _selectedSongIds.clear();
-      _selectionChanges.value++;
-      showAetherToast(
-        context,
-        message: '删除歌曲成功',
-        kind: AetherToastKind.success,
-      );
-    } catch (e) {
-      if (!context.mounted) {
-        return;
-      }
-      showAetherToast(
-        context,
-        message: '删除失败: $e',
-        kind: AetherToastKind.error,
-      );
-    }
   }
 
   void _handlePointerDown(PointerDownEvent event) {
     _textCache.deferWarmup();
-    _suppressRowTap = false;
+    _selection.suppressRowTap = false;
     if (event.kind != PointerDeviceKind.mouse ||
         event.buttons != kPrimaryMouseButton) {
       return;
     }
+    // A press on the scrollbar track must not start a marquee.
     final viewport = context.findRenderObject() as RenderBox?;
     final viewportX =
         viewport?.globalToLocal(event.position).dx ?? event.localPosition.dx;
     if (_viewportWidth > 0 &&
         viewportX >= _viewportWidth - _scrollbarHitTestWidth) {
-      _isPointerDownForSelection = false;
       return;
     }
-    _isPointerDownForSelection = true;
-    _suppressRowTap = false;
-    _selectionFirst = -1;
-    _selectionLast = -1;
-    _selectionOrigin = event.localPosition;
-    _selectionCurrent = event.localPosition;
-    _selectionBaseIds = _isMultiSelectModifierPressed()
-        ? Set<String>.from(_selectedSongIds)
-        : <String>{};
-    _boxSelectionAdditive = _isMultiSelectModifierPressed();
-    _isBoxSelecting = false;
+    _selection.pressDown(
+      event.localPosition,
+      additive: _multiSelectModifierPressed,
+    );
   }
 
   void _handlePointerMove(PointerMoveEvent event, List<Song> songs) {
-    if (!_isPointerDownForSelection || _selectionOrigin == null) {
-      return;
-    }
-
-    final movedDistance = (event.localPosition - _selectionOrigin!).distance;
-    if (!_isBoxSelecting && movedDistance < _dragThreshold) {
-      return;
-    }
-
-    _isBoxSelecting = true;
-    _suppressRowTap = true;
-    _selectionCurrent = event.localPosition;
-    _selectionRect.value = Rect.fromPoints(
-      _selectionOrigin!,
-      _selectionCurrent!,
+    _selection.pressMove(
+      event.localPosition,
+      songs,
+      scrollOffset: _verticalController.offset,
+      rowHeight: _rowHeight,
     );
-    _selectSongsInRect(songs);
   }
 
-  void _handlePointerUp() {
-    if (!_isPointerDownForSelection) {
-      return;
+  void _handleScrollbarDrag(bool dragging) {
+    _isScrollbarDragging = dragging;
+    if (dragging) {
+      _textCache.suspendWarmup();
+    } else {
+      _textCache.resumeWarmup();
     }
-    _selectionRect.value = null;
-    _isPointerDownForSelection = false;
-    _selectionOrigin = null;
-    _selectionCurrent = null;
-    _selectionBaseIds = <String>{};
-    _boxSelectionAdditive = false;
-    _isBoxSelecting = false;
-  }
-
-  void _selectSongsInRect(List<Song> songs) {
-    final origin = _selectionOrigin;
-    final current = _selectionCurrent;
-    if (origin == null || current == null || songs.isEmpty) {
-      return;
-    }
-
-    final top = math.min(origin.dy, current.dy) + _verticalController.offset;
-    final bottom = math.max(origin.dy, current.dy) + _verticalController.offset;
-    final firstIndex = (top / _rowHeight).floor().clamp(0, songs.length - 1);
-    final lastIndex = (bottom / _rowHeight).floor().clamp(0, songs.length - 1);
-    if (_selectionFirst == firstIndex && _selectionLast == lastIndex) return;
-    _selectionFirst = firstIndex;
-    _selectionLast = lastIndex;
-
-    final selectedInRect = songs
-        .sublist(firstIndex, lastIndex + 1)
-        .map((song) => song.id)
-        .toSet();
-
-    _selectedSongIds
-      ..clear()
-      ..addAll(_boxSelectionAdditive ? _selectionBaseIds : const <String>{})
-      ..addAll(selectedInRect);
-    _lastSelectedIndex = lastIndex;
-    _selectionChanges.value++;
-  }
-
-  void _resizeColumn(SongColumnKey column, double delta) {
-    final nextWidth = (_columnWidths[column] ?? column.defaultWidth) + delta;
-    setState(() {
-      _columnWidths[column] = nextWidth.clamp(column.minWidth, 600).toDouble();
-    });
-  }
-
-  void _reorderColumn(SongColumnKey dragged, SongColumnKey target) {
-    if (dragged == target) {
-      return;
-    }
-    final currentOrder = List<SongColumnKey>.from(_columnOrder);
-    final from = currentOrder.indexOf(dragged);
-    final to = currentOrder.indexOf(target);
-    if (from == -1 || to == -1) {
-      return;
-    }
-
-    currentOrder.removeAt(from);
-    currentOrder.insert(to, dragged);
-
-    setState(() {
-      _columnOrder = currentOrder;
-    });
-    _saveColumnLayout();
   }
 
   double _tableWidth(double availableWidth) {
-    final contentWidth =
-        _leadingColumnWidth +
-        _columnOrder.fold<double>(
-          0,
-          (sum, column) => sum + (_columnWidths[column] ?? column.defaultWidth),
-        );
     // Keep a small logical-pixel guard. The table is often rendered through
-    // FittedBox at a fractional scale; without this guard the Row can be
-    // rounded 0.333px wider than its viewport and Flutter paints overflow
-    // stripes across the last column.
-    return math.max(availableWidth, contentWidth + 1.0);
-  }
-
-  AudioVersion? _primaryVersionFor(Song song) {
-    for (final version in song.versions) {
-      if (version.isPrimary) {
-        return version;
-      }
-    }
-    if (song.versions.isNotEmpty) {
-      return song.versions.first;
-    }
-    return null;
+    // FittedBox at a fractional scale; without it the Row can round 0.333px
+    // wider than its viewport and paint overflow stripes over the last column.
+    return math.max(
+      availableWidth,
+      _leadingColumnWidth + _layout.totalWidth + 1.0,
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final libraryProvider = context.watch<LibraryProvider>();
-    final audioProvider = context.read<AudioPlayerProvider>();
-    context.watch<UIThemeProvider>();
+    final library = context.watch<LibraryProvider>();
     final cfg = context.tokens;
-    final songs = libraryProvider.displaySongs;
-    final cellBuilder = _cellBuilder;
+    final songs = library.displaySongs;
+
     _textCache.configurePrefetch(
       revision: songs,
-      titles: songs
-          .where(libraryProvider.songHasLyrics)
-          .map((song) => song.title),
+      titles: songs.where(library.songHasLyrics).map((song) => song.title),
       titlesWithoutLyrics: songs
-          .where((song) => !libraryProvider.songHasLyrics(song))
+          .where((song) => !library.songHasLyrics(song))
           .map((song) => song.title),
       artists: songs.map((song) => song.artist ?? '未知歌手'),
     );
     _verticalController.smoothWheel = !AetherMotion.reduce(context);
 
     if (songs.isEmpty) {
-      return const AetherEmptyState(
-        icon: Icons.search_off_rounded,
-        title: '没有符合条件的歌曲',
-        message: '请导入音乐，或调整标签 / 搜索过滤器',
-      );
+      return SongListEmptyState(library: library);
     }
 
     return LayoutBuilder(
       builder: (context, constraints) {
         _viewportWidth = constraints.maxWidth;
         final tableWidth = _tableWidth(constraints.maxWidth);
-        final bodyHeight = math
-            .max(0.0, constraints.maxHeight - _headerHeight)
-            .toDouble();
+        final bodyHeight = math.max(
+          0.0,
+          constraints.maxHeight - _headerHeight,
+        );
 
         return ScrollConfiguration(
           // The fixed track owns vertical scrolling. An automatically added
@@ -738,238 +306,22 @@ class _SongTableState extends State<SongTable> {
           child: SongTableScrollbar(
             controller: _verticalController,
             headerHeight: _headerHeight,
-            thumbColor: cfg.textSecondary.withValues(alpha: 0.6),
-            onDraggingChanged: (dragging) {
-              _isScrollbarDragging = dragging;
-              if (dragging) {
-                _textCache.suspendWarmup();
-              } else {
-                _textCache.resumeWarmup();
-              }
-            },
+            thumbColor: cfg.textTertiary.withValues(alpha: 0.5),
+            onDraggingChanged: _handleScrollbarDrag,
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: SizedBox(
                 width: tableWidth,
                 child: Column(
                   children: [
-                    Container(
+                    SongTableHeader(
+                      layout: _layout,
                       height: _headerHeight,
-                      decoration: BoxDecoration(
-                        border: Border(
-                          bottom: BorderSide(color: cfg.borderSubtle),
-                        ),
-                      ),
-                      child: Row(
-                        children: [
-                          SizedBox(
-                            width: _leadingColumnWidth,
-                            child: Center(
-                              child: Icon(
-                                Icons.drag_indicator,
-                                size: 16,
-                                color: cfg.textSecondary.withValues(
-                                  alpha: 0.65,
-                                ),
-                              ),
-                            ),
-                          ),
-                          for (final column in _columnOrder)
-                            cellBuilder.buildHeaderCell(column, cfg),
-                        ],
-                      ),
+                      leadingWidth: _leadingColumnWidth,
                     ),
                     SizedBox(
                       height: bodyHeight,
-                      child: Listener(
-                        behavior: HitTestBehavior.translucent,
-                        onPointerSignal: (event) =>
-                            _verticalController.pointerKind = event.kind,
-                        onPointerDown: _handlePointerDown,
-                        onPointerMove: (event) =>
-                            _handlePointerMove(event, songs),
-                        onPointerUp: (_) => _handlePointerUp(),
-                        onPointerCancel: (_) => _handlePointerUp(),
-                        child: Stack(
-                          children: [
-                            ListView.builder(
-                              controller: _verticalController,
-                              itemExtent: _rowHeight,
-                              // Fast thumb jumps replace most visible rows. Keep
-                              // the speculative work bounded instead of building
-                              // sixteen extra rows with text and tag scrollables.
-                              scrollCacheExtent: const ScrollCacheExtent.pixels(
-                                _rowHeight * 2,
-                              ),
-                              addAutomaticKeepAlives: false,
-                              itemCount: songs.length,
-                              itemBuilder: (context, index) {
-                                final song = songs[index];
-                                final primaryVersion = _primaryVersionFor(song);
-                                final hasLyrics = libraryProvider.songHasLyrics(
-                                  song,
-                                );
-
-                                return Selector<
-                                  AudioPlayerProvider,
-                                  ({bool playing, bool active, bool running})
-                                >(
-                                  selector: (_, audio) => (
-                                    playing: audio.playingSong?.id == song.id,
-                                    active: audio.activeSong?.id == song.id,
-                                    running:
-                                        audio.playingSong?.id == song.id &&
-                                        audio.isPlaying,
-                                  ),
-                                  builder: (context, state, _) {
-                                    final isCurrentlyPlaying = state.playing;
-                                    final isActive = state.active;
-                                    return SizedBox(
-                                      width: tableWidth,
-                                      height: _rowHeight,
-                                      child: GestureDetector(
-                                        behavior: HitTestBehavior.opaque,
-                                        onSecondaryTapUp: (details) {
-                                          _showContextMenu(
-                                            context,
-                                            details.globalPosition,
-                                            song,
-                                            libraryProvider,
-                                          );
-                                        },
-                                        child: AetherPressable(
-                                          pressScale: 1,
-                                          hoverColor: cfg.bgHover,
-                                          onTap: () async {
-                                            await _handleRowPrimaryTap(
-                                              song,
-                                              index,
-                                              songs,
-                                              libraryProvider,
-                                              audioProvider,
-                                            );
-                                          },
-
-                                          child: AnimatedBuilder(
-                                            animation: _selectionChanges,
-                                            builder: (context, child) => Container(
-                                              decoration: BoxDecoration(
-                                                color:
-                                                    _selectedSongIds.contains(
-                                                      song.id,
-                                                    )
-                                                    ? cfg.selection
-                                                    : isActive
-                                                    ? cfg.accentMuted
-                                                    : Colors.transparent,
-                                              ),
-                                              foregroundDecoration:
-                                                  BoxDecoration(
-                                                    border: Border(
-                                                      bottom: BorderSide(
-                                                        color: cfg.borderSubtle
-                                                            .withValues(
-                                                              alpha: 0.45,
-                                                            ),
-                                                      ),
-                                                      left: BorderSide(
-                                                        color: isActive
-                                                            ? cfg.accent
-                                                            : Colors
-                                                                  .transparent,
-                                                        width: 3,
-                                                      ),
-                                                    ),
-                                                  ),
-                                              child: child,
-                                            ),
-                                            child: Row(
-                                              children: [
-                                                SizedBox(
-                                                  width: _leadingColumnWidth,
-                                                  child: AetherIconButton(
-                                                    icon:
-                                                        isCurrentlyPlaying &&
-                                                            state.running
-                                                        ? Icons
-                                                              .pause_circle_filled
-                                                        : Icons
-                                                              .play_circle_filled,
-                                                    iconSize: AetherIconSize.lg,
-                                                    size: 36,
-                                                    color: isCurrentlyPlaying
-                                                        ? cfg.success
-                                                        : cfg.textSecondary,
-                                                    tooltip:
-                                                        isCurrentlyPlaying &&
-                                                            state.running
-                                                        ? '暂停'
-                                                        : '播放',
-                                                    onPressed: () async {
-                                                      if (isCurrentlyPlaying) {
-                                                        await audioProvider
-                                                            .playPause();
-                                                        return;
-                                                      }
-                                                      try {
-                                                        await audioProvider.playSong(
-                                                          song,
-                                                          songs,
-                                                          libraryProvider
-                                                              .libraryPath,
-                                                        );
-                                                      } catch (e) {
-                                                        if (!context.mounted) {
-                                                          return;
-                                                        }
-                                                        showAetherToast(
-                                                          context,
-                                                          message: e.toString(),
-                                                          kind: AetherToastKind
-                                                              .error,
-                                                        );
-                                                      }
-                                                    },
-                                                  ),
-                                                ),
-                                                for (final column
-                                                    in _columnOrder)
-                                                  cellBuilder.buildCell(
-                                                    column,
-                                                    song,
-                                                    primaryVersion,
-                                                    cfg,
-                                                    isCurrentlyPlaying,
-                                                    hasLyrics,
-                                                  ),
-                                              ],
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    );
-                                  },
-                                );
-                              },
-                            ),
-                            Positioned.fill(
-                              child: IgnorePointer(
-                                child: RepaintBoundary(
-                                  child: CustomPaint(
-                                    key: const ValueKey(
-                                      'song-selection-overlay',
-                                    ),
-                                    painter: _SelectionPainter(
-                                      _selectionRect,
-                                      cfg.accent,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
+                      child: _buildBody(songs, library, tableWidth, cfg),
                     ),
                   ],
                 ),
@@ -980,31 +332,64 @@ class _SongTableState extends State<SongTable> {
       },
     );
   }
-}
 
-class _SelectionPainter extends CustomPainter {
-  _SelectionPainter(this.rect, this.color) : super(repaint: rect);
-  final ValueNotifier<Rect?> rect;
-  final Color color;
-  @override
-  void paint(Canvas canvas, Size size) {
-    final bounds = rect.value;
-    if (bounds == null) return;
-    final rounded = RRect.fromRectAndRadius(
-      bounds,
-      const Radius.circular(AetherRadius.sm),
-    );
-    canvas.drawRRect(rounded, Paint()..color = color.withValues(alpha: 0.12));
-    canvas.drawRRect(
-      rounded,
-      Paint()
-        ..color = color.withValues(alpha: 0.55)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1,
+  Widget _buildBody(
+    List<Song> songs,
+    LibraryProvider library,
+    double tableWidth,
+    AppThemeConfig cfg,
+  ) {
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerSignal: (event) => _verticalController.pointerKind = event.kind,
+      onPointerDown: _handlePointerDown,
+      onPointerMove: (event) => _handlePointerMove(event, songs),
+      onPointerUp: (_) => _selection.pressEnd(),
+      onPointerCancel: (_) => _selection.pressEnd(),
+      child: Stack(
+        children: [
+          ListView.builder(
+            controller: _verticalController,
+            itemExtent: _rowHeight,
+            // Fast thumb jumps replace most visible rows. Keep the speculative
+            // work bounded instead of building many extra rows of text and
+            // tag scrollables.
+            scrollCacheExtent: const ScrollCacheExtent.pixels(_rowHeight * 2),
+            addAutomaticKeepAlives: false,
+            itemCount: songs.length,
+            itemBuilder: (context, index) {
+              final song = songs[index];
+              return SongTableRow(
+                song: song,
+                width: tableWidth,
+                height: _rowHeight,
+                leadingWidth: _leadingColumnWidth,
+                hasLyrics: library.songHasLyrics(song),
+                cells: _cells,
+                selection: _selection,
+                onTap: () => _handleRowTap(song, index, songs),
+                onPlayPressed: (isLoaded) =>
+                    _handlePlayPressed(song, songs, isLoaded),
+                onContextMenu: (position) =>
+                    _openContextMenu(position, song, index),
+              );
+            },
+          ),
+          Positioned.fill(
+            child: IgnorePointer(
+              child: RepaintBoundary(
+                child: CustomPaint(
+                  key: const ValueKey('song-selection-overlay'),
+                  painter: SongTableMarqueePainter(
+                    _selection.marquee,
+                    cfg.accent,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
-
-  @override
-  bool shouldRepaint(covariant _SelectionPainter oldDelegate) =>
-      oldDelegate.rect != rect || oldDelegate.color != color;
 }

@@ -118,6 +118,9 @@ int _compareSongsLikeExplorer(Song left, Song right) {
   return left.id.compareTo(right.id);
 }
 
+/// One file to import. A non-null [title] overrides what the file's tags say.
+typedef SongImportRequest = ({String filepath, String? title, String? artist});
+
 enum SongClipboardMode { copy, cut }
 
 /// Songs picked up with copy/cut, waiting to be pasted into a playlist.
@@ -422,22 +425,38 @@ class LibraryProvider extends ChangeNotifier {
   // Songs and versions
   // ---------------------------------------------------------------------------
 
-  Future<void> importSong(String filepath) {
-    return _mutate(() => music.importSong(filepath: filepath));
-  }
-
-  Future<void> importSongWithMetadata(
-    String filepath,
-    String title,
-    String artist,
-  ) {
-    return _mutate(
-      () => music.importSongWithMetadata(
-        filepath: filepath,
-        title: title,
-        artist: artist,
-      ),
-    );
+  /// Imports [requests] in order and reloads the library once at the end.
+  ///
+  /// One bad file does not stop the rest: the reasons of the files that could
+  /// not be imported are returned. [onProgress] receives the number handled.
+  Future<List<String>> importSongs(
+    List<SongImportRequest> requests, {
+    void Function(int done)? onProgress,
+  }) async {
+    final failures = <String>[];
+    try {
+      for (var index = 0; index < requests.length; index++) {
+        final request = requests[index];
+        final title = request.title;
+        try {
+          if (title == null) {
+            await music.importSong(filepath: request.filepath);
+          } else {
+            await music.importSongWithMetadata(
+              filepath: request.filepath,
+              title: title,
+              artist: request.artist ?? '',
+            );
+          }
+        } catch (e) {
+          failures.add(e.toString());
+        }
+        onProgress?.call(index + 1);
+      }
+    } finally {
+      await loadLibrary();
+    }
+    return failures;
   }
 
   Future<void> importAudioVersionForSong(String songId, String filepath) {
@@ -632,6 +651,15 @@ class LibraryProvider extends ChangeNotifier {
     } else if (!excludedTags.remove(tagId)) {
       selectedTags.add(tagId);
     }
+    notifyListeners();
+  }
+
+  void clearTagFilters() {
+    if (selectedTags.isEmpty && excludedTags.isEmpty) {
+      return;
+    }
+    selectedTags = [];
+    excludedTags = [];
     notifyListeners();
   }
 

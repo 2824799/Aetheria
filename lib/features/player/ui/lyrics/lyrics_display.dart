@@ -7,9 +7,7 @@ import 'package:provider/provider.dart';
 
 import 'package:aetheria/core/providers/floating_lyrics_provider.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
-import 'package:aetheria/core/widgets/aether_button.dart';
-import 'package:aetheria/core/widgets/aether_progress.dart';
-import 'package:aetheria/features/player/ui/lyrics/lyrics_shared.dart';
+import 'package:aetheria/features/player/ui/lyrics/lyrics_panel_widgets.dart';
 import 'package:aetheria/features/player/ui/lyrics/lyrics_synced_view.dart';
 import 'package:aetheria/src/rust/models/song.dart';
 
@@ -120,71 +118,34 @@ class _LyricsDisplayPanelState extends State<LyricsDisplayPanel> {
 
     final cfg = widget.cfg;
     final content = _displayContent;
-    final sourceText = _savedLyric == null
-        ? '未保存到当前音源'
-        : '${lyricSourceLabel(_savedLyric!.source)} · ${_savedLyric!.offsetMs}ms';
+    final error = _error;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Padding(
-          padding: EdgeInsets.fromLTRB(AetherSpace.xl, widget.compact ? AetherSpace.md : AetherSpace.lg, AetherSpace.md, AetherSpace.xs),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      widget.audioVersion?.originalName ?? '歌曲通用歌词',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: cfg.textPrimary,
-                        fontSize: widget.compact ? AetherType.bodySm : AetherType.body,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: AetherSpace.xxs),
-                    Text(
-                      sourceText,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: AetherType.captionStyle(cfg.textSecondary),
-                    ),
-                  ],
-                ),
-              ),
-              Tooltip(
-                message: '歌词管理',
-                child: AetherIconButton(
-                  icon: Icons.manage_search,
-                  iconSize: AetherIconSize.xl,
-                  color: cfg.textSecondary,
-                  tooltip: '管理歌词',
-                  onPressed: () => _openManager(context),
-                ),
-              ),
-            ],
-          ),
-        ),
-        if (_error != null)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: AetherSpace.xl),
-            child: Text(
-              _error!,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: AetherType.captionStyle(cfg.warning),
+        LyricPanelHeader(
+          audioVersion: widget.audioVersion,
+          savedLyric: _savedLyric,
+          actions: [
+            AetherIconButton(
+              icon: Icons.tune_rounded,
+              iconSize: AetherIconSize.lg,
+              color: cfg.textSecondary,
+              tooltip: '歌词管理',
+              onPressed: () => _openManager(context),
             ),
-          ),
+          ],
+        ),
+        if (error != null) LyricPanelError(error),
         Expanded(
           child: _loading
-              ? Center(
-                  child: AetherProgress.circular(size: 16, strokeWidth: 2),
-                )
+              ? const LyricPanelLoading()
               : content == null
-              ? _buildDisplayEmptyState(context, cfg)
+              ? LyricPanelEmptyState(
+                  actionLabel: '打开歌词管理',
+                  actionIcon: Icons.tune_rounded,
+                  onAction: () => _openManager(context),
+                )
               : SyncedLyricsView(
                   content: content,
                   translation: _displayTranslation,
@@ -194,35 +155,6 @@ class _LyricsDisplayPanelState extends State<LyricsDisplayPanel> {
                 ),
         ),
       ],
-    );
-  }
-
-  Widget _buildDisplayEmptyState(BuildContext context, AppThemeConfig cfg) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: AetherSpace.xxxl),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.lyrics_outlined, color: cfg.textSecondary, size: 30),
-            const SizedBox(height: AetherSpace.lg - 2),
-            Text(
-              '暂无歌词',
-              style: TextStyle(
-                color: cfg.textPrimary,
-                fontSize: AetherType.titleSm,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: AetherSpace.lg),
-            AetherButton.primary(
-              onPressed: () => _openManager(context),
-              icon: Icons.manage_search,
-              label: '打开歌词管理',
-            ),
-          ],
-        ),
-      ),
     );
   }
 

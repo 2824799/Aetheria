@@ -27,4 +27,8 @@ extension SongColumnKeyX on SongColumnKey {
         SongColumnKey.versions => 92,
         SongColumnKey.spec => 140,
       };
+
+  /// Numeric / badge columns read better centred under their title.
+  bool get isCentered =>
+      this == SongColumnKey.versions || this == SongColumnKey.spec;
 }
