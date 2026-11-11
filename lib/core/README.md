@@ -24,9 +24,14 @@ final cfg = context.tokens; // or context.cfg
 Text('Hello', style: AetherType.bodyStyle(cfg.textPrimary));
 ```
 
-Legacy fields (`textMain`, `bgPanel`, `border`, …) remain on `AppThemeConfig`
-so existing screens keep compiling. Prefer semantic names in new code:
-`textPrimary`, `bgElevated`, `danger`, `scrim`, …
+Surfaces are opaque steps: `bgSolid` (app background) → `bg1` (panels) →
+`bgElevated` (drawers) → `bgPopover` (dialogs, menus). Lines come in three
+weights: `divider` (between rows) → `borderSubtle` (around a surface) →
+`borderStrong`.
+
+Line and state colours (`divider`, `borderSubtle`, `bgHover`, `selection`, …)
+are already translucent. Use them as they are: `withValues(alpha: x)` replaces
+the alpha instead of scaling it, so it makes a hairline heavier, not lighter.
 
 ### Hard rules for feature UI
 
