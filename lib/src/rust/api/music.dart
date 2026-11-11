@@ -3,13 +3,10 @@
 
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
-import '../audio/player.dart';
 import '../frb_generated.dart';
 import '../models/playlist.dart';
 import '../models/song.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
-
-// These functions are ignored because they are not marked as `pub`: `absolute_audio_path_from_relative`, `copy_sidecar_lyrics`, `embedded_lyrics_from_audio`, `ensure_song_cover_path`, `ensure_version_belongs_to_song`, `estimate_duration_from_bitrate`, `estimate_duration_with_symphonia`, `explorer_style_compare`, `extract_embedded_cover`, `get_covers_dir`, `is_raw_aac_path`, `picture_extension`, `read_text_file_if_exists`, `refresh_audio_file_metadata_impl`, `reliable_duration`, `remove_sidecar_lyrics`, `saved_lyric_from_row`, `scan_directory`, `selected_lyric_query`, `sort_songs_like_explorer`
 
 bool isLibraryInitialized() =>
     RustLib.instance.api.crateApiMusicIsLibraryInitialized();
@@ -17,22 +14,53 @@ bool isLibraryInitialized() =>
 Future<void> initializeLibraryPath({required String path}) =>
     RustLib.instance.api.crateApiMusicInitializeLibraryPath(path: path);
 
-/// Flush committed WAL pages before sync transfers database.db by itself.
+Future<String> getLibraryPath() =>
+    RustLib.instance.api.crateApiMusicGetLibraryPath();
+
+/// Flushes the WAL so sync can transfer `database.db` by itself.
 Future<void> checkpointLibraryDatabase() =>
     RustLib.instance.api.crateApiMusicCheckpointLibraryDatabase();
 
+Future<void> resetLibrary() => RustLib.instance.api.crateApiMusicResetLibrary();
+
 Future<List<Song>> getSongs() => RustLib.instance.api.crateApiMusicGetSongs();
 
-Future<List<Tag>> getTags() => RustLib.instance.api.crateApiMusicGetTags();
+Future<void> updateSongMetadata({
+  required String songId,
+  required String title,
+  required String artist,
+}) => RustLib.instance.api.crateApiMusicUpdateSongMetadata(
+  songId: songId,
+  title: title,
+  artist: artist,
+);
 
-Future<List<Playlist>> getPlaylists() =>
-    RustLib.instance.api.crateApiMusicGetPlaylists();
+Future<void> deleteSong({required String songId}) =>
+    RustLib.instance.api.crateApiMusicDeleteSong(songId: songId);
 
-Future<int> startAudioServer() =>
-    RustLib.instance.api.crateApiMusicStartAudioServer();
+Future<void> deleteAudioVersion({required String versionId}) =>
+    RustLib.instance.api.crateApiMusicDeleteAudioVersion(versionId: versionId);
 
-Future<String> getLibraryPath() =>
-    RustLib.instance.api.crateApiMusicGetLibraryPath();
+Future<void> setPrimaryVersion({required String versionId}) =>
+    RustLib.instance.api.crateApiMusicSetPrimaryVersion(versionId: versionId);
+
+Future<String?> ensureSongCover({required String songId}) =>
+    RustLib.instance.api.crateApiMusicEnsureSongCover(songId: songId);
+
+Future<void> refreshAudioFileMetadata({required String versionId}) => RustLib
+    .instance
+    .api
+    .crateApiMusicRefreshAudioFileMetadata(versionId: versionId);
+
+/// Copies a version's audio file to `dest_path` (a directory or a file path)
+/// and returns the path written.
+Future<String> exportAudioFile({
+  required String versionId,
+  required String destPath,
+}) => RustLib.instance.api.crateApiMusicExportAudioFile(
+  versionId: versionId,
+  destPath: destPath,
+);
 
 Future<Song> importSong({required String filepath}) =>
     RustLib.instance.api.crateApiMusicImportSong(filepath: filepath);
@@ -55,27 +83,13 @@ Future<AudioVersion> importAudioVersionForSong({
   filepath: filepath,
 );
 
-Future<String?> ensureSongCover({required String songId}) =>
-    RustLib.instance.api.crateApiMusicEnsureSongCover(songId: songId);
+Future<List<String>> scanDirectoryForPreview({required String dirPath}) =>
+    RustLib.instance.api.crateApiMusicScanDirectoryForPreview(dirPath: dirPath);
 
-Future<void> updateVersionStatus({
-  required String versionId,
-  required bool isEnabled,
-  required bool isPrimary,
-}) => RustLib.instance.api.crateApiMusicUpdateVersionStatus(
-  versionId: versionId,
-  isEnabled: isEnabled,
-  isPrimary: isPrimary,
-);
-
-Future<void> updateSongMetadata({
-  required String songId,
-  required String title,
-  required String artist,
-}) => RustLib.instance.api.crateApiMusicUpdateSongMetadata(
-  songId: songId,
-  title: title,
-  artist: artist,
+Future<List<PreviewInfo>> previewAudioMetadata({
+  required List<String> filepaths,
+}) => RustLib.instance.api.crateApiMusicPreviewAudioMetadata(
+  filepaths: filepaths,
 );
 
 Future<SavedLyric?> getSelectedLyric({
@@ -86,8 +100,8 @@ Future<SavedLyric?> getSelectedLyric({
   audioVersionId: audioVersionId,
 );
 
-Future<List<SavedLyric>> getLyricsForSong({required String songId}) =>
-    RustLib.instance.api.crateApiMusicGetLyricsForSong(songId: songId);
+Future<List<String>> getSongIdsWithLyrics() =>
+    RustLib.instance.api.crateApiMusicGetSongIdsWithLyrics();
 
 Future<List<LocalLyricCandidate>> getLocalLyricCandidates({
   required String songId,
@@ -97,6 +111,8 @@ Future<List<LocalLyricCandidate>> getLocalLyricCandidates({
   audioVersionId: audioVersionId,
 );
 
+/// Saves a lyric for the song (or one of its audio versions), replacing the
+/// lyric previously saved for that scope.
 Future<SavedLyric> saveLyric({
   required String songId,
   String? audioVersionId,
@@ -121,9 +137,6 @@ Future<SavedLyric> saveLyric({
   offsetMs: offsetMs,
 );
 
-Future<SavedLyric> selectLyric({required String lyricId}) =>
-    RustLib.instance.api.crateApiMusicSelectLyric(lyricId: lyricId);
-
 Future<SavedLyric> updateLyricOffset({
   required String lyricId,
   required int offsetMs,
@@ -132,17 +145,15 @@ Future<SavedLyric> updateLyricOffset({
   offsetMs: offsetMs,
 );
 
-Future<void> deleteLyric({required String lyricId}) =>
-    RustLib.instance.api.crateApiMusicDeleteLyric(lyricId: lyricId);
+/// Clears the lyrics shown for a version (or every lyric of the song when
+/// `audio_version_id` is `None`). Returns whether the song still has lyrics.
+Future<bool> clearLyrics({required String songId, String? audioVersionId}) =>
+    RustLib.instance.api.crateApiMusicClearLyrics(
+      songId: songId,
+      audioVersionId: audioVersionId,
+    );
 
-Future<void> deleteSong({required String songId}) =>
-    RustLib.instance.api.crateApiMusicDeleteSong(songId: songId);
-
-Future<void> deleteAudioVersion({required String versionId}) =>
-    RustLib.instance.api.crateApiMusicDeleteAudioVersion(versionId: versionId);
-
-Future<bool> verifyAudioFile({required String filepath}) =>
-    RustLib.instance.api.crateApiMusicVerifyAudioFile(filepath: filepath);
+Future<List<Tag>> getTags() => RustLib.instance.api.crateApiMusicGetTags();
 
 Future<Tag> addTag({required String name, String? color, String? category}) =>
     RustLib.instance.api.crateApiMusicAddTag(
@@ -176,14 +187,20 @@ Future<void> tagSong({
   bind: bind,
 );
 
+Future<List<Playlist>> getPlaylists() =>
+    RustLib.instance.api.crateApiMusicGetPlaylists();
+
 Future<Playlist> createPlaylist({required String name}) =>
     RustLib.instance.api.crateApiMusicCreatePlaylist(name: name);
+
+Future<void> renamePlaylist({required String id, required String name}) =>
+    RustLib.instance.api.crateApiMusicRenamePlaylist(id: id, name: name);
 
 Future<void> deletePlaylist({required String id}) =>
     RustLib.instance.api.crateApiMusicDeletePlaylist(id: id);
 
-Future<void> renamePlaylist({required String id, required String name}) =>
-    RustLib.instance.api.crateApiMusicRenamePlaylist(id: id, name: name);
+Future<List<String>> getPlaylistSongs({required String playlistId}) =>
+    RustLib.instance.api.crateApiMusicGetPlaylistSongs(playlistId: playlistId);
 
 Future<void> addSongsToPlaylist({
   required String playlistId,
@@ -200,124 +217,3 @@ Future<void> removeSongsFromPlaylist({
   playlistId: playlistId,
   songIds: songIds,
 );
-
-Future<List<String>> getPlaylistSongs({required String playlistId}) =>
-    RustLib.instance.api.crateApiMusicGetPlaylistSongs(playlistId: playlistId);
-
-Future<List<String>> scanDirectoryForPreview({required String dirPath}) =>
-    RustLib.instance.api.crateApiMusicScanDirectoryForPreview(dirPath: dirPath);
-
-Future<List<PreviewInfo>> previewAudioMetadata({
-  required List<String> filepaths,
-}) => RustLib.instance.api.crateApiMusicPreviewAudioMetadata(
-  filepaths: filepaths,
-);
-
-Future<void> resetLibrary() => RustLib.instance.api.crateApiMusicResetLibrary();
-
-Future<String> exportAudioFile({
-  required String versionId,
-  required String destPath,
-}) => RustLib.instance.api.crateApiMusicExportAudioFile(
-  versionId: versionId,
-  destPath: destPath,
-);
-
-Future<void> updateVersionDuration({
-  required String versionId,
-  required double duration,
-}) => RustLib.instance.api.crateApiMusicUpdateVersionDuration(
-  versionId: versionId,
-  duration: duration,
-);
-
-Future<void> startRustPlayback({
-  required String path,
-  required double volume,
-  required double pitch,
-  required String algo,
-  required double normalizationGain,
-}) => RustLib.instance.api.crateApiMusicStartRustPlayback(
-  path: path,
-  volume: volume,
-  pitch: pitch,
-  algo: algo,
-  normalizationGain: normalizationGain,
-);
-
-Future<void> pauseRustPlayback() =>
-    RustLib.instance.api.crateApiMusicPauseRustPlayback();
-
-Future<void> resumeRustPlayback() =>
-    RustLib.instance.api.crateApiMusicResumeRustPlayback();
-
-Future<void> seekRustPlayback({required double secs}) =>
-    RustLib.instance.api.crateApiMusicSeekRustPlayback(secs: secs);
-
-Future<void> stopRustPlayback() =>
-    RustLib.instance.api.crateApiMusicStopRustPlayback();
-
-Future<void> setRustVolume({required double vol}) =>
-    RustLib.instance.api.crateApiMusicSetRustVolume(vol: vol);
-
-Future<void> setRustPitch({required double pitch, required String algo}) =>
-    RustLib.instance.api.crateApiMusicSetRustPitch(pitch: pitch, algo: algo);
-
-Future<void> setRustOutputBufferMs({required int ms}) =>
-    RustLib.instance.api.crateApiMusicSetRustOutputBufferMs(ms: ms);
-
-Future<void> setRustOutputLatencyMode({required String mode}) =>
-    RustLib.instance.api.crateApiMusicSetRustOutputLatencyMode(mode: mode);
-
-Future<void> setRustAudioQualitySettings({
-  required bool peakProtectionEnabled,
-  required bool ditherEnabled,
-  required String rubberbandWindow,
-  required bool rubberbandFormantPreserved,
-  required bool rubberbandVocalOnlyPitch,
-  required String resamplerQuality,
-}) => RustLib.instance.api.crateApiMusicSetRustAudioQualitySettings(
-  peakProtectionEnabled: peakProtectionEnabled,
-  ditherEnabled: ditherEnabled,
-  rubberbandWindow: rubberbandWindow,
-  rubberbandFormantPreserved: rubberbandFormantPreserved,
-  rubberbandVocalOnlyPitch: rubberbandVocalOnlyPitch,
-  resamplerQuality: resamplerQuality,
-);
-
-Future<AudioOutputInfo> getRustAudioOutputInfo() =>
-    RustLib.instance.api.crateApiMusicGetRustAudioOutputInfo();
-
-void setAudioPerformanceProfilingEnabled({required bool enabled}) => RustLib
-    .instance
-    .api
-    .crateApiMusicSetAudioPerformanceProfilingEnabled(enabled: enabled);
-
-bool isAudioPerformanceProfilingEnabled() =>
-    RustLib.instance.api.crateApiMusicIsAudioPerformanceProfilingEnabled();
-
-void resetAudioPerformanceStats() =>
-    RustLib.instance.api.crateApiMusicResetAudioPerformanceStats();
-
-String getAudioPerformanceReportJson() =>
-    RustLib.instance.api.crateApiMusicGetAudioPerformanceReportJson();
-
-String exportAudioPerformanceReportMarkdown() =>
-    RustLib.instance.api.crateApiMusicExportAudioPerformanceReportMarkdown();
-
-Future<String> getRustDefaultOutputDeviceName() =>
-    RustLib.instance.api.crateApiMusicGetRustDefaultOutputDeviceName();
-
-Future<double> getRustPlaybackPosition() =>
-    RustLib.instance.api.crateApiMusicGetRustPlaybackPosition();
-
-Future<bool> isRustPlaybackFinished() =>
-    RustLib.instance.api.crateApiMusicIsRustPlaybackFinished();
-
-Future<void> refreshAudioFileMetadata({required String versionId}) => RustLib
-    .instance
-    .api
-    .crateApiMusicRefreshAudioFileMetadata(versionId: versionId);
-
-Future<void> refreshSongDatabase() =>
-    RustLib.instance.api.crateApiMusicRefreshSongDatabase();

@@ -6,53 +6,29 @@ use std::time::Duration;
 static LIBRARY_DIR: RwLock<Option<PathBuf>> = RwLock::new(None);
 
 pub fn set_library_dir(path: PathBuf) {
-    if let Ok(mut dir) = LIBRARY_DIR.write() {
-        *dir = Some(path);
-    }
+    *LIBRARY_DIR.write().unwrap_or_else(|e| e.into_inner()) = Some(path);
 }
 
-// 获取库的根路径
-pub fn get_library_dir() -> PathBuf {
-    let mut custom_path = None;
-    if let Ok(dir) = LIBRARY_DIR.read() {
-        if let Some(path) = &*dir {
-            custom_path = Some(path.clone());
-        }
-    }
-
-    if let Some(path) = custom_path {
-        path
-    } else {
-        #[cfg(debug_assertions)]
-        {
-            // Fallback for development
-            std::env::temp_dir().join("aetheria_library")
-        }
-        #[cfg(not(debug_assertions))]
-        {
-            std::env::temp_dir().join("aetheria_library")
-        }
-    }
+/// Root of the managed library. Falls back to a temp directory until the app
+/// has called `initialize_library_path`.
+pub fn library_dir() -> PathBuf {
+    LIBRARY_DIR
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+        .unwrap_or_else(|| std::env::temp_dir().join("aetheria_library"))
 }
 
-// 获取托管音频文件夹路径
-pub fn get_files_dir() -> PathBuf {
-    get_library_dir().join("files")
+pub fn database_path() -> PathBuf {
+    library_dir().join("database.db")
 }
 
-// 初始化本地文件夹结构
-pub fn init_storage() -> std::io::Result<()> {
-    let files_dir = get_files_dir();
-    std::fs::create_dir_all(files_dir)?;
-    std::fs::create_dir_all(get_library_dir().join("covers"))?;
-    Ok(())
-}
-
-// 建立 SQLite 连接
-pub fn establish_connection() -> Result<Connection> {
-    let db_path = get_library_dir().join("database.db");
-    let conn = Connection::open(db_path)?;
-
+/// Opens a connection to the library database.
+///
+/// Connections are short-lived on purpose: LAN sync replaces `database.db` on
+/// disk, so nothing may keep the file open between calls.
+pub fn open() -> Result<Connection> {
+    let conn = Connection::open(database_path())?;
     conn.busy_timeout(Duration::from_secs(8))?;
     conn.execute_batch(
         "PRAGMA foreign_keys = ON;

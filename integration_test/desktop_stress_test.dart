@@ -52,11 +52,8 @@ void main() {
         library.songs = (await music.getSongs()).take(600).toList();
         library.tags = await music.getTags();
         library.libraryPath = _libraryPath;
-        library.songIdsWithLyrics = {
-          for (final song in library.songs)
-            if ((await music.getLyricsForSong(songId: song.id)).isNotEmpty)
-              song.id,
-        };
+        library.songIdsWithLyrics = (await music.getSongIdsWithLyrics())
+            .toSet();
         final originals = List<Song>.of(library.songs);
         while (library.songs.length < 600 && originals.isNotEmpty) {
           final song = originals[library.songs.length % originals.length];

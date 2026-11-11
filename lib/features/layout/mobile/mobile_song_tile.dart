@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:aetheria/core/utils/formatting.dart';
 import 'package:aetheria/core/providers/library_provider.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
 import 'package:aetheria/core/utils/audio_quality.dart';
@@ -40,7 +41,7 @@ class MobileSongTile extends StatelessWidget {
     }
 
     final specsText = audioQualityText(primary);
-    final qualityColor = audioQualityColor(primary, cfg.textSecondary);
+    final qualityColor = audioQualityColor(primary, cfg);
 
     return Padding(
       padding: const EdgeInsets.only(bottom: AetherSpace.sm),
@@ -108,13 +109,15 @@ class MobileSongTile extends StatelessWidget {
                           ),
                           decoration: BoxDecoration(
                             color: qualityColor.withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(AetherRadius.xs),
+                            borderRadius: BorderRadius.circular(
+                              AetherRadius.xs,
+                            ),
                           ),
                           child: Text(
                             specsText,
-                            style: AetherType.captionStyle(qualityColor).copyWith(
-                              fontWeight: FontWeight.w700,
-                            ),
+                            style: AetherType.captionStyle(
+                              qualityColor,
+                            ).copyWith(fontWeight: FontWeight.w700),
                           ),
                         ),
                       ],
@@ -125,9 +128,7 @@ class MobileSongTile extends StatelessWidget {
                         spacing: AetherSpace.sm,
                         runSpacing: AetherSpace.xs,
                         children: song.tags.map((t) {
-                          final c = t.color != null
-                              ? mobileParseHexColor(t.color!, cfg.textSecondary)
-                              : cfg.textSecondary;
+                          final c = parseTagColor(t.color, cfg.textSecondary);
                           return Container(
                             padding: const EdgeInsets.symmetric(
                               horizontal: AetherSpace.sm,
@@ -135,15 +136,18 @@ class MobileSongTile extends StatelessWidget {
                             ),
                             decoration: BoxDecoration(
                               color: c.withValues(alpha: 0.10),
-                              borderRadius:
-                                  BorderRadius.circular(AetherRadius.xs),
-                              border: Border.all(color: c.withValues(alpha: 0.35)),
+                              borderRadius: BorderRadius.circular(
+                                AetherRadius.xs,
+                              ),
+                              border: Border.all(
+                                color: c.withValues(alpha: 0.35),
+                              ),
                             ),
                             child: Text(
                               t.name,
-                              style: AetherType.captionStyle(c).copyWith(
-                                fontWeight: FontWeight.w600,
-                              ),
+                              style: AetherType.captionStyle(
+                                c,
+                              ).copyWith(fontWeight: FontWeight.w600),
                             ),
                           );
                         }).toList(),

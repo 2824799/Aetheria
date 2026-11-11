@@ -1,41 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:aetheria/core/providers/audio_player_provider.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
-import 'package:aetheria/src/rust/models/song.dart';
-
-Color mobileParseHexColor(String hex, Color defaultColor) {
-  final clean = hex.replaceAll('#', '');
-  if (clean.length == 6) {
-    return Color(int.parse('FF$clean', radix: 16));
-  }
-  return defaultColor;
-}
-
-String mobileFormatFileSize(int bytes) {
-  if (bytes <= 0) return '0 B';
-  const suffixes = ['B', 'KB', 'MB', 'GB'];
-  var i = 0;
-  double size = bytes.toDouble();
-  while (size >= 1024 && i < suffixes.length - 1) {
-    size /= 1024;
-    i++;
-  }
-  return '${size.toStringAsFixed(1)} ${suffixes[i]}';
-}
-
-AudioVersion? mobileDisplayVersionForSong(
-  Song song,
-  AudioPlayerProvider audioProvider,
-) {
-  final playingVersion = audioProvider.playingVersion;
-  if (audioProvider.playingSong?.id == song.id && playingVersion != null) {
-    return playingVersion;
-  }
-  for (final version in song.versions) {
-    if (version.isPrimary) return version;
-  }
-  return song.versions.isNotEmpty ? song.versions.first : null;
-}
 
 class MobileLrcBadge extends StatelessWidget {
   final AppThemeConfig cfg;

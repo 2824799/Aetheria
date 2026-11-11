@@ -6,8 +6,8 @@ import 'package:provider/provider.dart';
 import 'package:aetheria/core/providers/audio_player_provider.dart';
 import 'package:aetheria/core/providers/floating_lyrics_provider.dart';
 import 'package:aetheria/features/lyrics/lyric_timeline.dart';
+import 'package:aetheria/features/lyrics/playing_lyric.dart';
 import 'package:aetheria/services/native_audio_helper.dart';
-import 'package:aetheria/src/rust/api/music.dart' as music;
 
 class FloatingLyricsBridge extends StatefulWidget {
   const FloatingLyricsBridge({super.key, required this.child});
@@ -22,13 +22,8 @@ class _FloatingLyricsBridgeState extends State<FloatingLyricsBridge> {
   Timer? _timer;
   FloatingLyricsProvider? _settings;
   AudioPlayerProvider? _audio;
-  String? _loadedSongId;
-  String? _loadedVersionId;
-  String _content = '';
-  String? _translation;
-  int _offsetMs = 0;
-  LyricTimeline? _timeline;
-  bool _loading = false;
+  final PlayingLyricTracker _lyrics = PlayingLyricTracker();
+  final PlaybackPositionEstimator _clock = PlaybackPositionEstimator();
   bool _ticking = false;
   bool _visible = false;
   bool _requestedOverlayPermission = false;
@@ -36,9 +31,6 @@ class _FloatingLyricsBridgeState extends State<FloatingLyricsBridge> {
   int _lastSentAtMs = 0;
   int _lastOverlayCheckAtMs = 0;
   bool _overlayAllowed = true;
-  int _anchorPositionMs = 0;
-  int _anchorReadAtMs = 0;
-  bool _anchorWasPlaying = false;
   int _lastLyricRevision = 0;
 
   @override
@@ -126,8 +118,7 @@ class _FloatingLyricsBridgeState extends State<FloatingLyricsBridge> {
 
     if (settings.lyricRevision != _lastLyricRevision) {
       _lastLyricRevision = settings.lyricRevision;
-      _loadedSongId = null;
-      _loadedVersionId = null;
+      _lyrics.invalidate();
     }
 
     if (!settings.enabled) {
@@ -153,7 +144,7 @@ class _FloatingLyricsBridgeState extends State<FloatingLyricsBridge> {
       return;
     }
 
-    await _ensureLyricLoaded(audio);
+    await _lyrics.sync(audio);
     if (!mounted || !settings.enabled) return;
 
     final styleSignature = settings.styleSignature;
@@ -170,7 +161,7 @@ class _FloatingLyricsBridgeState extends State<FloatingLyricsBridge> {
     }
 
     final frameIntervalMs = (1000 / settings.refreshFps.clamp(10, 60)).round();
-    final playbackChanged = audio.isPlaying != _anchorWasPlaying;
+    final playbackChanged = audio.isPlaying != _clock.wasPlaying;
     if (!playbackChanged &&
         audio.isPlaying &&
         now - _lastSentAtMs < frameIntervalMs) {
@@ -181,12 +172,14 @@ class _FloatingLyricsBridgeState extends State<FloatingLyricsBridge> {
     }
     _lastSentAtMs = now;
 
-    final positionMs = _estimatedPlaybackPositionMs(audio, now) + _offsetMs;
-    final frame = _timeline?.frameAt(positionMs) ?? const LyricFrame.empty();
+    final lyric = _lyrics.lyric;
+    final positionMs = _clock.positionMs(audio, now) + lyric.offsetMs;
+    final frame =
+        lyric.timeline?.frameAt(positionMs) ?? const LyricFrame.empty();
     final songTitle = audio.playingSong?.title.trim();
     final artist = audio.playingSong?.artist?.trim();
     final previews = settings.showNextLine
-        ? (_timeline?.previewLinesAfter(
+        ? (lyric.timeline?.previewLinesAfter(
                 frame.activeIndex,
                 count: settings.compactMultiline ? 4 : 1,
                 showTranslation: settings.showTranslation,
@@ -212,73 +205,6 @@ class _FloatingLyricsBridgeState extends State<FloatingLyricsBridge> {
       'songTitle': songTitle ?? '',
       'artist': artist ?? '',
     });
-  }
-
-  int _estimatedPlaybackPositionMs(AudioPlayerProvider audio, int now) {
-    final currentMs = audio.currentPosition.inMilliseconds;
-    final moved = (currentMs - _anchorPositionMs).abs() > 120;
-    if (moved || audio.isPlaying != _anchorWasPlaying || _anchorReadAtMs == 0) {
-      _anchorPositionMs = currentMs;
-      _anchorReadAtMs = now;
-      _anchorWasPlaying = audio.isPlaying;
-    }
-    if (!audio.isPlaying) {
-      return currentMs;
-    }
-    final estimated = _anchorPositionMs + (now - _anchorReadAtMs);
-    final totalMs = audio.totalDuration.inMilliseconds;
-    if (totalMs > 0) {
-      return estimated.clamp(0, totalMs);
-    }
-    return estimated.clamp(0, 1 << 31);
-  }
-
-  Future<void> _ensureLyricLoaded(AudioPlayerProvider audio) async {
-    final song = audio.playingSong;
-    final version = audio.playingVersion;
-    final songId = song?.id;
-    final versionId = version?.id;
-    if (songId == _loadedSongId && versionId == _loadedVersionId) {
-      return;
-    }
-    if (_loading) {
-      return;
-    }
-
-    _loading = true;
-    try {
-      _loadedSongId = songId;
-      _loadedVersionId = versionId;
-      if (song == null) {
-        _content = '';
-        _translation = null;
-        _offsetMs = 0;
-        _timeline = null;
-        return;
-      }
-
-      final lyric = await music.getSelectedLyric(
-        songId: song.id,
-        audioVersionId: versionId,
-      );
-      _content = lyric?.content.trim().isNotEmpty == true
-          ? lyric!.content.trim()
-          : (song.lyrics?.trim() ?? '');
-      _translation = lyric?.translation?.trim();
-      _offsetMs = lyric?.offsetMs ?? 0;
-      _timeline = _content.trim().isEmpty
-          ? null
-          : LyricTimeline.parse(content: _content, translation: _translation);
-    } catch (_) {
-      _content = song?.lyrics?.trim() ?? '';
-      _translation = null;
-      _offsetMs = 0;
-      _timeline = _content.trim().isEmpty
-          ? null
-          : LyricTimeline.parse(content: _content);
-    } finally {
-      _loading = false;
-    }
   }
 
   double? _asDouble(Object? value) {

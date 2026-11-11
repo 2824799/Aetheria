@@ -65,7 +65,6 @@ class _MainLayoutState extends State<MainLayout>
       await context.read<AudioPlayerProvider>().restorePlaybackState(
         libraryProvider.songs,
         libraryProvider.libraryPath,
-        audioServerPort: libraryProvider.audioServerPort,
       );
     });
   }

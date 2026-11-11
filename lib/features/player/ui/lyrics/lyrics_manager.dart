@@ -275,14 +275,10 @@ class _LyricsPanelState extends State<LyricsPanel> {
     });
 
     try {
-      final lyrics = await music.getLyricsForSong(songId: widget.song.id);
-      for (final lyric in lyrics) {
-        if (widget.audioVersion == null ||
-            lyric.audioVersionId == widget.audioVersion?.id ||
-            lyric.audioVersionId == null) {
-          await music.deleteLyric(lyricId: lyric.id);
-        }
-      }
+      final songStillHasLyrics = await music.clearLyrics(
+        songId: widget.song.id,
+        audioVersionId: widget.audioVersion?.id,
+      );
       if (!mounted) {
         return;
       }
@@ -292,7 +288,9 @@ class _LyricsPanelState extends State<LyricsPanel> {
         _cleared = true;
         _loadingSaved = false;
       });
-      context.read<LibraryProvider>().markSongHasNoLyrics(widget.song.id);
+      if (!songStillHasLyrics) {
+        context.read<LibraryProvider>().markSongHasNoLyrics(widget.song.id);
+      }
       context.read<FloatingLyricsProvider>().notifyLyricUpdated();
       showAetherToast(
         context,

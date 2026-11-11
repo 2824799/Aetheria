@@ -1,14 +1,13 @@
 import 'package:flutter/material.dart';
 import 'dart:ui';
-import 'package:file_picker/file_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter/services.dart';
+import 'package:aetheria/core/utils/formatting.dart';
+import 'package:aetheria/features/player/version_actions.dart';
 import 'package:aetheria/core/providers/audio_player_provider.dart';
 import 'package:aetheria/core/providers/library_provider.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
 import 'package:aetheria/core/widgets/aether_button.dart';
-import 'package:aetheria/core/widgets/aether_dialog.dart';
-import 'package:aetheria/core/widgets/aether_empty_state.dart';
 import 'package:aetheria/core/widgets/aether_icon_button.dart';
 import 'package:aetheria/core/widgets/aether_text_field.dart';
 import 'package:aetheria/core/widgets/aether_pressable.dart';
@@ -17,93 +16,17 @@ import 'package:aetheria/core/widgets/aether_toast.dart';
 import 'package:aetheria/features/player/ui/lyrics_panel.dart';
 import 'package:aetheria/features/player/ui/song_cover_art.dart';
 import 'package:aetheria/src/rust/models/song.dart';
-import 'package:aetheria/src/rust/api/music.dart' as music;
-import 'package:aetheria/services/native_audio_helper.dart';
 import 'dart:io';
 import 'package:aetheria/core/widgets/aether_surface.dart';
 
 class DetailPane extends StatelessWidget {
   const DetailPane({super.key});
 
-  Color _parseHexColor(String hex, Color defaultColor) {
-    final clean = hex.replaceAll('#', '');
-    if (clean.length == 6) {
-      return Color(int.parse('FF$clean', radix: 16));
-    }
-    return defaultColor;
-  }
-
-  String _formatFileSize(int bytes) {
-    if (bytes <= 0) return '0 B';
-    const suffixes = ['B', 'KB', 'MB', 'GB'];
-    var i = 0;
-    double d = bytes.toDouble();
-    while (d >= 1024 && i < suffixes.length - 1) {
-      d /= 1024;
-      i++;
-    }
-    return '${d.toStringAsFixed(1)} ${suffixes[i]}';
-  }
-
   String _formatLoudness(double? loudness) {
     if (loudness == null) {
       return '响度: 待扫描';
     }
     return '响度: ${loudness.toStringAsFixed(1)} LUFS';
-  }
-
-  Future<bool> _confirmDeleteVersion(
-    BuildContext context,
-    AudioVersion version,
-  ) async {
-    return showAetherConfirmDialog(
-      context: context,
-      title: '删除音源版本？',
-      message: '确定要删除音源版本“${version.originalName}”吗？这会同时删除对应的本地音频文件。',
-      confirmLabel: '删除版本',
-      dangerous: true,
-    );
-  }
-
-  Future<T?> _withBlockingLoader<T>(
-    BuildContext context,
-    Future<T> Function() task,
-  ) async {
-    var opened = false;
-    try {
-      showAetherDialog<void>(
-        context: context,
-        barrierDismissible: false,
-        builder: (ctx) => const AetherDialog(
-          content: SizedBox(
-            height: 96,
-            child: AetherLoading(message: '处理中…'),
-          ),
-        ),
-      );
-      opened = true;
-      return await task();
-    } finally {
-      if (opened && context.mounted) {
-        Navigator.of(context).pop();
-      }
-    }
-  }
-
-  AudioVersion? _displayVersionForSong(
-    Song song,
-    AudioPlayerProvider audioProvider,
-  ) {
-    final playingVersion = audioProvider.playingVersion;
-    if (audioProvider.playingSong?.id == song.id && playingVersion != null) {
-      return playingVersion;
-    }
-    for (final version in song.versions) {
-      if (version.isPrimary) {
-        return version;
-      }
-    }
-    return song.versions.isNotEmpty ? song.versions.first : null;
   }
 
   Future<void> _saveSongMetadata(
@@ -129,141 +52,6 @@ class DetailPane extends StatelessWidget {
       orElse: () => song,
     );
     audioProvider.syncSongSnapshot(updatedSong);
-  }
-
-  Future<void> _setPrimaryVersion(
-    BuildContext context,
-    Song song,
-    AudioVersion version,
-    LibraryProvider libraryProvider,
-    AudioPlayerProvider audioProvider,
-  ) async {
-    if (version.isPrimary) {
-      return;
-    }
-
-    final shouldSwitchCurrentPlayback =
-        audioProvider.playingSong?.id == song.id &&
-        audioProvider.playingVersion?.id != version.id;
-    final position = audioProvider.currentPosition;
-    final startPaused = !audioProvider.isPlaying;
-
-    await libraryProvider.setPrimaryVersion(version.id);
-
-    if (!shouldSwitchCurrentPlayback) {
-      return;
-    }
-
-    final updatedSong = libraryProvider.songs.firstWhere(
-      (entry) => entry.id == song.id,
-      orElse: () => song,
-    );
-    final updatedVersion = updatedSong.versions.firstWhere(
-      (entry) => entry.id == version.id,
-      orElse: () => version,
-    );
-
-    await audioProvider.switchToVersion(
-      updatedSong,
-      updatedVersion,
-      libraryProvider.libraryPath,
-      audioServerPort: libraryProvider.audioServerPort,
-      startPosition: position,
-      startPaused: startPaused,
-    );
-  }
-
-  Future<void> _linkNewVersion(
-    BuildContext context,
-    Song song,
-    LibraryProvider provider,
-  ) async {
-    try {
-      FilePickerResult? result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['mp3', 'wav', 'flac', 'm4a', 'ogg', 'aac'],
-      );
-
-      if (result == null || result.files.single.path == null) return;
-      final path = result.files.single.path!;
-      if (!context.mounted) {
-        return;
-      }
-
-      await _withBlockingLoader<void>(context, () async {
-        await provider.importAudioVersionForSong(song.id, path);
-      });
-      if (!context.mounted) {
-        return;
-      }
-      showAetherToast(
-        context,
-        message: '成功关联新音源版本',
-        kind: AetherToastKind.success,
-      );
-    } catch (e) {
-      if (!context.mounted) {
-        return;
-      }
-      showAetherToast(
-        context,
-        message: '关联失败: $e',
-        kind: AetherToastKind.error,
-      );
-    }
-  }
-
-  Future<void> _exportVersion(
-    BuildContext context,
-    AudioVersion version,
-  ) async {
-    try {
-      if (Platform.isAndroid) {
-        final libraryPath = context.read<LibraryProvider>().libraryPath;
-        final srcPath = '$libraryPath/${version.filepath}'.replaceAll(
-          '\\',
-          '/',
-        );
-        await _withBlockingLoader<void>(context, () async {
-          await NativeAudioHelper.saveToDownloads(
-            srcPath,
-            version.originalName,
-          );
-        });
-        if (!context.mounted) return;
-        showAetherToast(
-          context,
-          message: '已成功导出至系统 Downloads/Aetheria 文件夹！',
-          kind: AetherToastKind.success,
-        );
-      } else {
-        final destPath = await FilePicker.platform.saveFile(
-          fileName: version.originalName,
-          dialogTitle: '选择保存音频的位置',
-        );
-        if (destPath == null) return;
-        if (!context.mounted) return;
-        await _withBlockingLoader<void>(context, () async {
-          await music.exportAudioFile(
-            versionId: version.id,
-            destPath: destPath,
-          );
-        });
-        if (!context.mounted) return;
-        showAetherToast(
-          context,
-          message: '音频文件导出还原成功！',
-          kind: AetherToastKind.success,
-        );
-      }
-    } catch (e) {
-      if (!context.mounted) return;
-      showAetherToast(
-        context,
-        message: '导出失败: $e',
-        kind: AetherToastKind.error,
-      );
-    }
   }
 
   @override
@@ -430,7 +218,7 @@ class DetailPane extends StatelessWidget {
     if (audioProvider.activeTab == 'lyrics') {
       return LyricsDisplayPanel(
         song: song,
-        audioVersion: _displayVersionForSong(song, audioProvider),
+        audioVersion: displayVersionForSong(song, audioProvider),
         cfg: cfg,
       );
     }
@@ -438,7 +226,7 @@ class DetailPane extends StatelessWidget {
     if (audioProvider.activeTab == 'lyric_manager') {
       return LyricsPanel(
         song: song,
-        audioVersion: _displayVersionForSong(song, audioProvider),
+        audioVersion: displayVersionForSong(song, audioProvider),
         cfg: cfg,
       );
     }
@@ -460,12 +248,6 @@ class DetailPane extends StatelessWidget {
               itemCount: song.versions.length,
               itemBuilder: (context, index) {
                 final v = song.versions[index];
-
-                final durationMin = (v.duration / 60).floor();
-                final durationSec = (v.duration % 60)
-                    .round()
-                    .toString()
-                    .padLeft(2, '0');
 
                 return AetherSurface(
                   margin: const EdgeInsets.only(bottom: AetherSpace.lg),
@@ -489,7 +271,7 @@ class DetailPane extends StatelessWidget {
 
                         // Technical specs
                         Text(
-                          '${v.format?.toUpperCase() ?? "未知"} | ${(v.bitrate ?? 0) ~/ 1000}kbps | ${v.sampleRate != null ? (v.sampleRate! / 1000).toStringAsFixed(1) : "未知"}kHz | $durationMin:$durationSec | ${_formatFileSize(v.fileSize.toInt())} | ${_formatLoudness(v.loudness)}',
+                          '${formatVersionSpecs(v)} | ${_formatLoudness(v.loudness)}',
                           style: AetherType.captionStyle(cfg.textSecondary),
                         ),
                         const SizedBox(height: AetherSpace.sm),
@@ -527,13 +309,7 @@ class DetailPane extends StatelessWidget {
                           child: Tooltip(
                             message: '播放这首歌时优先使用的版本；若正在播放，会按当前进度切到新版本。',
                             child: AetherPressable(
-                              onTap: () => _setPrimaryVersion(
-                                context,
-                                song,
-                                v,
-                                libraryProvider,
-                                audioProvider,
-                              ),
+                              onTap: () => makeVersionPrimary(context, song, v),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
@@ -568,47 +344,14 @@ class DetailPane extends StatelessWidget {
                               label: '导出物理文件',
                               icon: Icons.download,
                               size: AetherButtonSize.sm,
-                              onPressed: () => _exportVersion(context, v),
+                              onPressed: () => exportVersion(context, v),
                             ),
                             if (song.versions.length > 1)
                               AetherButton.danger(
                                 label: '删除版本',
                                 icon: Icons.delete_outline_rounded,
                                 size: AetherButtonSize.sm,
-                                onPressed: () async {
-                                  final confirmed = await _confirmDeleteVersion(
-                                    context,
-                                    v,
-                                  );
-                                  if (!confirmed) {
-                                    return;
-                                  }
-                                  if (!context.mounted) {
-                                    return;
-                                  }
-                                  try {
-                                    await libraryProvider.deleteAudioVersion(
-                                      v.id,
-                                    );
-                                    if (!context.mounted) {
-                                      return;
-                                    }
-                                    showAetherToast(
-                                      context,
-                                      message: '音频版本已删除',
-                                      kind: AetherToastKind.success,
-                                    );
-                                  } catch (e) {
-                                    if (!context.mounted) {
-                                      return;
-                                    }
-                                    showAetherToast(
-                                      context,
-                                      message: '删除失败: $e',
-                                      kind: AetherToastKind.error,
-                                    );
-                                  }
-                                },
+                                onPressed: () => deleteVersion(context, v),
                               ),
                           ],
                         ),
@@ -626,8 +369,7 @@ class DetailPane extends StatelessWidget {
               label: '关联新的音源版本',
               icon: Icons.add_rounded,
               expanded: true,
-              onPressed: () =>
-                  _linkNewVersion(context, song, libraryProvider),
+              onPressed: () => linkNewVersion(context, song),
             ),
           ),
         ],
@@ -641,9 +383,7 @@ class DetailPane extends StatelessWidget {
         itemBuilder: (context, index) {
           final tag = libraryProvider.tags[index];
           final isBound = song.tags.any((t) => t.id == tag.id);
-          final tagColor = tag.color != null
-              ? _parseHexColor(tag.color!, cfg.textSecondary)
-              : cfg.textSecondary;
+          final tagColor = parseTagColor(tag.color, cfg.textSecondary);
 
           return Padding(
             padding: const EdgeInsets.only(bottom: AetherSpace.md),

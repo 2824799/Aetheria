@@ -5,8 +5,8 @@ import 'dart:math' as math;
 import 'package:aetheria/core/providers/audio_player_provider.dart';
 import 'package:aetheria/core/providers/floating_lyrics_provider.dart';
 import 'package:aetheria/features/lyrics/lyric_timeline.dart';
+import 'package:aetheria/features/lyrics/playing_lyric.dart';
 import 'package:aetheria/services/native_audio_helper.dart';
-import 'package:aetheria/src/rust/api/music.dart' as music;
 import 'package:flutter/widgets.dart';
 import 'package:provider/provider.dart';
 
@@ -24,20 +24,13 @@ class _SuperLyricBridgeState extends State<SuperLyricBridge> {
   bool _available = false;
   bool _initializing = false;
   bool _ticking = false;
-  bool _loading = false;
   bool _stopped = true;
   bool _wasEnabled = false;
   int _nextInitializeAtMs = 0;
   int _lastLyricRevision = 0;
-  int _offsetMs = 0;
-  int _anchorPositionMs = 0;
-  int _anchorReadAtMs = 0;
-  bool _anchorWasPlaying = false;
-  String? _loadedSongId;
-  String? _loadedVersionId;
   String _lastPublishedSignature = '';
-  LyricTimeline? _timeline;
-  Map<int, String> _romanizedByTime = const <int, String>{};
+  final PlayingLyricTracker _lyrics = PlayingLyricTracker();
+  final PlaybackPositionEstimator _clock = PlaybackPositionEstimator();
 
   @override
   void initState() {
@@ -88,15 +81,17 @@ class _SuperLyricBridgeState extends State<SuperLyricBridge> {
 
       if (settings.lyricRevision != _lastLyricRevision) {
         _lastLyricRevision = settings.lyricRevision;
-        _loadedSongId = null;
-        _loadedVersionId = null;
-        _timeline = null;
-        _lastPublishedSignature = '';
+        _lyrics.invalidate();
       }
 
-      await _ensureLyricLoaded(audio);
+      if (await _lyrics.sync(audio)) {
+        _lastPublishedSignature = '';
+        _clock.reset();
+      }
       final song = audio.playingSong;
-      final timeline = _timeline;
+      final lyric = _lyrics.lyric;
+      final timeline = lyric.timeline;
+      final offsetMs = lyric.offsetMs;
       if (song == null ||
           timeline == null ||
           timeline.lines.isEmpty ||
@@ -105,7 +100,7 @@ class _SuperLyricBridgeState extends State<SuperLyricBridge> {
         return;
       }
 
-      final positionMs = _estimatedPlaybackPositionMs(audio, now) + _offsetMs;
+      final positionMs = _clock.positionMs(audio, now) + offsetMs;
       final activeIndex = timeline.hasTimedLines
           ? LyricTimeline.activeLineIndex(timeline.lines, positionMs)
           : 0;
@@ -124,7 +119,7 @@ class _SuperLyricBridgeState extends State<SuperLyricBridge> {
           : timeline.translationFor(line);
       final secondary = line.timeMs == null
           ? ''
-          : _romanizedByTime[line.timeMs]?.trim() ?? '';
+          : lyric.romanizedByTime[line.timeMs]?.trim() ?? '';
       final signature = <Object?>[
         song.id,
         audio.playingVersion?.id,
@@ -134,7 +129,7 @@ class _SuperLyricBridgeState extends State<SuperLyricBridge> {
         line.endMs,
         translation,
         secondary,
-        _offsetMs,
+        offsetMs,
       ].join('|');
       if (!_stopped && signature == _lastPublishedSignature) {
         return;
@@ -148,7 +143,7 @@ class _SuperLyricBridgeState extends State<SuperLyricBridge> {
           line: line,
           translation: translation,
           secondary: secondary,
-          offsetMs: _offsetMs,
+          offsetMs: offsetMs,
         ),
       );
       if (published) {
@@ -210,82 +205,6 @@ class _SuperLyricBridgeState extends State<SuperLyricBridge> {
     _lastPublishedSignature = '';
     if (!stopped) {
       _markUnavailable(DateTime.now().millisecondsSinceEpoch);
-    }
-  }
-
-  int _estimatedPlaybackPositionMs(AudioPlayerProvider audio, int now) {
-    final currentMs = audio.currentPosition.inMilliseconds;
-    final moved = (currentMs - _anchorPositionMs).abs() > 120;
-    if (moved || audio.isPlaying != _anchorWasPlaying || _anchorReadAtMs == 0) {
-      _anchorPositionMs = currentMs;
-      _anchorReadAtMs = now;
-      _anchorWasPlaying = audio.isPlaying;
-    }
-    if (!audio.isPlaying) {
-      return currentMs;
-    }
-    final estimated = _anchorPositionMs + (now - _anchorReadAtMs);
-    final totalMs = audio.totalDuration.inMilliseconds;
-    if (totalMs > 0) {
-      return estimated.clamp(0, totalMs);
-    }
-    return estimated.clamp(0, 1 << 31);
-  }
-
-  Future<void> _ensureLyricLoaded(AudioPlayerProvider audio) async {
-    final song = audio.playingSong;
-    final version = audio.playingVersion;
-    final songId = song?.id;
-    final versionId = version?.id;
-    if (songId == _loadedSongId && versionId == _loadedVersionId) {
-      return;
-    }
-    if (_loading) {
-      return;
-    }
-
-    _loading = true;
-    _loadedSongId = songId;
-    _loadedVersionId = versionId;
-    _timeline = null;
-    _romanizedByTime = const <int, String>{};
-    _offsetMs = 0;
-    _lastPublishedSignature = '';
-    _anchorReadAtMs = 0;
-    try {
-      if (song == null) {
-        return;
-      }
-
-      final lyric = await music.getSelectedLyric(
-        songId: song.id,
-        audioVersionId: versionId,
-      );
-      if (!mounted ||
-          audio.playingSong?.id != songId ||
-          audio.playingVersion?.id != versionId) {
-        return;
-      }
-
-      final content = lyric?.content.trim().isNotEmpty == true
-          ? lyric!.content.trim()
-          : (song.lyrics?.trim() ?? '');
-      final translation = lyric?.translation?.trim();
-      final romanized = lyric?.romanized?.trim();
-      _offsetMs = lyric?.offsetMs ?? 0;
-      _timeline = content.isEmpty
-          ? null
-          : LyricTimeline.parse(content: content, translation: translation);
-      _romanizedByTime = LyricTimeline.parseTranslationByTime(romanized);
-    } catch (_) {
-      final content = song?.lyrics?.trim() ?? '';
-      _timeline = content.isEmpty
-          ? null
-          : LyricTimeline.parse(content: content);
-      _romanizedByTime = const <int, String>{};
-      _offsetMs = 0;
-    } finally {
-      _loading = false;
     }
   }
 }

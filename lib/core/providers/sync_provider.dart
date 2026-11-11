@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
@@ -113,6 +114,7 @@ class SyncProvider extends ChangeNotifier {
   static const Duration _requestTimeout = Duration(seconds: 90);
   static const Duration _downloadTimeout = Duration(minutes: 3);
   static const Duration _sessionTtl = Duration(minutes: 30);
+  static const int _maxRequestBodyBytes = 16 * 1024;
 
   final Map<String, SyncDevice> _devices = {};
   final Map<String, Completer<bool>> _pendingRequestCompleters = {};
@@ -130,6 +132,8 @@ class SyncProvider extends ChangeNotifier {
   bool _fileHashCacheLoaded = false;
   String? _deviceId;
   String? _deviceName;
+  Future<void> _approvalQueue = Future<void>.value();
+  bool _disposed = false;
 
   bool isRunning = false;
   bool isDiscovering = false;
@@ -169,7 +173,7 @@ class SyncProvider extends ChangeNotifier {
 
     try {
       _server = await HttpServer.bind(InternetAddress.anyIPv4, 0);
-      unawaited(_serveHttp(_server!));
+      _serveHttp(_server!);
 
       try {
         _udpSocket = await RawDatagramSocket.bind(
@@ -340,7 +344,9 @@ class SyncProvider extends ChangeNotifier {
           updateProgress(
             '正在同步 (${completed + 1}/${plan.downloads.length}) ${file.path.split('/').last}...',
           );
-          final destination = File(_joinPath(tempDir.path, file.path.split('/')));
+          final destination = File(
+            _joinPath(tempDir.path, file.path.split('/')),
+          );
           await destination.parent.create(recursive: true);
           await _downloadToFile(
             Uri.http(device.endpoint, '/sync/file', {'path': file.path}),
@@ -423,17 +429,12 @@ class SyncProvider extends ChangeNotifier {
   }
 
   Future<String> _requestRemoteApproval(SyncDevice device) async {
-    final requestId = _newId();
     final request = await _client.postUrl(
       Uri.http(device.endpoint, '/sync/request'),
     );
     request.headers.contentType = ContentType.json;
     request.write(
-      jsonEncode({
-        'requestId': requestId,
-        'deviceId': _deviceId,
-        'deviceName': _deviceName,
-      }),
+      jsonEncode({'deviceId': _deviceId, 'deviceName': _deviceName}),
     );
     final response = await request.close().timeout(_requestTimeout);
     final body = await utf8.decoder.bind(response).join();
@@ -496,7 +497,10 @@ class SyncProvider extends ChangeNotifier {
   ) async {
     final filesDir = Directory(_joinPath(libraryPath, ['files']));
     await filesDir.create(recursive: true);
-    final localFilesMap = await _listLibraryFilesWithSize(filesDir, libraryPath);
+    final localFilesMap = await _listLibraryFilesWithSize(
+      filesDir,
+      libraryPath,
+    );
     final remoteByPath = {for (final file in remoteFiles) file.path: file};
     final downloads = <_RemoteFileInfo>[];
     final removeOrReplace = <String>{};
@@ -578,9 +582,9 @@ class SyncProvider extends ChangeNotifier {
       final filesDir = Directory(_joinPath(libraryPath, ['files']));
       await filesDir.create(recursive: true);
       final currentLocalFiles = await _listLibraryFiles(filesDir, libraryPath);
-      final pathsToRemove = currentLocalFiles.where(
-        (path) => !sourcePaths.contains(path),
-      ).toList();
+      final pathsToRemove = currentLocalFiles
+          .where((path) => !sourcePaths.contains(path))
+          .toList();
 
       for (final relPath in pathsToRemove) {
         final localPath = _resolveLibraryRelativePath(libraryPath, relPath);
@@ -674,16 +678,86 @@ class SyncProvider extends ChangeNotifier {
     return dir;
   }
 
-  Future<void> _serveHttp(HttpServer server) async {
-    await for (final request in server) {
+  /// Requests are served concurrently: an approval prompt can stay open for
+  /// [_requestTimeout] and must not stall transfers that are already running.
+  void _serveHttp(HttpServer server) {
+    server.listen(
+      (request) => unawaited(_respond(request)),
+      onError: (Object error) => debugPrint('Sync server error: $error'),
+    );
+  }
+
+  Future<void> _respond(HttpRequest request) async {
+    try {
+      await _handleHttpRequest(request);
+    } catch (e) {
+      debugPrint('Sync request ${request.uri.path} failed: $e');
+      // The response may already be partly sent, in which case the status can
+      // no longer change and closing reports the truncated body.
       try {
-        await _handleHttpRequest(request);
-      } catch (e) {
         request.response.statusCode = HttpStatus.internalServerError;
-        request.response.write(e.toString());
+        request.response.write('internal error');
+      } catch (_) {}
+      try {
         await request.response.close();
+      } catch (_) {}
+    }
+  }
+
+  Future<void> _reject(HttpRequest request, int status, String message) async {
+    request.response.statusCode = status;
+    request.response.write(message);
+    await request.response.close();
+  }
+
+  /// Reads a small JSON object body, or returns null when it is oversized or
+  /// malformed.
+  Future<Map<String, dynamic>?> _readJsonBody(HttpRequest request) async {
+    if (request.contentLength > _maxRequestBodyBytes) {
+      return null;
+    }
+    final bytes = BytesBuilder(copy: false);
+    await for (final chunk in request) {
+      bytes.add(chunk);
+      if (bytes.length > _maxRequestBodyBytes) {
+        return null;
       }
     }
+    try {
+      final decoded = jsonDecode(utf8.decode(bytes.takeBytes()));
+      return decoded is Map<String, dynamic> ? decoded : null;
+    } on FormatException {
+      return null;
+    }
+  }
+
+  /// Shows one approval prompt at a time; later requests wait their turn.
+  Future<bool> _awaitApproval(IncomingSyncRequest incoming) {
+    final previous = _approvalQueue;
+    final result = () async {
+      await previous;
+      if (_disposed) {
+        return false;
+      }
+      final completer = Completer<bool>();
+      _pendingRequestCompleters[incoming.id] = completer;
+      incomingRequest = incoming;
+      notifyListeners();
+      try {
+        return await completer.future.timeout(
+          _requestTimeout,
+          onTimeout: () => false,
+        );
+      } finally {
+        _pendingRequestCompleters.remove(incoming.id);
+        if (incomingRequest?.id == incoming.id) {
+          incomingRequest = null;
+          notifyListeners();
+        }
+      }
+    }();
+    _approvalQueue = result.then<void>((_) {}, onError: (_) {});
+    return result;
   }
 
   Future<void> _handleHttpRequest(HttpRequest request) async {
@@ -701,42 +775,33 @@ class SyncProvider extends ChangeNotifier {
         await _handleFileRequest(request);
         return;
       default:
-        request.response.statusCode = HttpStatus.notFound;
-        request.response.write('not found');
-        await request.response.close();
+        await _reject(request, HttpStatus.notFound, 'not found');
     }
   }
 
   Future<void> _handleSyncRequest(HttpRequest request) async {
     if (request.method != 'POST') {
-      request.response.statusCode = HttpStatus.methodNotAllowed;
-      await request.response.close();
+      await _reject(request, HttpStatus.methodNotAllowed, 'method not allowed');
       return;
     }
 
-    final body = await utf8.decoder.bind(request).join();
-    final json = jsonDecode(body) as Map<String, dynamic>;
-    final requestId = json['requestId']?.toString() ?? _newId();
-    final completer = Completer<bool>();
-    _pendingRequestCompleters[requestId] = completer;
-    incomingRequest = IncomingSyncRequest(
-      id: requestId,
-      deviceId: json['deviceId']?.toString() ?? '',
-      deviceName: json['deviceName']?.toString() ?? '未知设备',
-      address: request.connectionInfo?.remoteAddress.address ?? '',
-      createdAt: DateTime.now(),
-    );
-    notifyListeners();
+    final json = await _readJsonBody(request);
+    if (json == null) {
+      await _reject(request, HttpStatus.badRequest, 'invalid request');
+      return;
+    }
 
-    final approved = await completer.future
-        .timeout(_requestTimeout, onTimeout: () => false)
-        .whenComplete(() {
-          _pendingRequestCompleters.remove(requestId);
-          if (incomingRequest?.id == requestId) {
-            incomingRequest = null;
-            notifyListeners();
-          }
-        });
+    // The id is generated here: a peer-supplied one could collide with (and
+    // silently replace) a prompt that is still waiting for the user.
+    final approved = await _awaitApproval(
+      IncomingSyncRequest(
+        id: _newId(),
+        deviceId: json['deviceId']?.toString() ?? '',
+        deviceName: json['deviceName']?.toString() ?? '未知设备',
+        address: request.connectionInfo?.remoteAddress.address ?? '',
+        createdAt: DateTime.now(),
+      ),
+    );
 
     request.response.headers.contentType = ContentType.json;
     if (!approved) {
@@ -762,17 +827,13 @@ class SyncProvider extends ChangeNotifier {
 
   Future<void> _handleManifestRequest(HttpRequest request) async {
     if (!_isAuthorized(request)) {
-      request.response.statusCode = HttpStatus.unauthorized;
-      request.response.write('unauthorized');
-      await request.response.close();
+      await _reject(request, HttpStatus.unauthorized, 'unauthorized');
       return;
     }
 
     final libraryProvider = _libraryProvider;
     if (libraryProvider == null || libraryProvider.libraryPath.isEmpty) {
-      request.response.statusCode = HttpStatus.badRequest;
-      request.response.write('library not ready');
-      await request.response.close();
+      await _reject(request, HttpStatus.badRequest, 'library not ready');
       return;
     }
 
@@ -833,11 +894,7 @@ class SyncProvider extends ChangeNotifier {
         }
       }
 
-      files.add({
-        'path': relPath,
-        'size': actualSize,
-        'md5': fileMd5,
-      });
+      files.add({'path': relPath, 'size': actualSize, 'md5': fileMd5});
     }
 
     request.response.headers.contentType = ContentType.json;
@@ -857,16 +914,12 @@ class SyncProvider extends ChangeNotifier {
 
   Future<void> _handleDatabaseRequest(HttpRequest request) async {
     if (!_isAuthorized(request)) {
-      request.response.statusCode = HttpStatus.unauthorized;
-      request.response.write('unauthorized');
-      await request.response.close();
+      await _reject(request, HttpStatus.unauthorized, 'unauthorized');
       return;
     }
     final libraryProvider = _libraryProvider;
     if (libraryProvider == null) {
-      request.response.statusCode = HttpStatus.badRequest;
-      request.response.write('library not ready');
-      await request.response.close();
+      await _reject(request, HttpStatus.badRequest, 'library not ready');
       return;
     }
     await music.checkpointLibraryDatabase();
@@ -874,9 +927,7 @@ class SyncProvider extends ChangeNotifier {
       _joinPath(libraryProvider.libraryPath, ['database.db']),
     );
     if (!await dbFile.exists()) {
-      request.response.statusCode = HttpStatus.notFound;
-      request.response.write('database not found');
-      await request.response.close();
+      await _reject(request, HttpStatus.notFound, 'database not found');
       return;
     }
     request.response.headers.contentType = ContentType.binary;
@@ -887,26 +938,20 @@ class SyncProvider extends ChangeNotifier {
 
   Future<void> _handleFileRequest(HttpRequest request) async {
     if (!_isAuthorized(request)) {
-      request.response.statusCode = HttpStatus.unauthorized;
-      request.response.write('unauthorized');
-      await request.response.close();
+      await _reject(request, HttpStatus.unauthorized, 'unauthorized');
       return;
     }
     final libraryProvider = _libraryProvider;
     final relPath = request.uri.queryParameters['path'] ?? '';
     if (libraryProvider == null || !_isSafeLibraryFilePath(relPath)) {
-      request.response.statusCode = HttpStatus.badRequest;
-      request.response.write('invalid path');
-      await request.response.close();
+      await _reject(request, HttpStatus.badRequest, 'invalid path');
       return;
     }
     final file = File(
       _resolveLibraryRelativePath(libraryProvider.libraryPath, relPath),
     );
     if (!await file.exists()) {
-      request.response.statusCode = HttpStatus.notFound;
-      request.response.write('file not found');
-      await request.response.close();
+      await _reject(request, HttpStatus.notFound, 'file not found');
       return;
     }
     request.response.headers.contentType = ContentType.binary;
@@ -1232,8 +1277,7 @@ class SyncProvider extends ChangeNotifier {
   Future<List<String>> listLibraryFilesForTesting(
     Directory filesDir,
     String libraryPath,
-  ) =>
-      _listLibraryFiles(filesDir, libraryPath);
+  ) => _listLibraryFiles(filesDir, libraryPath);
 
   @visibleForTesting
   Future<void> applyMirrorSyncForTesting({
@@ -1260,7 +1304,7 @@ class SyncProvider extends ChangeNotifier {
 
   @visibleForTesting
   Future<({List<String> downloads, Set<String> removeOrReplace})>
-      buildFileSyncPlanForTesting({
+  buildFileSyncPlanForTesting({
     required String libraryPath,
     required List<({String path, int size, String? md5})> remoteFiles,
   }) async {
@@ -1284,7 +1328,21 @@ class SyncProvider extends ChangeNotifier {
   }
 
   @override
+  void notifyListeners() {
+    if (!_disposed) {
+      super.notifyListeners();
+    }
+  }
+
+  @override
   void dispose() {
+    _disposed = true;
+    for (final completer in _pendingRequestCompleters.values.toList()) {
+      if (!completer.isCompleted) {
+        completer.complete(false);
+      }
+    }
+    _pendingRequestCompleters.clear();
     _announceTimer?.cancel();
     _cleanupTimer?.cancel();
     _fileHashCachePersistTimer?.cancel();

@@ -62,7 +62,6 @@ void showMobileSongContextMenu(
                       song,
                       libraryProvider.displaySongs,
                       libraryProvider.libraryPath,
-                      audioServerPort: libraryProvider.audioServerPort,
                     );
                   } catch (e) {
                     if (!context.mounted) return;
@@ -132,10 +131,9 @@ void showMobileSongContextMenu(
                         onTap: () async {
                           Navigator.of(ctx).pop();
                           try {
-                            await libraryProvider.addSongsToPlaylist(
-                              pl.id,
-                              [song.id],
-                            );
+                            await libraryProvider.addSongsToPlaylist(pl.id, [
+                              song.id,
+                            ]);
                             if (!context.mounted) return;
                             showAetherToast(
                               context,

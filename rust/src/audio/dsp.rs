@@ -1,9 +1,10 @@
 use crate::audio::profiler;
 use std::fs::File;
+use std::path::Path;
 use symphonia::core::audio::{AudioBufferRef, Channels, SampleBuffer};
-use symphonia::core::codecs::{Decoder, DecoderOptions};
+use symphonia::core::codecs::{Decoder, DecoderOptions, CODEC_TYPE_NULL};
 use symphonia::core::errors::Error;
-use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo};
+use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo, Track};
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
@@ -13,157 +14,98 @@ const RESAMPLE_EPSILON: f64 = 0.000_001;
 const STANDARD_SINC_HALF_TAPS: usize = 32;
 const HIGH_QUALITY_SINC_HALF_TAPS: usize = 96;
 
-/// Calculate the loudness metric of an audio file in dBFS (decibels relative to full scale).
-/// This is computed by analyzing the average RMS level of the first 300 packets (approx. 5-10 seconds) for speed.
-pub fn calculate_loudness(filepath: &str) -> Result<f64, String> {
-    let _scope = profiler::scope("audio::dsp::calculate_loudness");
-    let file = File::open(filepath).map_err(|e| e.to_string())?;
-    let mss = MediaSourceStream::new(Box::new(file), Default::default());
+/// Opens `path` and probes its container format.
+pub fn open_format(path: &str) -> Result<Box<dyn FormatReader>, String> {
+    let file = File::open(path).map_err(|e| e.to_string())?;
+    let stream = MediaSourceStream::new(Box::new(file), Default::default());
     let mut hint = Hint::new();
-
-    if let Some(ext) = std::path::Path::new(filepath)
-        .extension()
-        .and_then(|e| e.to_str())
-    {
-        hint.with_extension(ext);
+    if let Some(extension) = Path::new(path).extension().and_then(|e| e.to_str()) {
+        hint.with_extension(extension);
     }
+    symphonia::default::get_probe()
+        .format(
+            &hint,
+            stream,
+            &FormatOptions::default(),
+            &MetadataOptions::default(),
+        )
+        .map(|probed| probed.format)
+        .map_err(|e| e.to_string())
+}
 
-    let meta_opts = MetadataOptions::default();
-    let fmt_opts = FormatOptions::default();
-
-    let probed = symphonia::default::get_probe()
-        .format(&hint, mss, &fmt_opts, &meta_opts)
-        .map_err(|e| e.to_string())?;
-
-    let mut format = probed.format;
-
-    let track = format
+/// The first track that carries decodable audio.
+pub fn default_track(format: &dyn FormatReader) -> Result<&Track, String> {
+    format
         .tracks()
         .iter()
-        .find(|t| t.codec_params.codec != symphonia::core::codecs::CODEC_TYPE_NULL)
-        .ok_or_else(|| "No audio track found".to_string())?;
+        .find(|track| track.codec_params.codec != CODEC_TYPE_NULL)
+        .ok_or_else(|| "No audio track found".to_string())
+}
 
-    let track_id = track.id;
-    let mut decoder = symphonia::default::get_codecs()
+fn make_decoder(track: &Track) -> Result<Box<dyn Decoder>, String> {
+    symphonia::default::get_codecs()
         .make(&track.codec_params, &DecoderOptions::default())
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())
+}
 
-    let mut total_samples = 0u64;
+/// How much of a file a loudness measurement decodes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LoudnessScan {
+    /// Roughly the first 5-10 seconds; fast enough to run during import.
+    Quick,
+    /// The whole file; used when the user asks for a metadata refresh.
+    Full,
+}
+
+const QUICK_LOUDNESS_PACKETS: usize = 300;
+
+/// Average RMS level of an audio file in dBFS, clamped to `-60.0..=0.0`.
+///
+/// Fails when the file yields no decodable samples, so callers never store a
+/// made-up level.
+pub fn calculate_loudness(path: &str, scan: LoudnessScan) -> Result<f64, String> {
+    let _scope = profiler::scope(match scan {
+        LoudnessScan::Quick => "audio::dsp::calculate_loudness",
+        LoudnessScan::Full => "audio::dsp::calculate_loudness_full",
+    });
+    let mut format = open_format(path)?;
+    let track = default_track(format.as_ref())?;
+    let track_id = track.id;
+    let mut decoder = make_decoder(track)?;
+
+    let mut sample_count = 0u64;
     let mut sum_squares = 0.0f64;
-    let mut packet_count = 0;
-
+    let mut packet_count = 0usize;
     loop {
         let packet = match format.next_packet() {
-            Ok(p) => p,
+            Ok(packet) => packet,
             Err(Error::IoError(ref e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
             Err(e) => return Err(e.to_string()),
         };
-
         if packet.track_id() != track_id {
             continue;
         }
-
         let decoded = match decoder.decode(&packet) {
-            Ok(buf) => buf,
+            Ok(buffer) => buffer,
             Err(Error::DecodeError(_)) => continue,
             Err(e) => return Err(e.to_string()),
         };
-
         let (samples, _) = packet_to_interleaved_f64(&decoded);
-        for sample in samples {
-            if sample.is_finite() {
-                sum_squares += sample * sample;
-                total_samples += 1;
-            }
+        for sample in samples.into_iter().filter(|sample| sample.is_finite()) {
+            sum_squares += sample * sample;
+            sample_count += 1;
         }
-
         packet_count += 1;
-        if packet_count > 300 {
+        if scan == LoudnessScan::Quick && packet_count > QUICK_LOUDNESS_PACKETS {
             break;
         }
     }
 
-    if total_samples == 0 {
-        return Ok(-15.0);
+    if sample_count == 0 {
+        return Err("No decodable audio samples".to_string());
     }
-
-    let mean_square = sum_squares / (total_samples as f64);
-    let rms = mean_square.sqrt();
-    let db = 20.0 * rms.log10();
-
-    Ok(db.clamp(-60.0, 0.0))
-}
-
-/// Calculate the loudness metric of the ENTIRE audio file in dBFS (decibels relative to full scale).
-/// This is used during manual database refresh for high-fidelity volume normalization.
-pub fn calculate_loudness_full(filepath: &str) -> Result<f64, String> {
-    let _scope = profiler::scope("audio::dsp::calculate_loudness_full");
-    let file = File::open(filepath).map_err(|e| e.to_string())?;
-    let mss = MediaSourceStream::new(Box::new(file), Default::default());
-    let mut hint = Hint::new();
-
-    if let Some(ext) = std::path::Path::new(filepath)
-        .extension()
-        .and_then(|e| e.to_str())
-    {
-        hint.with_extension(ext);
-    }
-
-    let probed = symphonia::default::get_probe()
-        .format(&hint, mss, &Default::default(), &Default::default())
-        .map_err(|e| e.to_string())?;
-
-    let mut format = probed.format;
-
-    let track = format
-        .tracks()
-        .iter()
-        .find(|t| t.codec_params.codec != symphonia::core::codecs::CODEC_TYPE_NULL)
-        .ok_or_else(|| "No audio track found".to_string())?;
-
-    let track_id = track.id;
-    let mut decoder = symphonia::default::get_codecs()
-        .make(&track.codec_params, &Default::default())
-        .map_err(|e| e.to_string())?;
-
-    let mut total_samples = 0u64;
-    let mut sum_squares = 0.0f64;
-
-    loop {
-        let packet = match format.next_packet() {
-            Ok(p) => p,
-            Err(Error::IoError(ref e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
-            Err(e) => return Err(e.to_string()),
-        };
-
-        if packet.track_id() != track_id {
-            continue;
-        }
-
-        let decoded = match decoder.decode(&packet) {
-            Ok(buf) => buf,
-            Err(Error::DecodeError(_)) => continue,
-            Err(e) => return Err(e.to_string()),
-        };
-
-        let (samples, _) = packet_to_interleaved_f64(&decoded);
-        for sample in samples {
-            if sample.is_finite() {
-                sum_squares += sample * sample;
-                total_samples += 1;
-            }
-        }
-    }
-
-    if total_samples == 0 {
-        return Ok(-15.0);
-    }
-
-    let mean_square = sum_squares / (total_samples as f64);
-    let rms = mean_square.sqrt();
-    let db = 20.0 * rms.log10();
-
-    Ok(db.clamp(-60.0, 0.0))
+    let rms = (sum_squares / sample_count as f64).sqrt();
+    Ok((20.0 * rms.log10()).clamp(-60.0, 0.0))
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -174,25 +116,8 @@ pub(crate) struct SourceFormat {
 }
 
 pub(crate) fn probe_source_format(path: &str) -> Result<SourceFormat, String> {
-    let file = File::open(path).map_err(|e| e.to_string())?;
-    let mss = MediaSourceStream::new(Box::new(file), Default::default());
-    let mut hint = Hint::new();
-    if let Some(ext) = std::path::Path::new(path)
-        .extension()
-        .and_then(|e| e.to_str())
-    {
-        hint.with_extension(ext);
-    }
-    let probed = symphonia::default::get_probe()
-        .format(&hint, mss, &Default::default(), &Default::default())
-        .map_err(|e| e.to_string())?;
-    let track = probed
-        .format
-        .tracks()
-        .iter()
-        .find(|t| t.codec_params.codec != symphonia::core::codecs::CODEC_TYPE_NULL)
-        .ok_or_else(|| "No audio track found".to_string())?;
-    let params = &track.codec_params;
+    let format = open_format(path)?;
+    let params = &default_track(format.as_ref())?.codec_params;
     Ok(SourceFormat {
         sample_rate: params.sample_rate.unwrap_or(0),
         channels: params.channels.map_or(2, |c| c.count() as u16),
@@ -237,40 +162,15 @@ impl StreamDecoder {
         {
             return Err("Unsupported output rate/channel count".to_string());
         }
-        let file = File::open(path).map_err(|e| e.to_string())?;
-        let mss = MediaSourceStream::new(Box::new(file), Default::default());
-        let mut hint = Hint::new();
-        if let Some(ext) = std::path::Path::new(path)
-            .extension()
-            .and_then(|e| e.to_str())
-        {
-            hint.with_extension(ext);
-        }
-
-        let probed = symphonia::default::get_probe()
-            .format(
-                &hint,
-                mss,
-                &FormatOptions::default(),
-                &MetadataOptions::default(),
-            )
-            .map_err(|e| e.to_string())?;
-        let format = probed.format;
-
-        let track = format
-            .tracks()
-            .iter()
-            .find(|t| t.codec_params.codec != symphonia::core::codecs::CODEC_TYPE_NULL)
-            .ok_or_else(|| "No audio track found".to_string())?;
+        let format = open_format(path)?;
+        let track = default_track(format.as_ref())?;
         let track_id = track.id;
         let source_sample_rate = track.codec_params.sample_rate.unwrap_or(target_sample_rate);
         let time_base = track
             .codec_params
             .time_base
             .unwrap_or(TimeBase::new(1, source_sample_rate.max(1)));
-        let decoder = symphonia::default::get_codecs()
-            .make(&track.codec_params, &DecoderOptions::default())
-            .map_err(|e| e.to_string())?;
+        let decoder = make_decoder(track)?;
 
         if source_sample_rate == 0 {
             return Err("Invalid source sample rate".to_string());
@@ -646,7 +546,7 @@ fn append_channels(input: &[f64], layout: Channels, target: usize, output: &mut 
 
 // ===================== Pitch shifting =====================
 
-/// Simple Resampling pitch shifting: changes pitch and speed together (high quality, no speed preservation).
+/// Resampling pitch shift: pitch and speed change together (tempo is not preserved).
 pub fn pitch_shift_resample(input: &[f32], pitch_factor: f64) -> Vec<f32> {
     let _scope = profiler::scope("audio::dsp::pitch_shift_resample");
     if input.len() < 4 || pitch_factor <= 0.0 || !pitch_factor.is_finite() {
@@ -686,191 +586,6 @@ fn cubic_stereo(input: &[f32], frames: usize, pos: f64, channel: usize) -> f32 {
     let a2 = -0.5 * y0 + 0.5 * y2;
     let a3 = y1;
     ((a0 * t + a1) * t + a2) * t + a3
-}
-
-/// Time domain OLA (Overlap Add) time-stretches the signal.
-pub fn time_stretch_ola(input: &[f32], stretch_factor: f64) -> Vec<f32> {
-    let _scope = profiler::scope("audio::dsp::time_stretch_ola");
-    if input.len() < 4 || stretch_factor <= 0.0 || !stretch_factor.is_finite() {
-        return input.to_vec();
-    }
-    if (stretch_factor - 1.0).abs() < 0.005 {
-        return input.to_vec();
-    }
-    let num_samples = input.len() / 2;
-    let window_size = 512usize.min(num_samples.max(1));
-    let hop_s = (window_size / 2).max(1);
-    let hop_a = ((hop_s as f64 * stretch_factor).round() as usize).max(1);
-
-    let target_num_samples =
-        ((num_samples as f64 / stretch_factor).ceil() as usize + window_size).max(window_size + 1);
-    let mut out_data = vec![0.0f32; target_num_samples * 2];
-    let mut out_weight = vec![0.0f32; target_num_samples];
-
-    let hanning: Vec<f32> = (0..window_size)
-        .map(|n| {
-            0.5 * (1.0 - ((2.0 * std::f64::consts::PI * n as f64) / (window_size - 1) as f64).cos())
-                as f32
-        })
-        .collect();
-
-    let mut out_pos = 0;
-    let mut in_pos = 0;
-
-    while in_pos + window_size <= num_samples && out_pos + window_size <= target_num_samples {
-        for n in 0..window_size {
-            let win = hanning[n];
-            let in_idx = (in_pos + n) * 2;
-            let out_idx = (out_pos + n) * 2;
-
-            out_data[out_idx] += input[in_idx] * win;
-            out_data[out_idx + 1] += input[in_idx + 1] * win;
-            out_weight[out_pos + n] += win;
-        }
-        out_pos += hop_s;
-        in_pos += hop_a;
-    }
-
-    if out_pos == 0 {
-        return input.to_vec();
-    }
-
-    let final_frames = (out_pos + window_size).min(target_num_samples);
-    let mut final_output = Vec::with_capacity(final_frames * 2);
-    for i in 0..final_frames {
-        let weight = out_weight[i];
-        if weight > 1e-6 {
-            let gain = 1.0 / weight;
-            final_output.push(out_data[i * 2] * gain);
-            final_output.push(out_data[i * 2 + 1] * gain);
-        } else if i < num_samples {
-            final_output.push(input[i * 2]);
-            final_output.push(input[i * 2 + 1]);
-        } else {
-            final_output.push(0.0);
-            final_output.push(0.0);
-        }
-    }
-
-    final_output
-}
-
-/// Pitch shift using OLA (Overlap Add): stretches speed first then resamples back (tempo preserved).
-pub fn pitch_shift_ola(input: &[f32], pitch_factor: f64) -> Vec<f32> {
-    let _scope = profiler::scope("audio::dsp::pitch_shift_ola");
-    if input.len() < 4 || pitch_factor <= 0.0 || !pitch_factor.is_finite() {
-        return input.to_vec();
-    }
-    if (pitch_factor - 1.0).abs() < 0.001 {
-        return input.to_vec();
-    }
-
-    // Resample first to change pitch, then OLA-stretch back to the original duration.
-    // The previous order was very sensitive to OLA truncation and could partially cancel
-    // or invert the requested shift on block-sized streaming buffers.
-    let shifted = pitch_shift_resample(input, pitch_factor);
-    time_stretch_ola(&shifted, 1.0 / pitch_factor)
-}
-
-/// WSOLA (Waveform Similarity Overlap Add) time stretching for enhanced tempo preservation.
-pub fn time_stretch_wsola(input: &[f32], stretch_factor: f64) -> Vec<f32> {
-    let _scope = profiler::scope("audio::dsp::time_stretch_wsola");
-    if (stretch_factor - 1.0).abs() < 0.005 {
-        return input.to_vec();
-    }
-    let num_samples = input.len() / 2;
-    let window_size = 1024;
-    let hop_s = 256;
-    let hop_a = (hop_s as f64 * stretch_factor) as usize;
-    let tolerance = 128;
-
-    let target_num_samples = (num_samples as f64 / stretch_factor) as usize + window_size;
-    let mut out_data = vec![0.0f32; target_num_samples * 2];
-    let mut out_weight = vec![0.0f32; target_num_samples];
-
-    let hanning: Vec<f32> = (0..window_size)
-        .map(|n| {
-            0.5 * (1.0 - ((2.0 * std::f64::consts::PI * n as f64) / (window_size - 1) as f64).cos())
-                as f32
-        })
-        .collect();
-
-    let mut out_pos = 0;
-    let mut in_pos = 0;
-    let mut last_delta = 0isize;
-
-    if num_samples > window_size {
-        for n in 0..window_size {
-            let win = hanning[n];
-            out_data[n * 2] += input[n * 2] * win;
-            out_data[n * 2 + 1] += input[n * 2 + 1] * win;
-            out_weight[n] += win * win;
-        }
-        out_pos += hop_s;
-        in_pos += hop_a;
-    }
-
-    while in_pos + window_size + tolerance < num_samples
-        && out_pos + window_size < target_num_samples
-    {
-        let natural_pos =
-            (in_pos as isize - hop_a as isize + last_delta + hop_s as isize).max(0) as usize;
-        let mut best_offset = 0isize;
-        let mut min_diff = f32::MAX;
-
-        for delta in -(tolerance as isize)..=(tolerance as isize) {
-            let candidate_pos_val = in_pos as isize + delta;
-            if candidate_pos_val < 0 {
-                continue;
-            }
-            let candidate_pos = candidate_pos_val as usize;
-            let mut diff = 0.0f32;
-            for n in 0..hop_s {
-                let natural_idx = (natural_pos + n) * 2;
-                let candidate_idx = (candidate_pos + n) * 2;
-                diff += (input[natural_idx] - input[candidate_idx]).abs()
-                    + (input[natural_idx + 1] - input[candidate_idx + 1]).abs();
-            }
-            if diff < min_diff {
-                min_diff = diff;
-                best_offset = delta;
-            }
-        }
-
-        last_delta = best_offset;
-        let actual_in_pos = (in_pos as isize + best_offset).max(0) as usize;
-
-        for n in 0..window_size {
-            let win = hanning[n];
-            let in_idx = (actual_in_pos + n) * 2;
-            let out_idx = (out_pos + n) * 2;
-
-            out_data[out_idx] += input[in_idx] * win;
-            out_data[out_idx + 1] += input[in_idx + 1] * win;
-            out_weight[out_pos + n] += win * win;
-        }
-
-        out_pos += hop_s;
-        in_pos += hop_a;
-    }
-
-    let mut final_output = Vec::with_capacity(out_pos * 2);
-    for i in 0..out_pos {
-        let weight = out_weight[i];
-        let gain = if weight > 0.1 { 1.0 / weight } else { 0.0 };
-        final_output.push(out_data[i * 2] * gain);
-        final_output.push(out_data[i * 2 + 1] * gain);
-    }
-
-    final_output
-}
-
-/// Pitch shift using WSOLA (Waveform Similarity Overlap Add) for high quality tempo preservation.
-pub fn pitch_shift_wsola(input: &[f32], pitch_factor: f64) -> Vec<f32> {
-    let _scope = profiler::scope("audio::dsp::pitch_shift_wsola");
-    let stretch_factor = 1.0 / pitch_factor;
-    let stretched = time_stretch_wsola(input, stretch_factor);
-    pitch_shift_resample(&stretched, pitch_factor)
 }
 
 #[cfg(test)]

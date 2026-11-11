@@ -62,16 +62,6 @@ Future<void> main() async {
             child: const AetheriaApp(),
           ),
   );
-
-  // Start the background audio server AFTER runApp so it never blocks the UI.
-  if (initError == null) {
-    try {
-      final port = await music.startAudioServer();
-      debugPrint('Rust audio server running on port $port');
-    } catch (e) {
-      debugPrint('Audio server start failed (non-fatal): $e');
-    }
-  }
 }
 
 class _BootstrapErrorScreen extends StatelessWidget {

@@ -95,23 +95,6 @@ Future<T?> showAetherMenu<T>({
   );
 }
 
-/// Convenience: open a menu from a widget's bottom-left (for trailing buttons).
-Future<T?> showAetherMenuFromRect<T>({
-  required BuildContext context,
-  required Rect globalRect,
-  required List<AetherMenuItem<T>> items,
-  double minWidth = 180,
-  double maxWidth = 280,
-}) {
-  return showAetherMenu<T>(
-    context: context,
-    globalPosition: Offset(globalRect.left, globalRect.bottom + 4),
-    items: items,
-    minWidth: minWidth,
-    maxWidth: maxWidth,
-  );
-}
-
 class _AetherMenuRoute<T> extends PopupRoute<T> {
   _AetherMenuRoute({
     required this.position,

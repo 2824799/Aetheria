@@ -22,20 +22,6 @@ Future<bool> mobileConfirmDeleteSong(BuildContext context, Song song) {
   );
 }
 
-Future<bool> mobileConfirmDeleteVersion(
-  BuildContext context,
-  AudioVersion version,
-) {
-  return showAetherConfirmDialog(
-    context: context,
-    title: '删除音源版本？',
-    message: '确定要删除音源版本“${version.originalName}”吗？这会同时删除对应的本地音频文件。',
-    confirmLabel: '删除版本',
-    cancelLabel: '取消',
-    dangerous: true,
-  );
-}
-
 Future<void> mobileConfirmDeletePlaylist(
   BuildContext context, {
   required String id,

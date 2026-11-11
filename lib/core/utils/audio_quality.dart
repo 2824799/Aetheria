@@ -1,63 +1,46 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/painting.dart';
 
+import 'package:aetheria/core/theme/app_theme_config.dart';
 import 'package:aetheria/src/rust/models/song.dart';
+
+const _losslessFormats = {'flac', 'wav', 'alac', 'ape'};
 
 String audioQualityText(AudioVersion? version) {
   if (version == null) {
     return '无源';
   }
 
-  final frequency = version.sampleRate != null
-      ? '${(version.sampleRate! / 1000).toStringAsFixed(1).replaceAll('.0', '')}k'
-      : '';
-  final bitDepth = version.bitDepth != null ? '${version.bitDepth}b' : '';
-  final bitrate = version.bitrate != null
-      ? '${(version.bitrate! / 1000).round()}kbps'
-      : '';
-  final loudness = version.loudness != null
-      ? '${version.loudness!.toStringAsFixed(1)}dB'
-      : '';
+  final sampleRate = version.sampleRate;
+  final bitDepth = version.bitDepth;
+  final bitrate = version.bitrate;
+  final loudness = version.loudness;
   final text = [
-    frequency,
-    bitDepth,
-    bitrate,
-    loudness,
-  ].where((item) => item.isNotEmpty).join('/');
+    if (sampleRate != null)
+      '${(sampleRate / 1000).toStringAsFixed(1).replaceAll('.0', '')}k',
+    if (bitDepth != null) '${bitDepth}b',
+    if (bitrate != null) '${(bitrate / 1000).round()}kbps',
+    if (loudness != null) '${loudness.toStringAsFixed(1)}dB',
+  ].join('/');
   return text.isEmpty ? '未知' : text;
 }
 
-Color audioQualityColor(AudioVersion? version, Color fallback) {
+/// Badge colour for a version's quality tier, taken from the theme's semantic
+/// status colours so it stays legible on every palette.
+Color audioQualityColor(AudioVersion? version, AppThemeConfig cfg) {
   if (version == null) {
-    return fallback;
+    return cfg.textSecondary;
   }
-  final format = version.format?.toLowerCase() ?? '';
-  final bitrateKbps = version.bitrate == null
-      ? null
-      : (version.bitrate! / 1000).round();
-  final isLossless =
-      format == 'flac' ||
-      format == 'wav' ||
-      format == 'alac' ||
-      format == 'ape';
-  final isHiResLossless =
-      isLossless &&
-      ((version.bitDepth != null && version.bitDepth! > 16) ||
-          (version.sampleRate != null && version.sampleRate! >= 48000));
+  if (_losslessFormats.contains(version.format?.toLowerCase())) {
+    return cfg.success;
+  }
 
-  if (isHiResLossless || isLossless) {
-    return const Color(0xFF10B981);
+  final bitrate = version.bitrate;
+  if (bitrate == null) {
+    return cfg.textSecondary;
   }
-  if (bitrateKbps != null && bitrateKbps < 192) {
-    return Colors.redAccent;
-  }
-  if (bitrateKbps != null && bitrateKbps < 256) {
-    return const Color(0xFFF59E0B);
-  }
-  if (bitrateKbps != null && bitrateKbps >= 320) {
-    return const Color(0xFF10B981);
-  }
-  if (bitrateKbps != null) {
-    return const Color(0xFF3B82F6);
-  }
-  return fallback;
+  final kbps = (bitrate / 1000).round();
+  if (kbps < 192) return cfg.danger;
+  if (kbps < 256) return cfg.warning;
+  if (kbps >= 320) return cfg.success;
+  return cfg.info;
 }

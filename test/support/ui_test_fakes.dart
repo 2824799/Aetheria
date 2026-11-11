@@ -86,11 +86,7 @@ class TestAudio extends ChangeNotifier implements AudioPlayerProvider {
   }
 
   @override
-  Future<void> restorePlaybackState(
-    List<Song> songs,
-    String path, {
-    int? audioServerPort,
-  }) async {}
+  Future<void> restorePlaybackState(List<Song> songs, String path) async {}
   int nextCalls = 0;
   int playCalls = 0;
   final seeks = <Duration>[];
@@ -112,12 +108,7 @@ class TestAudio extends ChangeNotifier implements AudioPlayerProvider {
   }
 
   @override
-  Future<void> playSong(
-    Song song,
-    List<Song> queue,
-    String libraryPath, {
-    int? audioServerPort,
-  }) async {
+  Future<void> playSong(Song song, List<Song> queue, String libraryPath) async {
     playCalls++;
     playingSong = activeSong = song;
     isPlaying = true;

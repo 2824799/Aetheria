@@ -1,3 +1,4 @@
+import 'package:aetheria/core/utils/audio_formats.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -65,7 +66,7 @@ class _MainContentState extends State<MainContent> {
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
-        allowedExtensions: ['mp3', 'wav', 'flac', 'm4a', 'ogg', 'aac'],
+        allowedExtensions: supportedAudioExtensions,
         allowMultiple: true,
       );
 
@@ -524,7 +525,6 @@ class _MainContentState extends State<MainContent> {
   }
 }
 
-
 class _MainContentTaskProgressDialog<T> extends StatefulWidget {
   final String initialTitle;
   final String initialSubtitle;
@@ -598,10 +598,7 @@ class _MainContentTaskProgressDialogState<T>
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            _subtitle,
-            style: AetherType.bodySmStyle(cfg.textSecondary),
-          ),
+          Text(_subtitle, style: AetherType.bodySmStyle(cfg.textSecondary)),
           const SizedBox(height: AetherSpace.xl),
           AetherProgress.linear(
             size: 6,

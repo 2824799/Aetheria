@@ -1,14 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:aetheria/core/utils/formatting.dart';
+import 'package:aetheria/features/player/version_actions.dart';
 import 'package:aetheria/core/providers/audio_player_provider.dart';
 import 'package:aetheria/core/providers/library_provider.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
 import 'package:aetheria/core/widgets/aether_button.dart';
 import 'package:aetheria/core/widgets/aether_icon_button.dart';
 import 'package:aetheria/core/widgets/aether_pressable.dart';
-import 'package:aetheria/core/widgets/aether_toast.dart';
-import 'package:aetheria/features/layout/mobile/mobile_actions.dart';
-import 'package:aetheria/features/layout/mobile/mobile_dialogs.dart';
-import 'package:aetheria/features/layout/mobile/mobile_utils.dart';
 import 'package:aetheria/features/player/ui/lyrics_panel.dart';
 import 'package:aetheria/src/rust/models/song.dart';
 
@@ -33,11 +31,6 @@ Widget buildMobileDetailTabContent(
             itemCount: song.versions.length,
             itemBuilder: (context, index) {
               final v = song.versions[index];
-              final durationMin = (v.duration / 60).floor();
-              final durationSec = (v.duration % 60)
-                  .round()
-                  .toString()
-                  .padLeft(2, '0');
 
               return Container(
                 margin: const EdgeInsets.only(bottom: AetherSpace.lg - 2),
@@ -60,7 +53,7 @@ Widget buildMobileDetailTabContent(
                     ),
                     const SizedBox(height: AetherSpace.xs),
                     Text(
-                      '${v.format?.toUpperCase() ?? "未知"} | ${(v.bitrate ?? 0) ~/ 1000}kbps | ${v.sampleRate != null ? (v.sampleRate! / 1000).toStringAsFixed(1) : "未知"}kHz | $durationMin:$durationSec | ${mobileFormatFileSize(v.fileSize.toInt())}',
+                      formatVersionSpecs(v),
                       style: AetherType.captionStyle(cfg.textSecondary),
                     ),
                     const SizedBox(height: AetherSpace.sm),
@@ -93,42 +86,7 @@ Widget buildMobileDetailTabContent(
                           child: AetherPressable(
                             onTap: v.isPrimary
                                 ? null
-                                : () async {
-                                    final shouldSwitch =
-                                        audioProvider.playingSong?.id ==
-                                            song.id &&
-                                        audioProvider.playingVersion?.id !=
-                                            v.id;
-                                    final position =
-                                        audioProvider.currentPosition;
-                                    final startPaused =
-                                        !audioProvider.isPlaying;
-                                    await libraryProvider.setPrimaryVersion(
-                                      v.id,
-                                    );
-                                    if (!shouldSwitch || !context.mounted) {
-                                      return;
-                                    }
-                                    final updatedSong =
-                                        libraryProvider.songs.firstWhere(
-                                      (entry) => entry.id == song.id,
-                                      orElse: () => song,
-                                    );
-                                    final updatedVersion =
-                                        updatedSong.versions.firstWhere(
-                                      (entry) => entry.id == v.id,
-                                      orElse: () => v,
-                                    );
-                                    await audioProvider.switchToVersion(
-                                      updatedSong,
-                                      updatedVersion,
-                                      libraryProvider.libraryPath,
-                                      audioServerPort:
-                                          libraryProvider.audioServerPort,
-                                      startPosition: position,
-                                      startPaused: startPaused,
-                                    );
-                                  },
+                                : () => makeVersionPrimary(context, song, v),
                             borderRadius:
                                 BorderRadius.circular(AetherRadius.sm),
                             child: Padding(
@@ -165,7 +123,7 @@ Widget buildMobileDetailTabContent(
                           icon: Icons.download,
                           color: cfg.textSecondary,
                           tooltip: '导出',
-                          onPressed: () => mobileExportVersion(context, v),
+                          onPressed: () => exportVersion(context, v),
                         ),
                         if (song.versions.length > 1) ...[
                           const SizedBox(width: AetherSpace.sm),
@@ -173,27 +131,7 @@ Widget buildMobileDetailTabContent(
                             icon: Icons.delete_outline,
                             color: cfg.danger,
                             tooltip: '删除版本',
-                            onPressed: () async {
-                              final confirm =
-                                  await mobileConfirmDeleteVersion(context, v);
-                              if (!confirm) return;
-                              try {
-                                await libraryProvider.deleteAudioVersion(v.id);
-                                if (!context.mounted) return;
-                                showAetherToast(
-                                  context,
-                                  message: '音源版本已删除',
-                                  kind: AetherToastKind.success,
-                                );
-                              } catch (e) {
-                                if (!context.mounted) return;
-                                showAetherToast(
-                                  context,
-                                  message: '删除失败: $e',
-                                  kind: AetherToastKind.error,
-                                );
-                              }
-                            },
+                            onPressed: () => deleteVersion(context, v),
                           ),
                         ],
                       ],
@@ -214,8 +152,7 @@ Widget buildMobileDetailTabContent(
             icon: Icons.add,
             size: AetherButtonSize.sm,
             expanded: true,
-            onPressed: () =>
-                mobileLinkNewVersion(context, song, libraryProvider),
+            onPressed: () => linkNewVersion(context, song),
           ),
         ),
       ],
@@ -235,9 +172,7 @@ Widget buildMobileDetailTabContent(
       itemBuilder: (context, index) {
         final tag = libraryProvider.tags[index];
         final isBound = song.tags.any((t) => t.id == tag.id);
-        final tagColor = tag.color != null
-            ? mobileParseHexColor(tag.color!, cfg.textSecondary)
-            : cfg.textSecondary;
+        final tagColor = parseTagColor(tag.color, cfg.textSecondary);
 
         return AetherPressable(
           onTap: () async {
@@ -290,7 +225,7 @@ Widget buildMobileDetailTabContent(
   if (activeTab == 'lyrics') {
     return LyricsDisplayPanel(
       song: song,
-      audioVersion: mobileDisplayVersionForSong(song, audioProvider),
+      audioVersion: displayVersionForSong(song, audioProvider),
       cfg: cfg,
       compact: true,
       onOpenManager: openLyricManager,
@@ -300,7 +235,7 @@ Widget buildMobileDetailTabContent(
   if (activeTab == 'lyric_manager') {
     return LyricsPanel(
       song: song,
-      audioVersion: mobileDisplayVersionForSong(song, audioProvider),
+      audioVersion: displayVersionForSong(song, audioProvider),
       cfg: cfg,
       compact: true,
     );
