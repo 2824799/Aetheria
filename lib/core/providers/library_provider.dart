@@ -121,6 +121,41 @@ int _compareSongsLikeExplorer(Song left, Song right) {
 /// One file to import. A non-null [title] overrides what the file's tags say.
 typedef SongImportRequest = ({String filepath, String? title, String? artist});
 
+/// Outcome of an import batch, including per-file failure reasons and any
+/// playlist that the imported songs were added to.
+typedef SongImportReport = ({
+  List<String> failures,
+  int importedCount,
+  Playlist? targetPlaylist,
+  String? playlistError,
+});
+
+String _importFileBasename(String filepath) {
+  return filepath.replaceAll('\\', '/').split('/').last;
+}
+
+String _expectedImportedTitle(SongImportRequest request, String baseName) {
+  final raw = request.title ?? '';
+  if (raw.trim().isNotEmpty) {
+    return raw;
+  }
+  final dot = baseName.lastIndexOf('.');
+  return dot > 0 ? baseName.substring(0, dot) : baseName;
+}
+
+int? _findUnusedMatch<T>(
+  List<T> candidates,
+  Set<int> used,
+  bool Function(T item) predicate,
+) {
+  for (var i = 0; i < candidates.length; i++) {
+    if (!used.contains(i) && predicate(candidates[i])) {
+      return i;
+    }
+  }
+  return null;
+}
+
 enum SongClipboardMode { copy, cut }
 
 /// Songs picked up with copy/cut, waiting to be pasted into a playlist.
@@ -163,6 +198,18 @@ class LibraryProvider extends ChangeNotifier {
 
   String? activePlaylistId;
   List<String> playlistSongIds = [];
+
+  /// The currently selected playlist, or null when viewing all songs.
+  Playlist? get activePlaylist => playlistById(activePlaylistId);
+
+  /// Returns the playlist matching [id], or null if missing.
+  Playlist? playlistById(String? id) {
+    if (id == null) return null;
+    for (final playlist in playlists) {
+      if (playlist.id == id) return playlist;
+    }
+    return null;
+  }
 
   String searchQuery = '';
   List<PlatformInt64> selectedTags = [];
@@ -427,36 +474,225 @@ class LibraryProvider extends ChangeNotifier {
 
   /// Imports [requests] in order and reloads the library once at the end.
   ///
-  /// One bad file does not stop the rest: the reasons of the files that could
-  /// not be imported are returned. [onProgress] receives the number handled.
+  /// Imported songs are added to [targetPlaylistId] (or [activePlaylistId] when
+  /// [addToActivePlaylist] is true). One bad file does not stop the rest: the
+  /// reasons of the files that could not be imported are returned.
+  /// [onProgress] receives the number handled.
   Future<List<String>> importSongs(
     List<SongImportRequest> requests, {
     void Function(int done)? onProgress,
+    String? targetPlaylistId,
+    bool addToActivePlaylist = true,
   }) async {
+    final report = await importSongsWithReport(
+      requests,
+      onProgress: onProgress,
+      targetPlaylistId: targetPlaylistId,
+      addToActivePlaylist: addToActivePlaylist,
+    );
+    return report.failures;
+  }
+
+  /// Imports [requests] in order, reloads the library, and adds successfully
+  /// imported songs to [targetPlaylistId] (defaulting to [activePlaylistId]
+  /// when [addToActivePlaylist] is true).
+  Future<SongImportReport> importSongsWithReport(
+    List<SongImportRequest> requests, {
+    void Function(int done)? onProgress,
+    String? targetPlaylistId,
+    bool addToActivePlaylist = true,
+  }) async {
+    final resolvedPlaylistId =
+        targetPlaylistId ?? (addToActivePlaylist ? activePlaylistId : null);
+    final previousSongIds = {for (final song in songs) song.id};
+    final previousVersionIds = {
+      for (final song in songs)
+        for (final version in song.versions) version.id,
+    };
+
     final failures = <String>[];
+    final orderedSongIds = List<String?>.filled(requests.length, null);
+    final claimedVersionIds = <String>{};
+    final metadataIndices = <int>[];
+    var importedCount = 0;
+    var reloaded = false;
+
     try {
       for (var index = 0; index < requests.length; index++) {
         final request = requests[index];
         final title = request.title;
         try {
           if (title == null) {
-            await music.importSong(filepath: request.filepath);
+            final song = await music.importSong(filepath: request.filepath);
+            orderedSongIds[index] = song.id;
+            for (final version in song.versions) {
+              if (!previousVersionIds.contains(version.id)) {
+                claimedVersionIds.add(version.id);
+              }
+            }
           } else {
             await music.importSongWithMetadata(
               filepath: request.filepath,
               title: title,
               artist: request.artist ?? '',
             );
+            metadataIndices.add(index);
           }
+          importedCount++;
         } catch (e) {
           failures.add(e.toString());
         }
         onProgress?.call(index + 1);
       }
-    } finally {
+
       await loadLibrary();
+      reloaded = true;
+
+      if (resolvedPlaylistId == null || importedCount == 0) {
+        return (
+          failures: failures,
+          importedCount: importedCount,
+          targetPlaylist: null,
+          playlistError: null,
+        );
+      }
+
+      final songIdsToAdd = _resolveImportedSongIds(
+        requests: requests,
+        orderedSongIds: orderedSongIds,
+        metadataIndices: metadataIndices,
+        previousSongIds: previousSongIds,
+        previousVersionIds: previousVersionIds,
+        claimedVersionIds: claimedVersionIds,
+      );
+      final targetPlaylist = playlistById(resolvedPlaylistId);
+      if (songIdsToAdd.isEmpty) {
+        return (
+          failures: failures,
+          importedCount: importedCount,
+          targetPlaylist: targetPlaylist,
+          playlistError: '未能识别已导入歌曲，无法添加到歌单',
+        );
+      }
+      if (targetPlaylist == null && _hasLoaded) {
+        return (
+          failures: failures,
+          importedCount: importedCount,
+          targetPlaylist: null,
+          playlistError: '目标歌单不存在或已被删除',
+        );
+      }
+
+      String? playlistError;
+      try {
+        await addSongsToPlaylist(resolvedPlaylistId, songIdsToAdd);
+      } catch (e) {
+        playlistError = e.toString();
+      }
+      return (
+        failures: failures,
+        importedCount: importedCount,
+        targetPlaylist: playlistById(resolvedPlaylistId) ?? targetPlaylist,
+        playlistError: playlistError,
+      );
+    } finally {
+      if (!reloaded) {
+        await loadLibrary();
+      }
     }
-    return failures;
+  }
+
+  List<String> _resolveImportedSongIds({
+    required List<SongImportRequest> requests,
+    required List<String?> orderedSongIds,
+    required List<int> metadataIndices,
+    required Set<String> previousSongIds,
+    required Set<String> previousVersionIds,
+    required Set<String> claimedVersionIds,
+  }) {
+    if (metadataIndices.isNotEmpty) {
+      final newVersions = <({Song song, AudioVersion version})>[
+        for (final song in songs)
+          for (final version in song.versions)
+            if (!previousVersionIds.contains(version.id) &&
+                !claimedVersionIds.contains(version.id))
+              (song: song, version: version),
+      ];
+      final newEmptySongs = <Song>[
+        for (final song in songs)
+          if (!previousSongIds.contains(song.id) && song.versions.isEmpty) song,
+      ];
+      final usedVersions = <int>{};
+      final usedEmptySongs = <int>{};
+
+      for (final index in metadataIndices) {
+        final request = requests[index];
+        final baseName = _importFileBasename(request.filepath);
+        final expectedTitle = _expectedImportedTitle(request, baseName);
+
+        final versionMatch =
+            _findUnusedMatch(
+              newVersions,
+              usedVersions,
+              (entry) =>
+                  entry.version.originalName == baseName &&
+                  entry.song.title == expectedTitle,
+            ) ??
+            _findUnusedMatch(
+              newVersions,
+              usedVersions,
+              (entry) => entry.version.originalName == baseName,
+            ) ??
+            _findUnusedMatch(
+              newVersions,
+              usedVersions,
+              (entry) => entry.song.title == expectedTitle,
+            );
+        if (versionMatch != null) {
+          usedVersions.add(versionMatch);
+          orderedSongIds[index] = newVersions[versionMatch].song.id;
+          continue;
+        }
+
+        final emptySongMatch =
+            _findUnusedMatch(
+              newEmptySongs,
+              usedEmptySongs,
+              (song) => song.title == expectedTitle,
+            ) ??
+            _findUnusedMatch(newEmptySongs, usedEmptySongs, (_) => true);
+        if (emptySongMatch != null) {
+          usedEmptySongs.add(emptySongMatch);
+          orderedSongIds[index] = newEmptySongs[emptySongMatch].id;
+          continue;
+        }
+
+        final fallbackVersion = _findUnusedMatch(
+          newVersions,
+          usedVersions,
+          (_) => true,
+        );
+        if (fallbackVersion != null) {
+          usedVersions.add(fallbackVersion);
+          orderedSongIds[index] = newVersions[fallbackVersion].song.id;
+        }
+      }
+
+      final seen = <String>{};
+      return [
+        for (final id in orderedSongIds)
+          if (id != null && seen.add(id)) id,
+        for (var i = 0; i < newVersions.length; i++)
+          if (!usedVersions.contains(i) && seen.add(newVersions[i].song.id))
+            newVersions[i].song.id,
+      ];
+    }
+
+    final seen = <String>{};
+    return [
+      for (final id in orderedSongIds)
+        if (id != null && seen.add(id)) id,
+    ];
   }
 
   Future<void> importAudioVersionForSong(String songId, String filepath) {

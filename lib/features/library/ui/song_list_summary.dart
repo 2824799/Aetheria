@@ -55,8 +55,8 @@ class SongListEmptyState extends StatelessWidget {
         icon: Icons.queue_music_rounded,
         title: '歌单里还没有歌曲',
         message: touch
-            ? '在“全部歌曲”中长按歌曲，可以把它添加到歌单'
-            : '在“全部歌曲”中右键歌曲，可以把它添加到歌单',
+            ? '在“全部歌曲”中长按歌曲添加，或在“设置 › 音乐库”中导入'
+            : '在“全部歌曲”中右键歌曲添加，或点击右上角的“导入歌曲”直接导入',
       );
     }
     return const AetherEmptyState(

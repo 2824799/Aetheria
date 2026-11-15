@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:aetheria/core/theme/aetheria_theme.dart';
 import 'package:aetheria/core/theme/tokens/motion.dart';
@@ -53,11 +55,15 @@ class AetherDropdown<T> extends StatelessWidget {
     final box = context.findRenderObject() as RenderBox?;
     if (box == null) return;
     final origin = box.localToGlobal(Offset.zero);
+    final maxWidth = math.max(
+      box.size.width,
+      (box.size.width * 1.4).clamp(180.0, 360.0),
+    );
     final selected = await showAetherMenu<T>(
       context: context,
       globalPosition: Offset(origin.dx, origin.dy + box.size.height + 4),
       minWidth: box.size.width,
-      maxWidth: (box.size.width * 1.4).clamp(180.0, 360.0),
+      maxWidth: maxWidth,
       items: [
         for (final item in items)
           AetherMenuItem<T>(

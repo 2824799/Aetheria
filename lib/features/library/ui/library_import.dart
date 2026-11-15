@@ -9,17 +9,29 @@ import 'package:aetheria/core/utils/audio_formats.dart';
 import 'package:aetheria/core/widgets/aether_button.dart';
 import 'package:aetheria/core/widgets/aether_checkbox.dart';
 import 'package:aetheria/core/widgets/aether_dialog.dart';
+import 'package:aetheria/core/widgets/aether_dropdown.dart';
 import 'package:aetheria/core/widgets/aether_pressable.dart';
 import 'package:aetheria/core/widgets/aether_progress_dialog.dart';
 import 'package:aetheria/core/widgets/aether_toast.dart';
 import 'package:aetheria/src/rust/api/music.dart' as music;
+import 'package:aetheria/src/rust/models/playlist.dart';
 import 'package:aetheria/src/rust/models/song.dart' show PreviewInfo;
 
+/// Result returned by [ImportFolderPreviewDialog].
+typedef ImportPreviewSelection = ({
+  List<PreviewInfo> previews,
+  String? targetPlaylistId,
+});
+
 /// Lets the user pick audio files and imports them.
+///
+/// Imported songs are added to whichever playlist was active when importing
+/// began, if any.
 Future<void> importAudioFiles(
   BuildContext context,
   LibraryProvider library,
 ) async {
+  final targetPlaylistId = library.activePlaylistId;
   final List<String> paths;
   try {
     final picked = await FilePicker.platform.pickFiles(
@@ -34,17 +46,23 @@ Future<void> importAudioFiles(
   }
   if (paths.isEmpty || !context.mounted) return;
 
-  await _importWithProgress(context, library, [
-    for (final path in paths) (filepath: path, title: null, artist: null),
-  ]);
+  await _importWithProgress(
+    context,
+    library,
+    [for (final path in paths) (filepath: path, title: null, artist: null)],
+    targetPlaylistId: targetPlaylistId,
+  );
 }
 
 /// Lets the user pick a folder, review what was found in it, and import the
 /// checked songs.
+///
+/// Target playlist defaults to whichever playlist is currently selected.
 Future<void> importAudioFolder(
   BuildContext context,
   LibraryProvider library,
 ) async {
+  final initialPlaylistId = library.activePlaylistId;
   final String? directory;
   try {
     directory = await FilePicker.platform.getDirectoryPath();
@@ -70,16 +88,27 @@ Future<void> importAudioFolder(
     return;
   }
 
-  final chosen = await showAetherDialog<List<PreviewInfo>>(
+  final selection = await showAetherDialog<ImportPreviewSelection>(
     context: context,
-    builder: (_) => _ImportPreviewDialog(previews: found),
+    builder: (_) => ImportFolderPreviewDialog(
+      previews: found,
+      playlists: library.playlists,
+      initialPlaylistId: initialPlaylistId,
+    ),
   );
-  if (chosen == null || chosen.isEmpty || !context.mounted) return;
+  if (selection == null || selection.previews.isEmpty || !context.mounted) {
+    return;
+  }
 
-  await _importWithProgress(context, library, [
-    for (final item in chosen)
-      (filepath: item.filepath, title: item.title, artist: item.artist),
-  ]);
+  await _importWithProgress(
+    context,
+    library,
+    [
+      for (final item in selection.previews)
+        (filepath: item.filepath, title: item.title, artist: item.artist),
+    ],
+    targetPlaylistId: selection.targetPlaylistId,
+  );
 }
 
 Future<List<PreviewInfo>> _scan(
@@ -106,18 +135,35 @@ Future<List<PreviewInfo>> _scan(
   return previews;
 }
 
+/// Exposes [_importWithProgress] for widget tests without duplicating its UI.
+@visibleForTesting
+Future<void> importWithProgressForTest(
+  BuildContext context,
+  LibraryProvider library,
+  List<SongImportRequest> requests, {
+  String? targetPlaylistId,
+}) => _importWithProgress(
+  context,
+  library,
+  requests,
+  targetPlaylistId: targetPlaylistId,
+);
+
 Future<void> _importWithProgress(
   BuildContext context,
   LibraryProvider library,
-  List<SongImportRequest> requests,
-) async {
+  List<SongImportRequest> requests, {
+  String? targetPlaylistId,
+}) async {
   final total = requests.length;
-  final failures = await showAetherProgressDialog<List<String>>(
+  final report = await showAetherProgressDialog<SongImportReport>(
     context: context,
     title: '正在导入…',
-    task: (report) => library.importSongs(
+    task: (progress) => library.importSongsWithReport(
       requests,
-      onProgress: (done) => report(
+      targetPlaylistId: targetPlaylistId,
+      addToActivePlaylist: false,
+      onProgress: (done) => progress(
         AetherProgressUpdate(
           title: '正在导入…',
           detail: '$done / $total',
@@ -126,21 +172,46 @@ Future<void> _importWithProgress(
       ),
     ),
   );
-  if (failures == null || !context.mounted) return;
+  if (report == null || !context.mounted) return;
+  _showImportSummaryToast(context, report);
+}
 
-  final imported = total - failures.length;
+void _showImportSummaryToast(BuildContext context, SongImportReport report) {
+  final imported = report.importedCount;
+  final failures = report.failures;
+  final playlist = report.targetPlaylist;
+  final playlistError = report.playlistError;
+
   if (failures.isEmpty) {
+    if (playlistError != null) {
+      showAetherToast(
+        context,
+        message: '已导入 $imported 首歌曲，但添加到歌单失败：$playlistError',
+        kind: AetherToastKind.warning,
+      );
+      return;
+    }
+    final suffix = playlist != null ? '，并添加到歌单「${playlist.name}」' : '';
     showAetherToast(
       context,
-      message: '已导入 $imported 首歌曲',
+      message: '已导入 $imported 首歌曲$suffix',
       kind: AetherToastKind.success,
     );
     return;
   }
+
+  final playlistSuffix =
+      imported > 0 && playlist != null && playlistError == null
+      ? '（已添加到歌单「${playlist.name}」）'
+      : '';
+  final playlistErrorSuffix = imported > 0 && playlistError != null
+      ? '；歌单添加失败：$playlistError'
+      : '';
   // Show one reason: usually every failure in a batch shares it.
   showAetherToast(
     context,
-    message: '导入 $imported 首，失败 ${failures.length} 首：${failures.first}',
+    message:
+        '导入 $imported 首$playlistSuffix，失败 ${failures.length} 首：${failures.first}$playlistErrorSuffix',
     kind: imported == 0 ? AetherToastKind.error : AetherToastKind.warning,
   );
 }
@@ -149,21 +220,43 @@ void _toastError(BuildContext context, String message) {
   showAetherToast(context, message: message, kind: AetherToastKind.error);
 }
 
-/// Lists the songs found in a folder; pops with the ones left checked.
-class _ImportPreviewDialog extends StatefulWidget {
-  const _ImportPreviewDialog({required this.previews});
+/// Lists the songs found in a folder and the target playlist, popping with the
+/// checked items and selected target playlist.
+@visibleForTesting
+class ImportFolderPreviewDialog extends StatefulWidget {
+  const ImportFolderPreviewDialog({
+    super.key,
+    required this.previews,
+    this.playlists = const [],
+    this.initialPlaylistId,
+  });
 
   final List<PreviewInfo> previews;
+  final List<Playlist> playlists;
+  final String? initialPlaylistId;
 
   @override
-  State<_ImportPreviewDialog> createState() => _ImportPreviewDialogState();
+  State<ImportFolderPreviewDialog> createState() =>
+      _ImportFolderPreviewDialogState();
 }
 
-class _ImportPreviewDialogState extends State<_ImportPreviewDialog> {
+class _ImportFolderPreviewDialogState extends State<ImportFolderPreviewDialog> {
+  static const String _noPlaylistId = '';
+
   late final List<bool> _checked = List<bool>.filled(
     widget.previews.length,
     true,
   );
+  late String _selectedPlaylistId = _resolveInitialPlaylistId();
+
+  String _resolveInitialPlaylistId() {
+    final initial = widget.initialPlaylistId;
+    if (initial == null) return _noPlaylistId;
+    for (final playlist in widget.playlists) {
+      if (playlist.id == initial) return initial;
+    }
+    return _noPlaylistId;
+  }
 
   int get _checkedCount => _checked.where((checked) => checked).length;
 
@@ -172,10 +265,15 @@ class _ImportPreviewDialogState extends State<_ImportPreviewDialog> {
   }
 
   void _confirm() {
-    Navigator.of(context).pop([
-      for (var i = 0; i < _checked.length; i++)
-        if (_checked[i]) widget.previews[i],
-    ]);
+    Navigator.of(context).pop<ImportPreviewSelection>((
+      previews: [
+        for (var i = 0; i < _checked.length; i++)
+          if (_checked[i]) widget.previews[i],
+      ],
+      targetPlaylistId: _selectedPlaylistId == _noPlaylistId
+          ? null
+          : _selectedPlaylistId,
+    ));
   }
 
   @override
@@ -193,6 +291,39 @@ class _ImportPreviewDialogState extends State<_ImportPreviewDialog> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (widget.playlists.isNotEmpty) ...[
+              Row(
+                children: [
+                  Text('添加到歌单', style: AetherType.bodySmStyle(cfg.textSecondary)),
+                  const SizedBox(width: AetherSpace.md),
+                  Expanded(
+                    child: AetherDropdown<String>(
+                      value: _selectedPlaylistId,
+                      height: AetherSpace.controlHeight,
+                      items: [
+                        const AetherDropdownItem(
+                          value: _noPlaylistId,
+                          label: '不添加到歌单（仅全部歌曲）',
+                          icon: Icons.library_music_outlined,
+                        ),
+                        for (final playlist in widget.playlists)
+                          AetherDropdownItem(
+                            value: playlist.id,
+                            label: playlist.name,
+                            icon: Icons.queue_music_rounded,
+                          ),
+                      ],
+                      onChanged: (value) {
+                        if (value != null) {
+                          setState(() => _selectedPlaylistId = value);
+                        }
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: AetherSpace.md),
+            ],
             Row(
               children: [
                 Text(

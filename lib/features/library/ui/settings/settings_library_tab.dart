@@ -87,6 +87,19 @@ class SettingsLibraryTab extends StatelessWidget {
               ),
             ],
           ),
+          if (libraryProvider.activePlaylist != null) ...[
+            const SizedBox(height: AetherSpace.md),
+            Text(
+              '* 当前选中歌单「${libraryProvider.activePlaylist!.name}」，导入的歌曲将默认添加到该歌单。',
+              style: AetherType.captionStyle(cfg.textSecondary).copyWith(height: 1.5),
+            ),
+          ] else if (libraryProvider.playlists.isNotEmpty) ...[
+            const SizedBox(height: AetherSpace.md),
+            Text(
+              '* 当前为“全部歌曲”，导入后仅加入音乐库；如需自动归类，请先选中目标歌单。',
+              style: AetherType.captionStyle(cfg.textSecondary).copyWith(height: 1.5),
+            ),
+          ],
         ],
         const AetherDivider(),
         const AetherSectionHeader(title: '数据维护与重构'),
