@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:aetheria/core/providers/library_provider.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
 import 'package:aetheria/core/utils/formatting.dart';
+import 'package:aetheria/core/utils/tag_ordering.dart';
 import 'package:aetheria/core/widgets/aether_empty_state.dart';
 import 'package:aetheria/core/widgets/aether_pressable.dart';
 import 'package:aetheria/core/widgets/aether_toast.dart';
@@ -15,8 +16,6 @@ class SongTagEditor extends StatelessWidget {
   const SongTagEditor({super.key, required this.song});
 
   final Song song;
-
-  static const String _uncategorized = '自定义';
 
   Future<void> _toggle(BuildContext context, Tag tag, bool bind) async {
     try {
@@ -35,7 +34,7 @@ class SongTagEditor extends StatelessWidget {
   Widget build(BuildContext context) {
     final cfg = context.tokens;
     final tags = context.select<LibraryProvider, List<Tag>>(
-      (library) => library.tags,
+      (library) => library.orderedTags,
     );
     if (tags.isEmpty) {
       return const AetherEmptyState(
@@ -45,10 +44,10 @@ class SongTagEditor extends StatelessWidget {
       );
     }
 
-    // Insertion order keeps categories in the order the library lists them.
+    // Insertion order keeps categories and tags in library priority order.
     final groups = <String, List<Tag>>{};
     for (final tag in tags) {
-      groups.putIfAbsent(tag.category ?? _uncategorized, () => []).add(tag);
+      groups.putIfAbsent(effectiveTagCategory(tag), () => []).add(tag);
     }
     final boundIds = {for (final tag in song.tags) tag.id};
 

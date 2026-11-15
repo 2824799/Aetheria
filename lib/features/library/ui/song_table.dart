@@ -11,6 +11,7 @@ import 'package:aetheria/core/providers/library_provider.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
 import 'package:aetheria/core/widgets/aether_toast.dart';
 import 'package:aetheria/features/library/ui/song_list_summary.dart';
+import 'package:aetheria/features/library/ui/song_table/song_tag_alignment.dart';
 import 'package:aetheria/features/library/ui/song_table/song_table_actions.dart';
 import 'package:aetheria/features/library/ui/song_table/song_table_cells.dart';
 import 'package:aetheria/features/library/ui/song_table/song_table_column_layout.dart';
@@ -19,6 +20,7 @@ import 'package:aetheria/features/library/ui/song_table/song_table_row.dart';
 import 'package:aetheria/features/library/ui/song_table/song_table_scroll_controller.dart';
 import 'package:aetheria/features/library/ui/song_table/song_table_scrollbar.dart';
 import 'package:aetheria/features/library/ui/song_table/song_table_selection.dart';
+import 'package:aetheria/features/library/ui/song_table/song_table_tags.dart';
 import 'package:aetheria/features/library/ui/song_table/song_table_text.dart';
 import 'package:aetheria/src/rust/models/song.dart';
 
@@ -74,6 +76,14 @@ class _SongTableState extends State<SongTable> {
   DateTime? _lastTapAt;
   String? _lastTapSongId;
   double _viewportWidth = 0;
+
+  SongTagAlignmentPlan? _cachedAlignmentPlan;
+  List<Song>? _cachedPlanSongs;
+  int _cachedPlanTagOrderRevision = -1;
+  TextScaler? _cachedPlanTextScaler;
+  TextDirection? _cachedPlanDirection;
+  Locale? _cachedPlanLocale;
+  TextStyle? _cachedPlanStyle;
 
   @override
   void initState() {
@@ -270,9 +280,55 @@ class _SongTableState extends State<SongTable> {
     );
   }
 
+  SongTagAlignmentPlan? _resolveAlignmentPlan(
+    BuildContext context,
+    LibraryProvider library,
+    List<Song> songs,
+    bool enabled,
+  ) {
+    if (!enabled) {
+      _cachedAlignmentPlan = null;
+      _cachedPlanSongs = null;
+      return null;
+    }
+
+    final textScaler = MediaQuery.textScalerOf(context);
+    final direction = Directionality.of(context);
+    final locale = Localizations.maybeLocaleOf(context);
+    final style = DefaultTextStyle.of(context).style;
+
+    final existing = _cachedAlignmentPlan;
+    if (existing != null &&
+        identical(_cachedPlanSongs, songs) &&
+        _cachedPlanTagOrderRevision == library.tagOrderRevision &&
+        _cachedPlanTextScaler == textScaler &&
+        _cachedPlanDirection == direction &&
+        _cachedPlanLocale == locale &&
+        _cachedPlanStyle == style) {
+      return existing;
+    }
+
+    final plan = SongTagAlignmentPlan.fromSongs(
+      songs,
+      orderConfig: library.tagOrderConfig,
+      measureChipWidth: (tag) => SongTableTags.measureChipWidth(context, tag),
+    );
+    _cachedAlignmentPlan = plan;
+    _cachedPlanSongs = songs;
+    _cachedPlanTagOrderRevision = library.tagOrderRevision;
+    _cachedPlanTextScaler = textScaler;
+    _cachedPlanDirection = direction;
+    _cachedPlanLocale = locale;
+    _cachedPlanStyle = style;
+    return plan;
+  }
+
   @override
   Widget build(BuildContext context) {
     final library = context.watch<LibraryProvider>();
+    final tagAlignmentEnabled = context.select<UIThemeProvider?, bool>(
+      (theme) => theme?.tagAlignmentEnabled ?? false,
+    );
     final cfg = context.tokens;
     final songs = library.displaySongs;
 
@@ -289,6 +345,13 @@ class _SongTableState extends State<SongTable> {
     if (songs.isEmpty) {
       return SongListEmptyState(library: library);
     }
+
+    final tagAlignmentPlan = _resolveAlignmentPlan(
+      context,
+      library,
+      songs,
+      tagAlignmentEnabled,
+    );
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -321,7 +384,13 @@ class _SongTableState extends State<SongTable> {
                     ),
                     SizedBox(
                       height: bodyHeight,
-                      child: _buildBody(songs, library, tableWidth, cfg),
+                      child: _buildBody(
+                        songs,
+                        library,
+                        tableWidth,
+                        cfg,
+                        tagAlignmentPlan,
+                      ),
                     ),
                   ],
                 ),
@@ -338,6 +407,7 @@ class _SongTableState extends State<SongTable> {
     LibraryProvider library,
     double tableWidth,
     AppThemeConfig cfg,
+    SongTagAlignmentPlan? tagAlignmentPlan,
   ) {
     return Listener(
       behavior: HitTestBehavior.translucent,
@@ -366,6 +436,7 @@ class _SongTableState extends State<SongTable> {
                 leadingWidth: _leadingColumnWidth,
                 hasLyrics: library.songHasLyrics(song),
                 cells: _cells,
+                tagAlignmentPlan: tagAlignmentPlan,
                 selection: _selection,
                 onTap: () => _handleRowTap(song, index, songs),
                 onPlayPressed: (isLoaded) =>

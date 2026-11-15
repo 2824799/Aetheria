@@ -13,24 +13,46 @@ export 'package:aetheria/core/theme/tokens/icon_size.dart';
 export 'package:aetheria/core/theme/tokens/palettes.dart';
 
 class UIThemeProvider extends ChangeNotifier {
+  static const String _themePrefsKey = 'aetheria-theme';
+  static const String _tagAlignmentPrefsKey = 'aetheria-tag-alignment-enabled';
+
   AppThemeType _themeType = AppThemeType.dark;
+  bool _tagAlignmentEnabled = false;
 
   UIThemeProvider() {
-    _loadTheme();
+    _loadPreferences();
   }
 
   AppThemeType get themeType => _themeType;
 
+  /// Whether desktop song table tags align vertically by category slots.
+  bool get tagAlignmentEnabled => _tagAlignmentEnabled;
+
   AppThemeConfig get currentTheme => AppThemeConfig.forType(_themeType);
 
-  Future<void> _loadTheme() async {
+  Future<void> _loadPreferences() async {
     final prefs = await SharedPreferences.getInstance();
-    final savedTheme = prefs.getString('aetheria-theme');
+    var changed = false;
+
+    final savedTheme = prefs.getString(_themePrefsKey);
     if (savedTheme != null) {
-      _themeType = AppThemeType.values.firstWhere(
+      final parsed = AppThemeType.values.firstWhere(
         (e) => e.toString().split('.').last == savedTheme,
         orElse: () => AppThemeType.dark,
       );
+      if (parsed != _themeType) {
+        _themeType = parsed;
+        changed = true;
+      }
+    }
+
+    final savedAlign = prefs.getBool(_tagAlignmentPrefsKey);
+    if (savedAlign != null && savedAlign != _tagAlignmentEnabled) {
+      _tagAlignmentEnabled = savedAlign;
+      changed = true;
+    }
+
+    if (changed) {
       notifyListeners();
     }
   }
@@ -40,7 +62,16 @@ class UIThemeProvider extends ChangeNotifier {
     _themeType = type;
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('aetheria-theme', type.toString().split('.').last);
+    await prefs.setString(_themePrefsKey, type.toString().split('.').last);
+  }
+
+  /// Toggles tag column alignment mode in the desktop song table.
+  Future<void> setTagAlignmentEnabled(bool enabled) async {
+    if (_tagAlignmentEnabled == enabled) return;
+    _tagAlignmentEnabled = enabled;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_tagAlignmentPrefsKey, enabled);
   }
 
   ThemeData get themeData => buildAetheriaThemeData(currentTheme);

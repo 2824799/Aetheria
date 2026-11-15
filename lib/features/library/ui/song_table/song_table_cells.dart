@@ -4,6 +4,7 @@ import 'package:aetheria/core/providers/ui_theme_provider.dart';
 import 'package:aetheria/core/utils/audio_quality.dart';
 import 'package:aetheria/features/library/ui/song_badges.dart';
 import 'package:aetheria/features/library/ui/song_table/song_columns.dart';
+import 'package:aetheria/features/library/ui/song_table/song_tag_alignment.dart';
 import 'package:aetheria/features/library/ui/song_table/song_table_column_layout.dart';
 import 'package:aetheria/features/library/ui/song_table/song_table_tags.dart';
 import 'package:aetheria/features/library/ui/song_table/song_table_text.dart';
@@ -26,6 +27,7 @@ class SongTableCells {
     AppThemeConfig cfg, {
     required bool isPlaying,
     required bool hasLyrics,
+    SongTagAlignmentPlan? tagAlignmentPlan,
   }) {
     final width = layout.widthOf(column);
     return SizedBox(
@@ -33,7 +35,7 @@ class SongTableCells {
       child: switch (column) {
         SongColumnKey.title => _title(song, cfg, isPlaying, hasLyrics),
         SongColumnKey.artist => _artist(song, cfg),
-        SongColumnKey.tags => _tags(song, cfg, width),
+        SongColumnKey.tags => _tags(song, cfg, width, tagAlignmentPlan),
         SongColumnKey.versions => _versions(song, cfg),
         SongColumnKey.spec => _quality(song),
       },
@@ -87,20 +89,29 @@ class SongTableCells {
     );
   }
 
-  Widget _tags(Song song, AppThemeConfig cfg, double width) {
+  Widget _tags(
+    Song song,
+    AppThemeConfig cfg,
+    double width,
+    SongTagAlignmentPlan? alignmentPlan,
+  ) {
+    final aligned = alignmentPlan != null && alignmentPlan.hasSlots;
     return Padding(
       padding: _padding,
       child: song.tags.isEmpty
-          ? SongTableText(
-              '—',
-              cache: textCache,
-              style: AetherType.bodySmStyle(cfg.textTertiary),
-            )
+          ? (aligned
+                ? const SizedBox.shrink()
+                : SongTableText(
+                    '—',
+                    cache: textCache,
+                    style: AetherType.bodySmStyle(cfg.textTertiary),
+                  ))
           : SongTableTags(
               tags: song.tags,
               textCache: textCache,
               cfg: cfg,
               availableWidth: width - _padding.horizontal,
+              alignmentPlan: alignmentPlan,
             ),
     );
   }

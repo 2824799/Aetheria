@@ -1,5 +1,9 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:aetheria/core/utils/tag_ordering.dart';
 import 'package:aetheria/src/rust/api/music.dart' as music;
 import 'package:aetheria/src/rust/models/song.dart';
 import 'package:aetheria/src/rust/models/playlist.dart';
@@ -175,6 +179,7 @@ Song _copySong(
   Song song, {
   required String? lyrics,
   required String? coverPath,
+  List<Tag>? tags,
 }) {
   return Song(
     id: song.id,
@@ -186,11 +191,13 @@ Song _copySong(
     rating: song.rating,
     createdAt: song.createdAt,
     versions: song.versions,
-    tags: song.tags,
+    tags: tags ?? song.tags,
   );
 }
 
 class LibraryProvider extends ChangeNotifier {
+  static const String _tagOrderPrefsKey = 'aetheria-tag-order-v1';
+
   List<Song> songs = [];
   List<Tag> tags = [];
   List<Playlist> playlists = [];
@@ -233,16 +240,86 @@ class LibraryProvider extends ChangeNotifier {
   int _loadRequest = 0;
   int _playlistRequest = 0;
   List<Song>? _displaySongsCache;
+  TagOrderConfig _tagOrderConfig = const TagOrderConfig();
+  bool _tagOrderLoaded = false;
+  int _tagOrderRevision = 0;
+  List<Tag>? _orderedTagsCache;
+  List<Tag>? _orderedTagsCacheSource;
+  int _orderedTagsCacheRevision = -1;
+
+  /// Active priority order for tag categories and tags within each category.
+  TagOrderConfig get tagOrderConfig => _tagOrderConfig;
+
+  /// Increments whenever category or in-category tag priorities change.
+  int get tagOrderRevision => _tagOrderRevision;
+
+  /// Library tags sorted by category priority first, then tag priority.
+  List<Tag> get orderedTags {
+    final cached = _orderedTagsCache;
+    if (cached != null &&
+        identical(_orderedTagsCacheSource, tags) &&
+        _orderedTagsCacheRevision == _tagOrderRevision) {
+      return cached;
+    }
+    final sorted = _tagOrderConfig.sortTags(tags);
+    _orderedTagsCacheSource = tags;
+    _orderedTagsCacheRevision = _tagOrderRevision;
+    return _orderedTagsCache = sorted;
+  }
+
+  /// Returns [song]'s tags sorted according to [tagOrderConfig].
+  List<Tag> orderedTagsFor(Song song) => _tagOrderConfig.sortTags(song.tags);
 
   @override
   void notifyListeners() {
     _displaySongsCache = null;
+    _orderedTagsCache = null;
     super.notifyListeners();
   }
 
   // ---------------------------------------------------------------------------
   // Loading
   // ---------------------------------------------------------------------------
+
+  Future<void> _ensureTagOrderLoaded() async {
+    if (_tagOrderLoaded) return;
+    _tagOrderLoaded = true;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_tagOrderPrefsKey);
+      if (raw != null && raw.isNotEmpty) {
+        _tagOrderConfig = TagOrderConfig.fromJson(jsonDecode(raw));
+        _tagOrderRevision++;
+      }
+    } catch (_) {
+      // Pure Dart unit tests may run without a Flutter binding or prefs mock.
+    }
+  }
+
+  Future<void> _saveTagOrderToPrefs() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_tagOrderPrefsKey, jsonEncode(_tagOrderConfig.toJson()));
+    } catch (_) {
+      // Pure Dart unit tests may run without a Flutter binding or prefs mock.
+    }
+  }
+
+  Song _songWithSortedTags(Song song) {
+    if (_tagOrderConfig.isSorted(song.tags)) {
+      return song;
+    }
+    return _copySong(
+      song,
+      lyrics: song.lyrics,
+      coverPath: song.coverPath,
+      tags: _tagOrderConfig.sortTags(song.tags),
+    );
+  }
+
+  List<Song> _songsWithSortedTags(List<Song> source) {
+    return [for (final song in source) _songWithSortedTags(song)];
+  }
 
   Future<void> loadLibrary() async {
     final request = ++_loadRequest;
@@ -258,6 +335,7 @@ class LibraryProvider extends ChangeNotifier {
         return;
       }
 
+      await _ensureTagOrderLoaded();
       final playlistId = activePlaylistId;
       final (
         loadedSongs,
@@ -280,8 +358,8 @@ class LibraryProvider extends ChangeNotifier {
         return;
       }
 
-      songs = loadedSongs;
-      tags = loadedTags;
+      tags = _tagOrderConfig.sortTags(loadedTags);
+      songs = _songsWithSortedTags(loadedSongs);
       playlists = loadedPlaylists;
       libraryPath = loadedPath;
       songIdsWithLyrics = lyricSongIds.toSet();
@@ -739,14 +817,26 @@ class LibraryProvider extends ChangeNotifier {
     String? color,
     String? category,
   ) {
-    return _mutate(
-      () => music.updateTag(
+    return _mutate(() async {
+      await music.updateTag(
         tagId: tagId,
         name: name,
         color: color,
         category: category,
-      ),
-    );
+      );
+      final trimmed = category?.trim();
+      final resolvedCategory =
+          (trimmed == null || trimmed.isEmpty) ? kDefaultTagCategory : trimmed;
+      final pruned = _tagOrderConfig.pruneTagId(
+        tagId.toInt(),
+        keepCategory: resolvedCategory,
+      );
+      if (!identical(pruned, _tagOrderConfig)) {
+        _tagOrderConfig = pruned;
+        _tagOrderRevision++;
+        await _saveTagOrderToPrefs();
+      }
+    });
   }
 
   Future<void> deleteTag(PlatformInt64 tagId) {
@@ -755,6 +845,12 @@ class LibraryProvider extends ChangeNotifier {
       // A deleted tag must not keep filtering the list invisibly.
       selectedTags.remove(tagId);
       excludedTags.remove(tagId);
+      final pruned = _tagOrderConfig.pruneTagId(tagId.toInt());
+      if (!identical(pruned, _tagOrderConfig)) {
+        _tagOrderConfig = pruned;
+        _tagOrderRevision++;
+        await _saveTagOrderToPrefs();
+      }
     });
   }
 
@@ -762,6 +858,48 @@ class LibraryProvider extends ChangeNotifier {
     return _mutate(
       () => music.tagSong(songId: songId, tagId: tagId, bind: bind),
     );
+  }
+
+  /// Moves the tag category at [fromIndex] to [toIndex] and persists the order.
+  Future<void> moveTagCategory(int fromIndex, int toIndex) async {
+    final next = _tagOrderConfig.moveCategory(tags, fromIndex, toIndex);
+    if (identical(next, _tagOrderConfig)) return;
+    await _applyTagOrderConfig(next);
+  }
+
+  /// Moves a tag inside [category] from [fromIndex] to [toIndex] and persists.
+  Future<void> moveTagInCategory(
+    String category,
+    int fromIndex,
+    int toIndex,
+  ) async {
+    final next = _tagOrderConfig.moveTagInCategory(
+      tags,
+      category,
+      fromIndex,
+      toIndex,
+    );
+    if (identical(next, _tagOrderConfig)) return;
+    await _applyTagOrderConfig(next);
+  }
+
+  /// Serializes the configured tag and category priorities for LAN sync.
+  Map<String, dynamic> exportTagOrderPayload() => _tagOrderConfig.toJson();
+
+  /// Replaces tag and category priorities from a synced remote payload.
+  Future<void> applySyncedTagOrder(dynamic payload) async {
+    if (payload is! Map) return;
+    await _applyTagOrderConfig(TagOrderConfig.fromJson(payload));
+  }
+
+  Future<void> _applyTagOrderConfig(TagOrderConfig next) async {
+    _tagOrderConfig = next;
+    _tagOrderLoaded = true;
+    _tagOrderRevision++;
+    tags = _tagOrderConfig.sortTags(tags);
+    songs = _songsWithSortedTags(songs);
+    notifyListeners();
+    await _saveTagOrderToPrefs();
   }
 
   // ---------------------------------------------------------------------------
@@ -946,7 +1084,7 @@ class LibraryProvider extends ChangeNotifier {
       });
     }
 
-    final result = list.toList();
+    final result = [for (final song in list) _songWithSortedTags(song)];
     // Playlist order is user-defined. Every other list uses one shared natural
     // ordering so desktop and mobile never depend on their native platform.
     if (!inPlaylist) {

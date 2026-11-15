@@ -5,6 +5,7 @@ import 'package:aetheria/core/providers/audio_player_provider.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
 import 'package:aetheria/core/widgets/aether_icon_button.dart';
 import 'package:aetheria/core/widgets/aether_pressable.dart';
+import 'package:aetheria/features/library/ui/song_table/song_tag_alignment.dart';
 import 'package:aetheria/features/library/ui/song_table/song_table_cells.dart';
 import 'package:aetheria/features/library/ui/song_table/song_table_selection.dart';
 import 'package:aetheria/src/rust/models/song.dart';
@@ -22,6 +23,7 @@ class SongTableRow extends StatelessWidget {
     required this.leadingWidth,
     required this.hasLyrics,
     required this.cells,
+    this.tagAlignmentPlan,
     required this.selection,
     required this.onTap,
     required this.onPlayPressed,
@@ -34,6 +36,7 @@ class SongTableRow extends StatelessWidget {
   final double leadingWidth;
   final bool hasLyrics;
   final SongTableCells cells;
+  final SongTagAlignmentPlan? tagAlignmentPlan;
   final SongTableSelection selection;
   final VoidCallback onTap;
 
@@ -116,6 +119,7 @@ class SongTableRow extends StatelessWidget {
                           cfg,
                           isPlaying: state.loaded,
                           hasLyrics: hasLyrics,
+                          tagAlignmentPlan: tagAlignmentPlan,
                         ),
                     ],
                   ),

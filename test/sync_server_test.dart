@@ -4,8 +4,15 @@ import 'dart:io';
 
 import 'package:aetheria/core/providers/library_provider.dart';
 import 'package:aetheria/core/providers/sync_provider.dart';
+import 'package:aetheria/src/rust/frb_generated.dart';
+import 'package:aetheria/src/rust/models/song.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+class _FakeSyncManifestApi extends Fake implements RustLibApi {
+  @override
+  Future<void> crateApiMusicCheckpointLibraryDatabase() async {}
+}
 
 void main() {
   late SyncProvider provider;
@@ -126,5 +133,58 @@ void main() {
     await provider.approveIncomingRequest(secondPrompt.id);
     final approved = jsonDecode((await second).body) as Map<String, dynamic>;
     expect(approved['approved'], isTrue);
+  });
+
+  group('manifest tagOrder', () {
+    setUpAll(() => RustLib.initMock(api: _FakeSyncManifestApi()));
+    tearDownAll(RustLib.dispose);
+
+    test('manifest includes tagOrder payload when library directory exists', () async {
+      final tempLibDir = await Directory.systemTemp.createTemp('aetheria_manifest_');
+      addTearDown(() async {
+        if (await tempLibDir.exists()) {
+          await tempLibDir.delete(recursive: true);
+        }
+      });
+
+      final library = LibraryProvider()
+        ..libraryPath = tempLibDir.path
+        ..tags = const [
+          Tag(id: 1, name: '中文', category: '语言'),
+          Tag(id: 2, name: '摇滚', category: '流派'),
+        ];
+      addTearDown(library.dispose);
+      await library.moveTagCategory(1, 0);
+
+      final tagSync = SyncProvider();
+      addTearDown(tagSync.dispose);
+      await tagSync.start(library);
+
+      final pendingReq = client
+          .openUrl('POST', Uri.parse('http://127.0.0.1:${tagSync.localPort}/sync/request'))
+          .then((req) async {
+            req.headers.contentType = ContentType.json;
+            req.write(approvalBody('MobilePeer'));
+            final resp = await req.close();
+            return jsonDecode(await utf8.decoder.bind(resp).join()) as Map<String, dynamic>;
+          });
+
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      await tagSync.approveIncomingRequest(tagSync.incomingRequest!.id);
+      final approved = await pendingReq;
+      final token = approved['token'] as String;
+
+      final manifestReq = await client.getUrl(
+        Uri.parse('http://127.0.0.1:${tagSync.localPort}/sync/manifest'),
+      );
+      manifestReq.headers.set('X-Aetheria-Sync-Token', token);
+      final manifestResp = await manifestReq.close();
+      expect(manifestResp.statusCode, HttpStatus.ok);
+
+      final manifest =
+          jsonDecode(await utf8.decoder.bind(manifestResp).join())
+              as Map<String, dynamic>;
+      expect(manifest['tagOrder'], library.exportTagOrderPayload());
+    });
   });
 }

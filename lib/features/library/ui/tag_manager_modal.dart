@@ -4,23 +4,19 @@ import 'package:provider/provider.dart';
 
 import 'package:aetheria/core/providers/library_provider.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
-import 'package:aetheria/core/utils/formatting.dart';
+import 'package:aetheria/core/utils/tag_ordering.dart';
 import 'package:aetheria/core/widgets/aether_button.dart';
 import 'package:aetheria/core/widgets/aether_dialog.dart';
 import 'package:aetheria/core/widgets/aether_dropdown.dart';
 import 'package:aetheria/core/widgets/aether_empty_state.dart';
 import 'package:aetheria/core/widgets/aether_icon_button.dart';
-import 'package:aetheria/core/widgets/aether_pressable.dart';
 import 'package:aetheria/core/widgets/aether_surface.dart';
 import 'package:aetheria/core/widgets/aether_text_field.dart';
 import 'package:aetheria/core/widgets/aether_toast.dart';
 import 'package:aetheria/core/widgets/color_picker_field.dart';
+import 'package:aetheria/features/library/ui/tag_manager_priority_list.dart';
 import 'package:aetheria/src/rust/models/song.dart';
 
-/// Category used when a tag has none, and the dropdown entry that reveals the
-/// free-text category field.
-const _customCategory = '自定义';
-const _presetCategories = ['流派', '语言', '情绪', '场景', _customCategory];
 const _defaultColor = '#3b82f6';
 
 /// Create, edit and delete tags: the tag list beside an editor in wide
@@ -43,8 +39,8 @@ class _TagManagerModalState extends State<TagManagerModal> {
   final _nameController = TextEditingController();
   final _customCategoryController = TextEditingController();
 
-  /// One of [_presetCategories]; [_customCategory] means "use the text field".
-  String _category = _customCategory;
+  /// One of [kPresetTagCategories]; [kDefaultTagCategory] means "use the text field".
+  String _category = kDefaultTagCategory;
   String _color = _defaultColor;
   PlatformInt64? _editingTagId;
 
@@ -58,15 +54,16 @@ class _TagManagerModalState extends State<TagManagerModal> {
   }
 
   void _startEdit(Tag tag) {
-    final category = tag.category ?? _customCategory;
+    final category = effectiveTagCategory(tag);
     final isPreset =
-        category != _customCategory && _presetCategories.contains(category);
+        category != kDefaultTagCategory &&
+        kPresetTagCategories.contains(category);
     setState(() {
       _editingTagId = tag.id;
       _nameController.text = tag.name;
-      _category = isPreset ? category : _customCategory;
+      _category = isPreset ? category : kDefaultTagCategory;
       _customCategoryController.text =
-          isPreset || category == _customCategory ? '' : category;
+          isPreset || category == kDefaultTagCategory ? '' : category;
       _color = tag.color ?? _defaultColor;
     });
   }
@@ -76,15 +73,15 @@ class _TagManagerModalState extends State<TagManagerModal> {
       _editingTagId = null;
       _nameController.clear();
       _customCategoryController.clear();
-      _category = _customCategory;
+      _category = kDefaultTagCategory;
       _color = _defaultColor;
     });
   }
 
   String get _resolvedCategory {
-    if (_category != _customCategory) return _category;
+    if (_category != kDefaultTagCategory) return _category;
     final typed = _customCategoryController.text.trim();
-    return typed.isEmpty ? _customCategory : typed;
+    return typed.isEmpty ? kDefaultTagCategory : typed;
   }
 
   Future<void> _submit(LibraryProvider library) async {
@@ -128,11 +125,7 @@ class _TagManagerModalState extends State<TagManagerModal> {
       await library.deleteTag(tag.id);
       if (!mounted) return;
       if (_editingTagId == tag.id) _resetForm();
-      showAetherToast(
-        context,
-        message: '标签已删除',
-        kind: AetherToastKind.success,
-      );
+      showAetherToast(context, message: '标签已删除', kind: AetherToastKind.success);
     } catch (e) {
       if (!mounted) return;
       showAetherToast(
@@ -147,8 +140,7 @@ class _TagManagerModalState extends State<TagManagerModal> {
   Widget build(BuildContext context) {
     final library = context.watch<LibraryProvider>();
     final cfg = context.tokens;
-    final size = MediaQuery.sizeOf(context);
-    final wide = size.width >= 768;
+    final mediaSize = MediaQuery.sizeOf(context);
 
     final editor = _TagEditor(
       isEditing: _isEditing,
@@ -161,122 +153,118 @@ class _TagManagerModalState extends State<TagManagerModal> {
       onSubmit: () => _submit(library),
       onCancelEdit: _resetForm,
     );
-    final rows = _buildTagRows(cfg, library);
+    final groups = groupOrderedTags(library.orderedTags);
 
-    return Center(
-      child: Material(
-        color: Colors.transparent,
-        child: Container(
-          width: wide ? 760 : double.infinity,
-          height: wide ? size.height.clamp(480.0, 600.0) : size.height * 0.86,
-          margin: EdgeInsets.symmetric(
-            horizontal: wide ? AetherSpace.xxxl : AetherSpace.lg,
-            vertical: wide ? AetherSpace.massive : AetherSpace.xxl,
-          ),
-          child: AetherSurface(
-            level: AetherSurfaceLevel.overlay,
-            borderRadius: BorderRadius.circular(AetherRadius.lg),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _Header(tagCount: library.tags.length),
-                Expanded(
-                  child: wide
-                      ? Row(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Expanded(
-                              child: rows.isEmpty
-                                  ? const _NoTags()
-                                  : ListView(
-                                      padding: const EdgeInsets.fromLTRB(
-                                        AetherSpace.xl,
-                                        0,
-                                        AetherSpace.xl,
-                                        AetherSpace.xl,
-                                      ),
-                                      children: rows,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final availWidth = constraints.hasBoundedWidth
+            ? constraints.maxWidth
+            : mediaSize.width;
+        final availHeight = constraints.hasBoundedHeight
+            ? constraints.maxHeight
+            : mediaSize.height;
+        final wide = availWidth >= 768;
+
+        return Center(
+          child: Material(
+            color: Colors.transparent,
+            child: Container(
+              width: wide ? 760 : double.infinity,
+              height: wide
+                  ? (availHeight - AetherSpace.massive * 2).clamp(360.0, 600.0)
+                  : availHeight * 0.86,
+              margin: EdgeInsets.symmetric(
+                horizontal: wide ? AetherSpace.xxxl : AetherSpace.lg,
+                vertical: wide ? AetherSpace.massive : AetherSpace.xxl,
+              ),
+              child: AetherSurface(
+                level: AetherSurfaceLevel.overlay,
+                borderRadius: BorderRadius.circular(AetherRadius.lg),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _Header(tagCount: library.tags.length),
+                    Expanded(
+                      child: wide
+                          ? Row(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Expanded(
+                                  child: groups.isEmpty
+                                      ? const _NoTags()
+                                      : TagPriorityList(
+                                          groups: groups,
+                                          editingTagId: _editingTagId,
+                                          onMoveCategory:
+                                              library.moveTagCategory,
+                                          onMoveTag: library.moveTagInCategory,
+                                          onEditTag: _startEdit,
+                                          onDeleteTag: (tag) =>
+                                              _delete(library, tag),
+                                        ),
+                                ),
+                                Container(
+                                  width: 304,
+                                  decoration: BoxDecoration(
+                                    border: Border(
+                                      left: BorderSide(color: cfg.borderSubtle),
                                     ),
-                            ),
-                            Container(
-                              width: 304,
-                              decoration: BoxDecoration(
-                                border: Border(
-                                  left: BorderSide(color: cfg.borderSubtle),
+                                  ),
+                                  child: SingleChildScrollView(
+                                    padding: const EdgeInsets.fromLTRB(
+                                      AetherSpace.xxl,
+                                      AetherSpace.xs,
+                                      AetherSpace.xxl,
+                                      AetherSpace.xxl,
+                                    ),
+                                    child: editor,
+                                  ),
                                 ),
-                              ),
-                              child: SingleChildScrollView(
-                                padding: const EdgeInsets.fromLTRB(
-                                  AetherSpace.xxl,
-                                  AetherSpace.xs,
-                                  AetherSpace.xxl,
-                                  AetherSpace.xxl,
+                              ],
+                            )
+                          : CustomScrollView(
+                              slivers: [
+                                SliverToBoxAdapter(
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: AetherSpace.xxxl,
+                                    ),
+                                    child: editor,
+                                  ),
                                 ),
-                                child: editor,
-                              ),
+                                const SliverToBoxAdapter(
+                                  child: SizedBox(height: AetherSpace.xl),
+                                ),
+                                SliverToBoxAdapter(
+                                  child: Divider(height: 1, color: cfg.divider),
+                                ),
+                                if (groups.isEmpty)
+                                  const SliverToBoxAdapter(
+                                    child: SizedBox(
+                                      height: 220,
+                                      child: _NoTags(),
+                                    ),
+                                  )
+                                else
+                                  SliverTagPriorityList(
+                                    groups: groups,
+                                    editingTagId: _editingTagId,
+                                    onMoveCategory: library.moveTagCategory,
+                                    onMoveTag: library.moveTagInCategory,
+                                    onEditTag: _startEdit,
+                                    onDeleteTag: (tag) => _delete(library, tag),
+                                  ),
+                              ],
                             ),
-                          ],
-                        )
-                      : ListView(
-                          padding: const EdgeInsets.fromLTRB(
-                            AetherSpace.xl,
-                            0,
-                            AetherSpace.xl,
-                            AetherSpace.xl,
-                          ),
-                          children: [
-                            Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: AetherSpace.md,
-                              ),
-                              child: editor,
-                            ),
-                            const SizedBox(height: AetherSpace.xl),
-                            Divider(height: 1, color: cfg.divider),
-                            if (rows.isEmpty)
-                              const SizedBox(height: 220, child: _NoTags())
-                            else
-                              ...rows,
-                          ],
-                        ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
-  }
-
-  /// Tags grouped by category, in the order categories first appear.
-  List<Widget> _buildTagRows(AppThemeConfig cfg, LibraryProvider library) {
-    final groups = <String, List<Tag>>{};
-    for (final tag in library.tags) {
-      groups.putIfAbsent(tag.category ?? _customCategory, () => []).add(tag);
-    }
-    return [
-      for (final entry in groups.entries) ...[
-        Padding(
-          padding: const EdgeInsets.fromLTRB(
-            AetherSpace.md,
-            AetherSpace.xl,
-            AetherSpace.md,
-            AetherSpace.sm,
-          ),
-          child: Text(
-            entry.key,
-            style: AetherType.captionStyle(cfg.textTertiary),
-          ),
-        ),
-        for (final tag in entry.value)
-          _TagRow(
-            tag: tag,
-            editing: tag.id == _editingTagId,
-            onEdit: () => _startEdit(tag),
-            onDelete: () => _delete(library, tag),
-          ),
-      ],
-    ];
   }
 }
 
@@ -302,8 +290,9 @@ class _Header extends StatelessWidget {
           const SizedBox(width: AetherSpace.md),
           Expanded(
             child: Text(
-              tagCount == 0 ? '' : '$tagCount 个',
+              tagCount == 0 ? '' : '$tagCount 个 · 拖拽或点箭头调整显示顺序',
               style: AetherType.bodySmStyle(cfg.textTertiary),
+              overflow: TextOverflow.ellipsis,
             ),
           ),
           AetherIconButton(
@@ -329,73 +318,6 @@ class _NoTags extends StatelessWidget {
       icon: Icons.label_outline_rounded,
       title: '还没有标签',
       message: '创建标签后，可以在歌曲详情里给歌曲打标签，并按标签筛选',
-    );
-  }
-}
-
-class _TagRow extends StatelessWidget {
-  const _TagRow({
-    required this.tag,
-    required this.editing,
-    required this.onEdit,
-    required this.onDelete,
-  });
-
-  final Tag tag;
-  final bool editing;
-  final VoidCallback onEdit;
-  final VoidCallback onDelete;
-
-  @override
-  Widget build(BuildContext context) {
-    final cfg = context.tokens;
-    final radius = BorderRadius.circular(AetherRadius.md);
-    return AetherPressable(
-      onTap: onEdit,
-      borderRadius: radius,
-      pressScale: 1,
-      semanticLabel: '编辑标签 ${tag.name}',
-      child: Container(
-        height: 40,
-        padding: const EdgeInsets.only(
-          left: AetherSpace.md,
-          right: AetherSpace.xs,
-        ),
-        decoration: BoxDecoration(
-          color: editing ? cfg.accentMuted : null,
-          borderRadius: radius,
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 10,
-              height: 10,
-              decoration: BoxDecoration(
-                color: parseTagColor(tag.color, cfg.textTertiary),
-                shape: BoxShape.circle,
-              ),
-            ),
-            const SizedBox(width: AetherSpace.lg),
-            Expanded(
-              child: Text(
-                tag.name,
-                style: AetherType.bodyStyle(
-                  editing ? cfg.accent : cfg.textPrimary,
-                ),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            AetherIconButton(
-              icon: Icons.delete_outline_rounded,
-              size: 32,
-              iconSize: AetherIconSize.md,
-              color: cfg.textTertiary,
-              tooltip: '删除标签',
-              onPressed: onDelete,
-            ),
-          ],
-        ),
-      ),
     );
   }
 }
@@ -446,14 +368,14 @@ class _TagEditor extends StatelessWidget {
         AetherDropdown<String>(
           value: category,
           items: [
-            for (final preset in _presetCategories)
+            for (final preset in kPresetTagCategories)
               AetherDropdownItem(value: preset, label: preset),
           ],
           onChanged: (value) {
             if (value != null) onCategoryChanged(value);
           },
         ),
-        if (category == _customCategory) ...[
+        if (category == kDefaultTagCategory) ...[
           const SizedBox(height: AetherSpace.md),
           AetherTextField(
             controller: customCategoryController,

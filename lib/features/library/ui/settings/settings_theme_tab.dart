@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
 import 'package:aetheria/core/widgets/aether_section.dart';
+import 'package:aetheria/core/widgets/aether_switch.dart';
 import 'package:aetheria/features/library/ui/settings/settings_shared_widgets.dart';
 
 class SettingsThemeTab extends StatelessWidget {
@@ -72,6 +73,14 @@ class SettingsThemeTab extends StatelessWidget {
               ],
             );
           },
+        ),
+        const AetherDivider(),
+        const AetherSectionHeader(title: '列表与标签显示'),
+        AetherSwitchTile(
+          title: '歌曲表格标签对齐模式',
+          subtitle: '开启后按当前列表中各标签种类与同一槽位的最大宽度纵向对齐，未包含该种类的歌曲保留空位（仅作用于桌面端表格）。',
+          value: themeProvider.tagAlignmentEnabled,
+          onChanged: themeProvider.setTagAlignmentEnabled,
         ),
         const AetherDivider(),
         Text(

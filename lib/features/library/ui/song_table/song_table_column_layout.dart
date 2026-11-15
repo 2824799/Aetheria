@@ -7,7 +7,7 @@ import 'package:aetheria/features/library/ui/song_table/song_columns.dart';
 class SongTableColumnLayout extends ChangeNotifier {
   static const String _orderKey = 'aetheria-song-table-column-order';
   static const String _widthPrefix = 'aetheria-song-table-column-width-';
-  static const double _maxWidth = 600;
+  static const double _maxWidth = 960;
 
   List<SongColumnKey> _order = List<SongColumnKey>.of(SongColumnKey.values);
   final Map<SongColumnKey, double> _widths = {

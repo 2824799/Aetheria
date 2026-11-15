@@ -276,6 +276,7 @@ class SyncProvider extends ChangeNotifier {
       notifyListeners();
 
       final manifest = await _fetchManifest(device, token);
+      final remoteTagOrder = manifest['tagOrder'];
       final remoteFiles = (manifest['files'] as List<dynamic>? ?? [])
           .whereType<Map<String, dynamic>>()
           .map(_RemoteFileInfo.fromJson)
@@ -385,6 +386,9 @@ class SyncProvider extends ChangeNotifier {
       updateProgress('正在重新加载音乐库...');
       await music.initializeLibraryPath(path: libraryProvider.libraryPath);
       await libraryProvider.loadLibrary();
+      if (remoteTagOrder != null) {
+        await libraryProvider.applySyncedTagOrder(remoteTagOrder);
+      }
       await announceNow();
       completed++;
 
@@ -907,6 +911,7 @@ class SyncProvider extends ChangeNotifier {
           'md5': await dbFile.exists() ? await _fileMd5(dbFile) : '',
         },
         'files': files,
+        'tagOrder': libraryProvider.exportTagOrderPayload(),
       }),
     );
     await request.response.close();

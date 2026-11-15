@@ -236,7 +236,8 @@ class _TagPool extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (library.tags.isEmpty) {
+    final orderedTags = library.orderedTags;
+    if (orderedTags.isEmpty) {
       return Text(
         '还没有标签，可以在“管理标签”中新建',
         style: AetherType.bodySmStyle(cfg.textTertiary),
@@ -246,7 +247,7 @@ class _TagPool extends StatelessWidget {
       spacing: AetherSpace.sm,
       runSpacing: AetherSpace.sm,
       children: [
-        for (final tag in library.tags)
+        for (final tag in orderedTags)
           _TagChip(
             tag: tag,
             isRequired: library.selectedTags.contains(tag.id),
