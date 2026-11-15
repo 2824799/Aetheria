@@ -17,6 +17,8 @@ pub fn reset() -> Result<()> {
         "DELETE FROM lyrics;
          DELETE FROM playlist_songs;
          DELETE FROM song_tags;
+         DELETE FROM phigros_charts;
+         DELETE FROM phigros_songs;
          DELETE FROM audio_files;
          DELETE FROM songs;
          DELETE FROM playlists;
@@ -27,7 +29,7 @@ pub fn reset() -> Result<()> {
 
     // The rows are gone; files that cannot be removed right now (e.g. still
     // open in the player on Windows) are merely orphans.
-    for dir in [paths::files_dir(), paths::covers_dir()] {
+    for dir in [paths::files_dir(), paths::covers_dir(), paths::phigros_dir()] {
         let _ = fs::remove_dir_all(&dir);
     }
     paths::ensure_dirs()?;

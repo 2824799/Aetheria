@@ -11,17 +11,23 @@ class Playlist {
   final String name;
   final String? description;
   final String createdAt;
+  final String? kind;
 
   const Playlist({
     required this.id,
     required this.name,
     this.description,
     required this.createdAt,
+    this.kind,
   });
 
   @override
   int get hashCode =>
-      id.hashCode ^ name.hashCode ^ description.hashCode ^ createdAt.hashCode;
+      id.hashCode ^
+      name.hashCode ^
+      description.hashCode ^
+      createdAt.hashCode ^
+      kind.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -31,5 +37,6 @@ class Playlist {
           id == other.id &&
           name == other.name &&
           description == other.description &&
-          createdAt == other.createdAt;
+          createdAt == other.createdAt &&
+          kind == other.kind;
 }

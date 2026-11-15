@@ -70,7 +70,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.12.0';
 
   @override
-  int get rustContentHash => 450319926;
+  int get rustContentHash => -2017494938;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -99,6 +99,8 @@ abstract class RustLibApi extends BaseApi {
     required String songId,
     String? audioVersionId,
   });
+
+  Future<void> crateApiPlaybackConfigureHitsoundBank({String? seDir});
 
   Future<Playlist> crateApiMusicCreatePlaylist({required String name});
 
@@ -154,6 +156,10 @@ abstract class RustLibApi extends BaseApi {
   Future<AudioVersion> crateApiMusicImportAudioVersionForSong({
     required String songId,
     required String filepath,
+  });
+
+  Future<PhigrosImportResult> crateApiMusicImportPhigrosPackage({
+    required String packageDir,
   });
 
   Future<Song> crateApiMusicImportSong({required String filepath});
@@ -232,6 +238,18 @@ abstract class RustLibApi extends BaseApi {
 
   Future<void> crateApiPlaybackSetOutputLatencyMode({required String mode});
 
+  Future<void> crateApiMusicSetPhigrosSongDifficulty({
+    required String songId,
+    required String difficulty,
+  });
+
+  Future<void> crateApiMusicSetPhigrosSongHitsound({
+    required String songId,
+    required String mode,
+    double? volume,
+    int? offsetMs,
+  });
+
   Future<void> crateApiPlaybackSetPitch({
     required double pitch,
     required String algo,
@@ -247,6 +265,10 @@ abstract class RustLibApi extends BaseApi {
     required double pitch,
     required String algo,
     required double normalizationGain,
+    String? chartPath,
+    required bool hitsoundEnabled,
+    required double hitsoundVolume,
+    required int hitsoundOffsetMs,
   });
 
   Future<void> crateApiPlaybackStopPlayback();
@@ -259,6 +281,13 @@ abstract class RustLibApi extends BaseApi {
 
   Future<SavedLyric> crateApiMusicUpdateLyricOffset({
     required String lyricId,
+    required int offsetMs,
+  });
+
+  Future<void> crateApiPlaybackUpdatePlaybackHitsound({
+    String? chartPath,
+    required bool enabled,
+    required double volume,
     required int offsetMs,
   });
 
@@ -420,6 +449,37 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   );
 
   @override
+  Future<void> crateApiPlaybackConfigureHitsoundBank({String? seDir}) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_opt_String(seDir, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 5,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiPlaybackConfigureHitsoundBankConstMeta,
+        argValues: [seDir],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiPlaybackConfigureHitsoundBankConstMeta =>
+      const TaskConstMeta(
+        debugName: "configure_hitsound_bank",
+        argNames: ["seDir"],
+      );
+
+  @override
   Future<Playlist> crateApiMusicCreatePlaylist({required String name}) {
     return handler.executeNormal(
       NormalTask(
@@ -429,7 +489,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 5,
+            funcId: 6,
             port: port_,
           );
         },
@@ -457,7 +517,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 6,
+            funcId: 7,
             port: port_,
           );
         },
@@ -488,7 +548,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 7,
+            funcId: 8,
             port: port_,
           );
         },
@@ -516,7 +576,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 8,
+            funcId: 9,
             port: port_,
           );
         },
@@ -544,7 +604,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 9,
+            funcId: 10,
             port: port_,
           );
         },
@@ -572,7 +632,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 10,
+            funcId: 11,
             port: port_,
           );
         },
@@ -604,7 +664,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 11,
+            funcId: 12,
             port: port_,
           );
         },
@@ -631,7 +691,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 12)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 13)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_String,
@@ -661,7 +721,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 13,
+            funcId: 14,
             port: port_,
           );
         },
@@ -685,7 +745,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 14)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 15)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_String,
@@ -713,7 +773,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 15,
+            funcId: 16,
             port: port_,
           );
         },
@@ -743,7 +803,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 16,
+            funcId: 17,
             port: port_,
           );
         },
@@ -775,7 +835,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 17,
+            funcId: 18,
             port: port_,
           );
         },
@@ -805,7 +865,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 18,
+            funcId: 19,
             port: port_,
           );
         },
@@ -835,7 +895,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 19,
+            funcId: 20,
             port: port_,
           );
         },
@@ -865,7 +925,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 20,
+            funcId: 21,
             port: port_,
           );
         },
@@ -897,7 +957,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 21,
+            funcId: 22,
             port: port_,
           );
         },
@@ -927,7 +987,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 22,
+            funcId: 23,
             port: port_,
           );
         },
@@ -954,7 +1014,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 23,
+            funcId: 24,
             port: port_,
           );
         },
@@ -981,7 +1041,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 24,
+            funcId: 25,
             port: port_,
           );
         },
@@ -1013,7 +1073,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 25,
+            funcId: 26,
             port: port_,
           );
         },
@@ -1035,6 +1095,39 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<PhigrosImportResult> crateApiMusicImportPhigrosPackage({
+    required String packageDir,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(packageDir, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 27,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_phigros_import_result,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiMusicImportPhigrosPackageConstMeta,
+        argValues: [packageDir],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiMusicImportPhigrosPackageConstMeta =>
+      const TaskConstMeta(
+        debugName: "import_phigros_package",
+        argNames: ["packageDir"],
+      );
+
+  @override
   Future<Song> crateApiMusicImportSong({required String filepath}) {
     return handler.executeNormal(
       NormalTask(
@@ -1044,7 +1137,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 26,
+            funcId: 28,
             port: port_,
           );
         },
@@ -1078,7 +1171,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 27,
+            funcId: 29,
             port: port_,
           );
         },
@@ -1108,7 +1201,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 28,
+            funcId: 30,
             port: port_,
           );
         },
@@ -1136,7 +1229,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 29,
+            funcId: 31,
             port: port_,
           );
         },
@@ -1163,7 +1256,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 30)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 32)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_bool,
@@ -1188,7 +1281,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 31,
+            funcId: 33,
             port: port_,
           );
         },
@@ -1218,7 +1311,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 32,
+            funcId: 34,
             port: port_,
           );
         },
@@ -1251,7 +1344,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 33,
+            funcId: 35,
             port: port_,
           );
         },
@@ -1286,7 +1379,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 34,
+            funcId: 36,
             port: port_,
           );
         },
@@ -1321,7 +1414,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 35,
+            funcId: 37,
             port: port_,
           );
         },
@@ -1348,7 +1441,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 36)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 38)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_unit,
@@ -1376,7 +1469,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 37,
+            funcId: 39,
             port: port_,
           );
         },
@@ -1403,7 +1496,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 38,
+            funcId: 40,
             port: port_,
           );
         },
@@ -1451,7 +1544,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 39,
+            funcId: 41,
             port: port_,
           );
         },
@@ -1505,7 +1598,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 40,
+            funcId: 42,
             port: port_,
           );
         },
@@ -1536,7 +1629,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 41,
+            funcId: 43,
             port: port_,
           );
         },
@@ -1563,7 +1656,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_bool(enabled, serializer);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 42)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 44)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_unit,
@@ -1606,7 +1699,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 43,
+            funcId: 45,
             port: port_,
           );
         },
@@ -1651,7 +1744,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 44,
+            funcId: 46,
             port: port_,
           );
         },
@@ -1679,7 +1772,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 45,
+            funcId: 47,
             port: port_,
           );
         },
@@ -1701,6 +1794,80 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<void> crateApiMusicSetPhigrosSongDifficulty({
+    required String songId,
+    required String difficulty,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(songId, serializer);
+          sse_encode_String(difficulty, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 48,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiMusicSetPhigrosSongDifficultyConstMeta,
+        argValues: [songId, difficulty],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiMusicSetPhigrosSongDifficultyConstMeta =>
+      const TaskConstMeta(
+        debugName: "set_phigros_song_difficulty",
+        argNames: ["songId", "difficulty"],
+      );
+
+  @override
+  Future<void> crateApiMusicSetPhigrosSongHitsound({
+    required String songId,
+    required String mode,
+    double? volume,
+    int? offsetMs,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(songId, serializer);
+          sse_encode_String(mode, serializer);
+          sse_encode_opt_box_autoadd_f_64(volume, serializer);
+          sse_encode_opt_box_autoadd_i_32(offsetMs, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 49,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiMusicSetPhigrosSongHitsoundConstMeta,
+        argValues: [songId, mode, volume, offsetMs],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiMusicSetPhigrosSongHitsoundConstMeta =>
+      const TaskConstMeta(
+        debugName: "set_phigros_song_hitsound",
+        argNames: ["songId", "mode", "volume", "offsetMs"],
+      );
+
+  @override
   Future<void> crateApiPlaybackSetPitch({
     required double pitch,
     required String algo,
@@ -1714,7 +1881,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 46,
+            funcId: 50,
             port: port_,
           );
         },
@@ -1742,7 +1909,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 47,
+            funcId: 51,
             port: port_,
           );
         },
@@ -1773,7 +1940,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 48,
+            funcId: 52,
             port: port_,
           );
         },
@@ -1798,6 +1965,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required double pitch,
     required String algo,
     required double normalizationGain,
+    String? chartPath,
+    required bool hitsoundEnabled,
+    required double hitsoundVolume,
+    required int hitsoundOffsetMs,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -1808,10 +1979,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_f_64(pitch, serializer);
           sse_encode_String(algo, serializer);
           sse_encode_f_32(normalizationGain, serializer);
+          sse_encode_opt_String(chartPath, serializer);
+          sse_encode_bool(hitsoundEnabled, serializer);
+          sse_encode_f_32(hitsoundVolume, serializer);
+          sse_encode_i_32(hitsoundOffsetMs, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 49,
+            funcId: 53,
             port: port_,
           );
         },
@@ -1820,7 +1995,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateApiPlaybackStartPlaybackConstMeta,
-        argValues: [path, volume, pitch, algo, normalizationGain],
+        argValues: [
+          path,
+          volume,
+          pitch,
+          algo,
+          normalizationGain,
+          chartPath,
+          hitsoundEnabled,
+          hitsoundVolume,
+          hitsoundOffsetMs,
+        ],
         apiImpl: this,
       ),
     );
@@ -1829,7 +2014,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateApiPlaybackStartPlaybackConstMeta =>
       const TaskConstMeta(
         debugName: "start_playback",
-        argNames: ["path", "volume", "pitch", "algo", "normalizationGain"],
+        argNames: [
+          "path",
+          "volume",
+          "pitch",
+          "algo",
+          "normalizationGain",
+          "chartPath",
+          "hitsoundEnabled",
+          "hitsoundVolume",
+          "hitsoundOffsetMs",
+        ],
       );
 
   @override
@@ -1841,7 +2036,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 50,
+            funcId: 54,
             port: port_,
           );
         },
@@ -1875,7 +2070,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 51,
+            funcId: 55,
             port: port_,
           );
         },
@@ -1909,7 +2104,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 52,
+            funcId: 56,
             port: port_,
           );
         },
@@ -1931,6 +2126,45 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<void> crateApiPlaybackUpdatePlaybackHitsound({
+    String? chartPath,
+    required bool enabled,
+    required double volume,
+    required int offsetMs,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_opt_String(chartPath, serializer);
+          sse_encode_bool(enabled, serializer);
+          sse_encode_f_32(volume, serializer);
+          sse_encode_i_32(offsetMs, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 57,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiPlaybackUpdatePlaybackHitsoundConstMeta,
+        argValues: [chartPath, enabled, volume, offsetMs],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiPlaybackUpdatePlaybackHitsoundConstMeta =>
+      const TaskConstMeta(
+        debugName: "update_playback_hitsound",
+        argNames: ["chartPath", "enabled", "volume", "offsetMs"],
+      );
+
+  @override
   Future<void> crateApiMusicUpdateSongMetadata({
     required String songId,
     required String title,
@@ -1946,7 +2180,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 53,
+            funcId: 58,
             port: port_,
           );
         },
@@ -1985,7 +2219,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 54,
+            funcId: 59,
             port: port_,
           );
         },
@@ -2076,6 +2310,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  PhigrosSongMeta dco_decode_box_autoadd_phigros_song_meta(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_phigros_song_meta(raw);
+  }
+
+  @protected
   SavedLyric dco_decode_box_autoadd_saved_lyric(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_saved_lyric(raw);
@@ -2123,6 +2363,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     return (raw as List<dynamic>)
         .map(dco_decode_local_lyric_candidate)
         .toList();
+  }
+
+  @protected
+  List<PhigrosChartMeta> dco_decode_list_phigros_chart_meta(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_phigros_chart_meta).toList();
   }
 
   @protected
@@ -2189,9 +2435,73 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  PhigrosSongMeta? dco_decode_opt_box_autoadd_phigros_song_meta(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_phigros_song_meta(raw);
+  }
+
+  @protected
   SavedLyric? dco_decode_opt_box_autoadd_saved_lyric(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_box_autoadd_saved_lyric(raw);
+  }
+
+  @protected
+  PhigrosChartMeta dco_decode_phigros_chart_meta(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 15)
+      throw Exception('unexpected arr length: expect 15 but see ${arr.length}');
+    return PhigrosChartMeta(
+      difficulty: dco_decode_String(arr[0]),
+      sortRank: dco_decode_i_32(arr[1]),
+      rating: dco_decode_f_64(arr[2]),
+      charter: dco_decode_String(arr[3]),
+      bpmMin: dco_decode_f_64(arr[4]),
+      bpmMax: dco_decode_f_64(arr[5]),
+      chartOffsetMs: dco_decode_i_32(arr[6]),
+      noteCount: dco_decode_i_32(arr[7]),
+      tapCount: dco_decode_i_32(arr[8]),
+      dragCount: dco_decode_i_32(arr[9]),
+      holdCount: dco_decode_i_32(arr[10]),
+      flickCount: dco_decode_i_32(arr[11]),
+      audioRelPath: dco_decode_opt_String(arr[12]),
+      coverRelPath: dco_decode_opt_String(arr[13]),
+      chartRelPath: dco_decode_String(arr[14]),
+    );
+  }
+
+  @protected
+  PhigrosImportResult dco_decode_phigros_import_result(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    return PhigrosImportResult(
+      playlistId: dco_decode_String(arr[0]),
+      importedCount: dco_decode_i_32(arr[1]),
+      updatedCount: dco_decode_i_32(arr[2]),
+      chartCount: dco_decode_i_32(arr[3]),
+    );
+  }
+
+  @protected
+  PhigrosSongMeta dco_decode_phigros_song_meta(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 9)
+      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
+    return PhigrosSongMeta(
+      phigrosId: dco_decode_String(arr[0]),
+      chapter: dco_decode_String(arr[1]),
+      composer: dco_decode_String(arr[2]),
+      illustrator: dco_decode_String(arr[3]),
+      selectedDifficulty: dco_decode_String(arr[4]),
+      hitsoundMode: dco_decode_String(arr[5]),
+      hitsoundVolume: dco_decode_opt_box_autoadd_f_64(arr[6]),
+      hitsoundOffsetMs: dco_decode_opt_box_autoadd_i_32(arr[7]),
+      charts: dco_decode_list_phigros_chart_meta(arr[8]),
+    );
   }
 
   @protected
@@ -2210,13 +2520,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   Playlist dco_decode_playlist(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 4)
-      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
     return Playlist(
       id: dco_decode_String(arr[0]),
       name: dco_decode_String(arr[1]),
       description: dco_decode_opt_String(arr[2]),
       createdAt: dco_decode_String(arr[3]),
+      kind: dco_decode_opt_String(arr[4]),
     );
   }
 
@@ -2261,8 +2572,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   Song dco_decode_song(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 10)
-      throw Exception('unexpected arr length: expect 10 but see ${arr.length}');
+    if (arr.length != 11)
+      throw Exception('unexpected arr length: expect 11 but see ${arr.length}');
     return Song(
       id: dco_decode_String(arr[0]),
       title: dco_decode_String(arr[1]),
@@ -2274,6 +2585,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       createdAt: dco_decode_String(arr[7]),
       versions: dco_decode_list_audio_version(arr[8]),
       tags: dco_decode_list_tag(arr[9]),
+      phigros: dco_decode_opt_box_autoadd_phigros_song_meta(arr[10]),
     );
   }
 
@@ -2407,6 +2719,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  PhigrosSongMeta sse_decode_box_autoadd_phigros_song_meta(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_phigros_song_meta(deserializer));
+  }
+
+  @protected
   SavedLyric sse_decode_box_autoadd_saved_lyric(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_saved_lyric(deserializer));
@@ -2472,6 +2792,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var ans_ = <LocalLyricCandidate>[];
     for (var idx_ = 0; idx_ < len_; ++idx_) {
       ans_.add(sse_decode_local_lyric_candidate(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<PhigrosChartMeta> sse_decode_list_phigros_chart_meta(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <PhigrosChartMeta>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_phigros_chart_meta(deserializer));
     }
     return ans_;
   }
@@ -2584,6 +2918,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  PhigrosSongMeta? sse_decode_opt_box_autoadd_phigros_song_meta(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_phigros_song_meta(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
   SavedLyric? sse_decode_opt_box_autoadd_saved_lyric(
     SseDeserializer deserializer,
   ) {
@@ -2594,6 +2941,85 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     } else {
       return null;
     }
+  }
+
+  @protected
+  PhigrosChartMeta sse_decode_phigros_chart_meta(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_difficulty = sse_decode_String(deserializer);
+    var var_sortRank = sse_decode_i_32(deserializer);
+    var var_rating = sse_decode_f_64(deserializer);
+    var var_charter = sse_decode_String(deserializer);
+    var var_bpmMin = sse_decode_f_64(deserializer);
+    var var_bpmMax = sse_decode_f_64(deserializer);
+    var var_chartOffsetMs = sse_decode_i_32(deserializer);
+    var var_noteCount = sse_decode_i_32(deserializer);
+    var var_tapCount = sse_decode_i_32(deserializer);
+    var var_dragCount = sse_decode_i_32(deserializer);
+    var var_holdCount = sse_decode_i_32(deserializer);
+    var var_flickCount = sse_decode_i_32(deserializer);
+    var var_audioRelPath = sse_decode_opt_String(deserializer);
+    var var_coverRelPath = sse_decode_opt_String(deserializer);
+    var var_chartRelPath = sse_decode_String(deserializer);
+    return PhigrosChartMeta(
+      difficulty: var_difficulty,
+      sortRank: var_sortRank,
+      rating: var_rating,
+      charter: var_charter,
+      bpmMin: var_bpmMin,
+      bpmMax: var_bpmMax,
+      chartOffsetMs: var_chartOffsetMs,
+      noteCount: var_noteCount,
+      tapCount: var_tapCount,
+      dragCount: var_dragCount,
+      holdCount: var_holdCount,
+      flickCount: var_flickCount,
+      audioRelPath: var_audioRelPath,
+      coverRelPath: var_coverRelPath,
+      chartRelPath: var_chartRelPath,
+    );
+  }
+
+  @protected
+  PhigrosImportResult sse_decode_phigros_import_result(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_playlistId = sse_decode_String(deserializer);
+    var var_importedCount = sse_decode_i_32(deserializer);
+    var var_updatedCount = sse_decode_i_32(deserializer);
+    var var_chartCount = sse_decode_i_32(deserializer);
+    return PhigrosImportResult(
+      playlistId: var_playlistId,
+      importedCount: var_importedCount,
+      updatedCount: var_updatedCount,
+      chartCount: var_chartCount,
+    );
+  }
+
+  @protected
+  PhigrosSongMeta sse_decode_phigros_song_meta(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_phigrosId = sse_decode_String(deserializer);
+    var var_chapter = sse_decode_String(deserializer);
+    var var_composer = sse_decode_String(deserializer);
+    var var_illustrator = sse_decode_String(deserializer);
+    var var_selectedDifficulty = sse_decode_String(deserializer);
+    var var_hitsoundMode = sse_decode_String(deserializer);
+    var var_hitsoundVolume = sse_decode_opt_box_autoadd_f_64(deserializer);
+    var var_hitsoundOffsetMs = sse_decode_opt_box_autoadd_i_32(deserializer);
+    var var_charts = sse_decode_list_phigros_chart_meta(deserializer);
+    return PhigrosSongMeta(
+      phigrosId: var_phigrosId,
+      chapter: var_chapter,
+      composer: var_composer,
+      illustrator: var_illustrator,
+      selectedDifficulty: var_selectedDifficulty,
+      hitsoundMode: var_hitsoundMode,
+      hitsoundVolume: var_hitsoundVolume,
+      hitsoundOffsetMs: var_hitsoundOffsetMs,
+      charts: var_charts,
+    );
   }
 
   @protected
@@ -2614,11 +3040,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_name = sse_decode_String(deserializer);
     var var_description = sse_decode_opt_String(deserializer);
     var var_createdAt = sse_decode_String(deserializer);
+    var var_kind = sse_decode_opt_String(deserializer);
     return Playlist(
       id: var_id,
       name: var_name,
       description: var_description,
       createdAt: var_createdAt,
+      kind: var_kind,
     );
   }
 
@@ -2683,6 +3111,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_createdAt = sse_decode_String(deserializer);
     var var_versions = sse_decode_list_audio_version(deserializer);
     var var_tags = sse_decode_list_tag(deserializer);
+    var var_phigros = sse_decode_opt_box_autoadd_phigros_song_meta(
+      deserializer,
+    );
     return Song(
       id: var_id,
       title: var_title,
@@ -2694,6 +3125,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       createdAt: var_createdAt,
       versions: var_versions,
       tags: var_tags,
+      phigros: var_phigros,
     );
   }
 
@@ -2799,6 +3231,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_box_autoadd_phigros_song_meta(
+    PhigrosSongMeta self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_phigros_song_meta(self, serializer);
+  }
+
+  @protected
   void sse_encode_box_autoadd_saved_lyric(
     SavedLyric self,
     SseSerializer serializer,
@@ -2861,6 +3302,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_i_32(self.length, serializer);
     for (final item in self) {
       sse_encode_local_lyric_candidate(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_phigros_chart_meta(
+    List<PhigrosChartMeta> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_phigros_chart_meta(item, serializer);
     }
   }
 
@@ -2957,6 +3410,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_opt_box_autoadd_phigros_song_meta(
+    PhigrosSongMeta? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_phigros_song_meta(self, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_opt_box_autoadd_saved_lyric(
     SavedLyric? self,
     SseSerializer serializer,
@@ -2967,6 +3433,58 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     if (self != null) {
       sse_encode_box_autoadd_saved_lyric(self, serializer);
     }
+  }
+
+  @protected
+  void sse_encode_phigros_chart_meta(
+    PhigrosChartMeta self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.difficulty, serializer);
+    sse_encode_i_32(self.sortRank, serializer);
+    sse_encode_f_64(self.rating, serializer);
+    sse_encode_String(self.charter, serializer);
+    sse_encode_f_64(self.bpmMin, serializer);
+    sse_encode_f_64(self.bpmMax, serializer);
+    sse_encode_i_32(self.chartOffsetMs, serializer);
+    sse_encode_i_32(self.noteCount, serializer);
+    sse_encode_i_32(self.tapCount, serializer);
+    sse_encode_i_32(self.dragCount, serializer);
+    sse_encode_i_32(self.holdCount, serializer);
+    sse_encode_i_32(self.flickCount, serializer);
+    sse_encode_opt_String(self.audioRelPath, serializer);
+    sse_encode_opt_String(self.coverRelPath, serializer);
+    sse_encode_String(self.chartRelPath, serializer);
+  }
+
+  @protected
+  void sse_encode_phigros_import_result(
+    PhigrosImportResult self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.playlistId, serializer);
+    sse_encode_i_32(self.importedCount, serializer);
+    sse_encode_i_32(self.updatedCount, serializer);
+    sse_encode_i_32(self.chartCount, serializer);
+  }
+
+  @protected
+  void sse_encode_phigros_song_meta(
+    PhigrosSongMeta self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.phigrosId, serializer);
+    sse_encode_String(self.chapter, serializer);
+    sse_encode_String(self.composer, serializer);
+    sse_encode_String(self.illustrator, serializer);
+    sse_encode_String(self.selectedDifficulty, serializer);
+    sse_encode_String(self.hitsoundMode, serializer);
+    sse_encode_opt_box_autoadd_f_64(self.hitsoundVolume, serializer);
+    sse_encode_opt_box_autoadd_i_32(self.hitsoundOffsetMs, serializer);
+    sse_encode_list_phigros_chart_meta(self.charts, serializer);
   }
 
   @protected
@@ -2986,6 +3504,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.name, serializer);
     sse_encode_opt_String(self.description, serializer);
     sse_encode_String(self.createdAt, serializer);
+    sse_encode_opt_String(self.kind, serializer);
   }
 
   @protected
@@ -3028,6 +3547,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.createdAt, serializer);
     sse_encode_list_audio_version(self.versions, serializer);
     sse_encode_list_tag(self.tags, serializer);
+    sse_encode_opt_box_autoadd_phigros_song_meta(self.phigros, serializer);
   }
 
   @protected

@@ -11,4 +11,7 @@ pub mod playlist;
 pub mod song;
 
 pub use playlist::Playlist;
-pub use song::{AudioVersion, LocalLyricCandidate, PreviewInfo, SavedLyric, Song, Tag};
+pub use song::{
+    AudioVersion, LocalLyricCandidate, PhigrosChartMeta, PhigrosImportResult, PhigrosSongMeta,
+    PreviewInfo, SavedLyric, Song, Tag,
+};

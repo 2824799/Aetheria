@@ -20,6 +20,7 @@ import 'package:aetheria/features/library/ui/settings_modal.dart';
 import 'package:aetheria/features/library/ui/song_list_summary.dart';
 import 'package:aetheria/features/library/ui/tag_filter.dart';
 import 'package:aetheria/features/library/ui/tag_manager_modal.dart';
+import 'package:aetheria/features/phigros/ui/phigros_zone_header.dart';
 import 'package:aetheria/src/rust/models/song.dart';
 
 export 'package:aetheria/features/layout/mobile/mobile_song_reveal.dart'
@@ -189,6 +190,16 @@ class _MobileLayoutState extends State<MobileLayout>
                 ),
               ),
               const SizedBox(height: AetherSpace.md),
+              if (library.isPhigrosPlaylistActive)
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(
+                    AetherSpace.xl,
+                    0,
+                    AetherSpace.xl,
+                    AetherSpace.md,
+                  ),
+                  child: PhigrosZoneHeader(compact: true),
+                ),
               Expanded(
                 child: _buildSongList(
                   library,

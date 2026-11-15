@@ -1,6 +1,7 @@
 //! Local audio decoding, DSP, device output and profiling.
 
 pub mod dsp;
+pub mod hitsound;
 pub mod player;
 pub mod profiler;
 pub mod rubberband;

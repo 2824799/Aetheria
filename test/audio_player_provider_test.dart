@@ -22,12 +22,27 @@ class _PlaybackApi extends Fake implements RustLibApi {
   }
 
   @override
+  Future<void> crateApiPlaybackConfigureHitsoundBank({String? seDir}) async {}
+
+  @override
+  Future<void> crateApiPlaybackUpdatePlaybackHitsound({
+    String? chartPath,
+    required bool enabled,
+    required double volume,
+    required int offsetMs,
+  }) async {}
+
+  @override
   Future<void> crateApiPlaybackStartPlayback({
     required String path,
     required double volume,
     required double pitch,
     required String algo,
     required double normalizationGain,
+    String? chartPath,
+    required bool hitsoundEnabled,
+    required double hitsoundVolume,
+    required int hitsoundOffsetMs,
   }) async {
     paths.add(path);
     if (!started.isCompleted) started.complete();

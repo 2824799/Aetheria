@@ -4,8 +4,11 @@ import 'package:aetheria/core/providers/library_provider.dart';
 import 'package:aetheria/core/widgets/aether_menu.dart';
 import 'package:aetheria/core/widgets/aether_toast.dart';
 import 'package:aetheria/features/library/song_actions.dart';
+import 'package:aetheria/features/phigros/phigros_badges.dart';
+import 'package:aetheria/src/rust/models/song.dart';
 
 const String _playlistPrefix = 'playlist:';
+const String _phigrosDiffPrefix = 'phi_diff:';
 
 /// Opens the row context menu for [songIds] and runs the chosen command.
 ///
@@ -17,15 +20,35 @@ Future<void> showSongTableContextMenu({
   required LibraryProvider library,
   required VoidCallback onDeleted,
 }) async {
+  Song? singlePhigrosSong;
+  if (songIds.length == 1) {
+    final targetId = songIds.first;
+    for (final s in library.songs) {
+      if (s.id == targetId && s.phigros != null) {
+        singlePhigrosSong = s;
+        break;
+      }
+    }
+  }
   final command = await showAetherMenu<String>(
     context: context,
     globalPosition: position,
-    items: _menuItems(library),
+    items: _menuItems(library, singlePhigrosSong),
   );
   if (command == null || !context.mounted) return;
 
   final playlistId = library.activePlaylistId;
   try {
+    if (command.startsWith(_phigrosDiffPrefix) && singlePhigrosSong != null) {
+      final diff = command.substring(_phigrosDiffPrefix.length);
+      await changePhigrosDifficultyAndSync(
+        context,
+        library,
+        singlePhigrosSong,
+        diff,
+      );
+      return;
+    }
     if (command.startsWith(_playlistPrefix)) {
       final id = command.substring(_playlistPrefix.length);
       for (final playlist in library.playlists) {
@@ -64,10 +87,24 @@ Future<void> showSongTableContextMenu({
   }
 }
 
-List<AetherMenuItem<String>> _menuItems(LibraryProvider library) {
+List<AetherMenuItem<String>> _menuItems(
+  LibraryProvider library,
+  Song? singlePhigrosSong,
+) {
   final inPlaylist = library.activePlaylistId != null;
   final clipboardCount = library.clipboard?.songIds.length;
+  final phigros = singlePhigrosSong?.phigros;
   return [
+    if (phigros != null && phigros.charts.isNotEmpty) ...[
+      for (final chart in phigros.charts)
+        AetherMenuItem(
+          value: '$_phigrosDiffPrefix${chart.difficulty}',
+          label:
+              '切换难度 · ${formatPhigrosDiffBadgeLabel(chart)}${chart.difficulty == phigros.selectedDifficulty ? ' ✓' : ''}',
+          icon: Icons.sports_esports_rounded,
+        ),
+      const AetherMenuItem.divider(),
+    ],
     const AetherMenuItem(
       value: 'copy',
       label: '复制所选歌曲',

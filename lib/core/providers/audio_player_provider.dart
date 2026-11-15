@@ -35,6 +35,12 @@ class AudioPlayerProvider extends ChangeNotifier {
   static const String _resamplerQualityKey = 'resampler-quality';
   static const String _outputLatencyModeKey = 'output-latency-mode';
   static const String _developerModeKey = 'developer-mode-enabled';
+  static const String _phigrosHitsoundEnabledKey =
+      'aetheria-phigros-hitsound-enabled';
+  static const String _phigrosHitsoundVolumeKey =
+      'aetheria-phigros-hitsound-volume';
+  static const String _phigrosHitsoundOffsetMsKey =
+      'aetheria-phigros-hitsound-offset-ms';
 
   /// Loudness assumed for versions that have not been measured, in dBFS.
   static const double _defaultLoudnessDb = -15.0;
@@ -77,11 +83,17 @@ class AudioPlayerProvider extends ChangeNotifier {
   AudioOutputInfo? audioOutputInfo;
   bool developerModeEnabled = false;
 
+  bool phigrosHitsoundEnabled = true;
+  double phigrosHitsoundVolume = 0.75;
+  int phigrosHitsoundOffsetMs = 0;
+
   bool isDetailOpen = false;
   String activeTab = 'lyrics';
 
   final math.Random _random = math.Random();
   String _libraryPath = '';
+  String _configuredSeLibraryPath = '';
+  String? _activeStreamAudioPath;
   Timer? _positionTimer;
   Timer? _outputInfoTimer;
   Timer? _audioRouteChangeDebounce;
@@ -162,6 +174,12 @@ class AudioPlayerProvider extends ChangeNotifier {
       prefs.getString(_outputLatencyModeKey),
     );
     developerModeEnabled = prefs.getBool(_developerModeKey) ?? false;
+    phigrosHitsoundEnabled = prefs.getBool(_phigrosHitsoundEnabledKey) ?? true;
+    phigrosHitsoundVolume = (prefs.getDouble(_phigrosHitsoundVolumeKey) ?? 0.75)
+        .clamp(0.0, 1.5)
+        .toDouble();
+    phigrosHitsoundOffsetMs =
+        (prefs.getInt(_phigrosHitsoundOffsetMsKey) ?? 0).clamp(-500, 500);
   }
 
   Future<void> _pushSettingsToEngine() async {
@@ -171,6 +189,8 @@ class AudioPlayerProvider extends ChangeNotifier {
     await playback.setVolume(volume: volume);
     await _pushQualitySettings();
     await _pushPitch();
+    await _ensureHitsoundBankConfigured();
+    await _pushHitsoundSettings();
   }
 
   /// Announces a changed setting, persists it and forwards it to the engine.
@@ -326,6 +346,102 @@ class AudioPlayerProvider extends ChangeNotifier {
     await prefs.setBool(_developerModeKey, value);
   }
 
+  Future<void> setPhigrosHitsoundEnabled(bool value) {
+    phigrosHitsoundEnabled = value;
+    return _applySetting(
+      persist: (prefs) => prefs.setBool(_phigrosHitsoundEnabledKey, value),
+      push: _pushHitsoundSettings,
+    );
+  }
+
+  Future<void> setPhigrosHitsoundVolume(double value) {
+    phigrosHitsoundVolume = value.clamp(0.0, 1.5).toDouble();
+    return _applySetting(
+      persist: (prefs) =>
+          prefs.setDouble(_phigrosHitsoundVolumeKey, phigrosHitsoundVolume),
+      push: _pushHitsoundSettings,
+    );
+  }
+
+  Future<void> setPhigrosHitsoundOffsetMs(int value) {
+    phigrosHitsoundOffsetMs = value.clamp(-500, 500);
+    return _applySetting(
+      persist: (prefs) =>
+          prefs.setInt(_phigrosHitsoundOffsetMsKey, phigrosHitsoundOffsetMs),
+      push: _pushHitsoundSettings,
+    );
+  }
+
+  /// Resolves the effective chart path & hit-sound parameters for [song].
+  ({String? chartPath, bool enabled, double volume, int offsetMs})
+  resolveHitsoundForSong(Song? song) {
+    final phi = song?.phigros;
+    if (phi == null || phi.charts.isEmpty) {
+      return (
+        chartPath: null,
+        enabled: false,
+        volume: phigrosHitsoundVolume,
+        offsetMs: phigrosHitsoundOffsetMs,
+      );
+    }
+    final chart = activePhigrosChartFor(phi);
+    final chartPath = chart == null
+        ? null
+        : phigrosChartPath(_libraryPath, chart.chartRelPath);
+    final enabled = switch (phi.hitsoundMode) {
+      'on' => true,
+      'off' => false,
+      _ => phigrosHitsoundEnabled,
+    };
+    final effectiveVolume = (phi.hitsoundVolume ?? phigrosHitsoundVolume)
+        .clamp(0.0, 1.5)
+        .toDouble();
+    final effectiveOffsetMs = (phi.hitsoundOffsetMs ?? phigrosHitsoundOffsetMs)
+        .clamp(-500, 500);
+    return (
+      chartPath: chartPath,
+      enabled: enabled,
+      volume: effectiveVolume,
+      offsetMs: effectiveOffsetMs,
+    );
+  }
+
+  /// Currently selected difficulty chart for [phi], or its first available chart.
+  static PhigrosChartMeta? activePhigrosChartFor(PhigrosSongMeta phi) {
+    for (final chart in phi.charts) {
+      if (chart.difficulty == phi.selectedDifficulty) {
+        return chart;
+      }
+    }
+    return phi.charts.firstOrNull;
+  }
+
+  Future<void> _ensureHitsoundBankConfigured() async {
+    final seDir = phigrosSeDirPath(_libraryPath);
+    if (seDir == null || _libraryPath == _configuredSeLibraryPath) {
+      return;
+    }
+    try {
+      await playback.configureHitsoundBank(seDir: seDir);
+      _configuredSeLibraryPath = _libraryPath;
+    } catch (_) {
+      // Bank setup will retry before opening the next stream.
+    }
+  }
+
+  Future<void> _pushHitsoundSettings() async {
+    if (!_hasPreparedPlayback && playingSong == null) {
+      return;
+    }
+    final resolved = resolveHitsoundForSong(playingSong);
+    await playback.updatePlaybackHitsound(
+      chartPath: resolved.chartPath,
+      enabled: resolved.enabled,
+      volume: resolved.volume,
+      offsetMs: resolved.offsetMs,
+    );
+  }
+
   void setVolume(double value) {
     volume = value.clamp(0.0, 1.0).toDouble();
     notifyListeners();
@@ -469,6 +585,20 @@ class AudioPlayerProvider extends ChangeNotifier {
         (throw const FormatException('音乐库中的音频文件名无效。'));
   }
 
+  Future<String> _resolveSongAudioPath(Song? song, AudioVersion version) async {
+    final phi = song?.phigros;
+    if (phi != null) {
+      final chartAudioRel = activePhigrosChartFor(phi)?.audioRelPath;
+      if (chartAudioRel != null && chartAudioRel.isNotEmpty) {
+        final candidate = managedAudioPath(_libraryPath, chartAudioRel);
+        if (candidate != null && await File(candidate).exists()) {
+          return candidate;
+        }
+      }
+    }
+    return _audioPath(version);
+  }
+
   /// Gain that pulls louder tracks down towards the quietest primary version
   /// in the queue, scaled by [volumeBalanceStrength].
   double _normalizationGain(AudioVersion version) {
@@ -551,18 +681,25 @@ class AudioPlayerProvider extends ChangeNotifier {
         : startPosition;
     _hasPreparedPlayback = false;
     try {
-      final path = _audioPath(version);
+      await _ensureHitsoundBankConfigured();
+      final path = await _resolveSongAudioPath(playingSong, version);
       if (!await File(path).exists()) {
         throw Exception('音频文件不存在: $path');
       }
       if (superseded()) return;
+      final hitsound = resolveHitsoundForSong(playingSong);
       await playback.startPlayback(
         path: path,
         volume: volume,
         pitch: _effectivePitchSemitones,
         algo: pitchAlgorithm,
         normalizationGain: _normalizationGain(version),
+        chartPath: hitsound.chartPath,
+        hitsoundEnabled: hitsound.enabled,
+        hitsoundVolume: hitsound.volume,
+        hitsoundOffsetMs: hitsound.offsetMs,
       );
+      _activeStreamAudioPath = path;
       if (superseded()) return;
       if (position > Duration.zero) {
         await playback.seekPlayback(secs: position.inMilliseconds / 1000.0);
@@ -929,6 +1066,11 @@ class AudioPlayerProvider extends ChangeNotifier {
     totalDuration = Duration(milliseconds: (version.duration * 1000).round());
     _hasPreparedPlayback = false;
     _pendingRestorePosition = null;
+    if (song.phigros != null && activeTab == 'lyrics') {
+      activeTab = 'phigros';
+    } else if (song.phigros == null && activeTab == 'phigros') {
+      activeTab = 'lyrics';
+    }
   }
 
   List<Song> _queueWith(Song song) {
@@ -950,6 +1092,25 @@ class AudioPlayerProvider extends ChangeNotifier {
     }
     if (isActive || isPlayingSong) {
       _publishPlaybackState();
+    }
+    if (isPlayingSong && _hasPreparedPlayback) {
+      unawaited(_syncPlayingPhigrosState(song));
+    }
+  }
+
+  Future<void> _syncPlayingPhigrosState(Song song) async {
+    final version = playingVersion;
+    if (version == null) return;
+    try {
+      final targetPath = await _resolveSongAudioPath(song, version);
+      if (playingSong?.id != song.id || !_hasPreparedPlayback) return;
+      if (_activeStreamAudioPath != null && _activeStreamAudioPath != targetPath) {
+        await _restartStream();
+      } else {
+        await _pushHitsoundSettings();
+      }
+    } catch (error) {
+      debugPrint('Failed to sync live hitsound settings: $error');
     }
   }
 
@@ -996,6 +1157,12 @@ class AudioPlayerProvider extends ChangeNotifier {
 
   void setActiveSong(Song? song) {
     activeSong = song;
+    if (song != null && song.phigros != null && activeTab == 'lyrics') {
+      activeTab = 'phigros';
+    } else if ((song == null || song.phigros == null) &&
+        activeTab == 'phigros') {
+      activeTab = 'lyrics';
+    }
     notifyListeners();
   }
 

@@ -1,6 +1,6 @@
 //! Song and audio-version queries and mutations.
 
-use super::{paths, probe, LibraryError, Result};
+use super::{paths, phigros, probe, LibraryError, Result};
 use crate::database::connection;
 use crate::models::{AudioVersion, Song, Tag};
 use rusqlite::{params, Connection, OptionalExtension, Row};
@@ -29,6 +29,7 @@ fn song_from_row(row: &Row<'_>) -> rusqlite::Result<Song> {
         created_at: row.get::<_, Option<String>>(7)?.unwrap_or_default(),
         versions: Vec::new(),
         tags: Vec::new(),
+        phigros: None,
     })
 }
 
@@ -108,6 +109,12 @@ pub fn all() -> Result<Vec<Song>> {
             songs[index].tags.push(tag);
         }
     }
+    let mut phigros_map = phigros::load_all_meta(&conn)?;
+    for song in &mut songs {
+        if let Some(meta) = phigros_map.remove(&song.id) {
+            song.phigros = Some(meta);
+        }
+    }
     Ok(songs)
 }
 
@@ -134,6 +141,7 @@ pub(super) fn load(conn: &Connection, song_id: &str) -> Result<Song> {
         )?
         .query_map(params![song_id], tag_from_row)?
         .collect::<rusqlite::Result<_>>()?;
+    song.phigros = phigros::load_meta(conn, song_id)?;
     Ok(song)
 }
 
@@ -195,9 +203,26 @@ pub fn delete(song_id: &str) -> Result<()> {
         .prepare("SELECT filepath FROM audio_files WHERE song_id = ?1")?
         .query_map(params![song_id], |row| row.get::<_, String>(0))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
+    let phigros_chart_files = tx
+        .prepare("SELECT chart_rel_path, audio_rel_path, cover_rel_path FROM phigros_charts WHERE song_id = ?1")?
+        .query_map(params![song_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<String>>(2)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
 
     // Explicit deletes keep databases created before the cascades consistent.
-    for table in ["lyrics", "playlist_songs", "song_tags", "audio_files"] {
+    for table in [
+        "lyrics",
+        "playlist_songs",
+        "song_tags",
+        "phigros_charts",
+        "phigros_songs",
+        "audio_files",
+    ] {
         tx.execute(
             &format!("DELETE FROM {table} WHERE song_id = ?1"),
             params![song_id],
@@ -209,6 +234,17 @@ pub fn delete(song_id: &str) -> Result<()> {
     // Files go last: a failed transaction must not leave rows without audio.
     for stored in &audio_paths {
         remove_audio_file(stored);
+    }
+    for (chart_rel, diff_audio_rel, diff_cover_rel) in &phigros_chart_files {
+        if let Some(p) = paths::phigros_chart_file(chart_rel) {
+            let _ = fs::remove_file(p);
+        }
+        if let Some(audio) = diff_audio_rel.as_deref() {
+            remove_audio_file(audio);
+        }
+        if let Some(cover) = diff_cover_rel.as_deref().and_then(paths::cover_file) {
+            let _ = fs::remove_file(cover);
+        }
     }
     if let Some(cover) = cover_path.as_deref().and_then(paths::cover_file) {
         let _ = fs::remove_file(cover);

@@ -186,5 +186,66 @@ void main() {
               as Map<String, dynamic>;
       expect(manifest['tagOrder'], library.exportTagOrderPayload());
     });
+
+    test('manifest includes covers/ and phigros/ alongside files/', () async {
+      final tempLibDir = await Directory.systemTemp.createTemp('aetheria_phi_manifest_');
+      addTearDown(() async {
+        if (await tempLibDir.exists()) {
+          await tempLibDir.delete(recursive: true);
+        }
+      });
+
+      await Directory('${tempLibDir.path}/files').create(recursive: true);
+      await Directory('${tempLibDir.path}/covers').create(recursive: true);
+      await Directory('${tempLibDir.path}/phigros/charts').create(recursive: true);
+      await Directory('${tempLibDir.path}/phigros/se').create(recursive: true);
+      await File('${tempLibDir.path}/database.db').writeAsBytes([1, 2, 3]);
+      await File('${tempLibDir.path}/files/phi_a.flac').writeAsBytes([4, 5]);
+      await File('${tempLibDir.path}/covers/phi_a.jpg').writeAsBytes([6, 7]);
+      await File('${tempLibDir.path}/phigros/charts/a_IN.json').writeAsString('{"notes":[]}');
+      await File('${tempLibDir.path}/phigros/se/tap.wav').writeAsBytes([8, 9]);
+
+      final library = LibraryProvider()..libraryPath = tempLibDir.path;
+      addTearDown(library.dispose);
+
+      final phiSync = SyncProvider();
+      addTearDown(phiSync.dispose);
+      await phiSync.start(library);
+
+      final pendingReq = client
+          .openUrl('POST', Uri.parse('http://127.0.0.1:${phiSync.localPort}/sync/request'))
+          .then((req) async {
+            req.headers.contentType = ContentType.json;
+            req.write(approvalBody('MobilePeer'));
+            final resp = await req.close();
+            return jsonDecode(await utf8.decoder.bind(resp).join()) as Map<String, dynamic>;
+          });
+
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      await phiSync.approveIncomingRequest(phiSync.incomingRequest!.id);
+      final approved = await pendingReq;
+      final token = approved['token'] as String;
+
+      final manifestReq = await client.getUrl(
+        Uri.parse('http://127.0.0.1:${phiSync.localPort}/sync/manifest'),
+      );
+      manifestReq.headers.set('X-Aetheria-Sync-Token', token);
+      final manifestResp = await manifestReq.close();
+      expect(manifestResp.statusCode, HttpStatus.ok);
+
+      final manifest =
+          jsonDecode(await utf8.decoder.bind(manifestResp).join())
+              as Map<String, dynamic>;
+      final paths = {for (final f in manifest['files'] as List) f['path'] as String};
+      expect(
+        paths,
+        containsAll([
+          'files/phi_a.flac',
+          'covers/phi_a.jpg',
+          'phigros/charts/a_IN.json',
+          'phigros/se/tap.wav',
+        ]),
+      );
+    });
   });
 }

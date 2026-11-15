@@ -116,6 +116,168 @@ class LocalLyricCandidate {
           content == other.content;
 }
 
+/// Chart metadata for one Phigros difficulty level attached to a song.
+class PhigrosChartMeta {
+  final String difficulty;
+  final int sortRank;
+  final double rating;
+  final String charter;
+  final double bpmMin;
+  final double bpmMax;
+  final int chartOffsetMs;
+  final int noteCount;
+  final int tapCount;
+  final int dragCount;
+  final int holdCount;
+  final int flickCount;
+  final String? audioRelPath;
+  final String? coverRelPath;
+  final String chartRelPath;
+
+  const PhigrosChartMeta({
+    required this.difficulty,
+    required this.sortRank,
+    required this.rating,
+    required this.charter,
+    required this.bpmMin,
+    required this.bpmMax,
+    required this.chartOffsetMs,
+    required this.noteCount,
+    required this.tapCount,
+    required this.dragCount,
+    required this.holdCount,
+    required this.flickCount,
+    this.audioRelPath,
+    this.coverRelPath,
+    required this.chartRelPath,
+  });
+
+  @override
+  int get hashCode =>
+      difficulty.hashCode ^
+      sortRank.hashCode ^
+      rating.hashCode ^
+      charter.hashCode ^
+      bpmMin.hashCode ^
+      bpmMax.hashCode ^
+      chartOffsetMs.hashCode ^
+      noteCount.hashCode ^
+      tapCount.hashCode ^
+      dragCount.hashCode ^
+      holdCount.hashCode ^
+      flickCount.hashCode ^
+      audioRelPath.hashCode ^
+      coverRelPath.hashCode ^
+      chartRelPath.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is PhigrosChartMeta &&
+          runtimeType == other.runtimeType &&
+          difficulty == other.difficulty &&
+          sortRank == other.sortRank &&
+          rating == other.rating &&
+          charter == other.charter &&
+          bpmMin == other.bpmMin &&
+          bpmMax == other.bpmMax &&
+          chartOffsetMs == other.chartOffsetMs &&
+          noteCount == other.noteCount &&
+          tapCount == other.tapCount &&
+          dragCount == other.dragCount &&
+          holdCount == other.holdCount &&
+          flickCount == other.flickCount &&
+          audioRelPath == other.audioRelPath &&
+          coverRelPath == other.coverRelPath &&
+          chartRelPath == other.chartRelPath;
+}
+
+/// Summary returned after importing or refreshing a Phigros asset package.
+class PhigrosImportResult {
+  final String playlistId;
+  final int importedCount;
+  final int updatedCount;
+  final int chartCount;
+
+  const PhigrosImportResult({
+    required this.playlistId,
+    required this.importedCount,
+    required this.updatedCount,
+    required this.chartCount,
+  });
+
+  @override
+  int get hashCode =>
+      playlistId.hashCode ^
+      importedCount.hashCode ^
+      updatedCount.hashCode ^
+      chartCount.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is PhigrosImportResult &&
+          runtimeType == other.runtimeType &&
+          playlistId == other.playlistId &&
+          importedCount == other.importedCount &&
+          updatedCount == other.updatedCount &&
+          chartCount == other.chartCount;
+}
+
+/// Per-song Phigros metadata, selected chart difficulty, and per-song hitsound overrides.
+class PhigrosSongMeta {
+  final String phigrosId;
+  final String chapter;
+  final String composer;
+  final String illustrator;
+  final String selectedDifficulty;
+
+  /// `"global"`, `"on"`, or `"off"`.
+  final String hitsoundMode;
+  final double? hitsoundVolume;
+  final int? hitsoundOffsetMs;
+  final List<PhigrosChartMeta> charts;
+
+  const PhigrosSongMeta({
+    required this.phigrosId,
+    required this.chapter,
+    required this.composer,
+    required this.illustrator,
+    required this.selectedDifficulty,
+    required this.hitsoundMode,
+    this.hitsoundVolume,
+    this.hitsoundOffsetMs,
+    required this.charts,
+  });
+
+  @override
+  int get hashCode =>
+      phigrosId.hashCode ^
+      chapter.hashCode ^
+      composer.hashCode ^
+      illustrator.hashCode ^
+      selectedDifficulty.hashCode ^
+      hitsoundMode.hashCode ^
+      hitsoundVolume.hashCode ^
+      hitsoundOffsetMs.hashCode ^
+      charts.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is PhigrosSongMeta &&
+          runtimeType == other.runtimeType &&
+          phigrosId == other.phigrosId &&
+          chapter == other.chapter &&
+          composer == other.composer &&
+          illustrator == other.illustrator &&
+          selectedDifficulty == other.selectedDifficulty &&
+          hitsoundMode == other.hitsoundMode &&
+          hitsoundVolume == other.hitsoundVolume &&
+          hitsoundOffsetMs == other.hitsoundOffsetMs &&
+          charts == other.charts;
+}
+
 class PreviewInfo {
   final String filepath;
   final String filename;
@@ -222,6 +384,7 @@ class Song {
   final String createdAt;
   final List<AudioVersion> versions;
   final List<Tag> tags;
+  final PhigrosSongMeta? phigros;
 
   const Song({
     required this.id,
@@ -234,6 +397,7 @@ class Song {
     required this.createdAt,
     required this.versions,
     required this.tags,
+    this.phigros,
   });
 
   @override
@@ -247,7 +411,8 @@ class Song {
       rating.hashCode ^
       createdAt.hashCode ^
       versions.hashCode ^
-      tags.hashCode;
+      tags.hashCode ^
+      phigros.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -263,7 +428,8 @@ class Song {
           rating == other.rating &&
           createdAt == other.createdAt &&
           versions == other.versions &&
-          tags == other.tags;
+          tags == other.tags &&
+          phigros == other.phigros;
 }
 
 class Tag {

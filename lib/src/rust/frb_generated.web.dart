@@ -43,6 +43,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   int dco_decode_box_autoadd_i_32(dynamic raw);
 
   @protected
+  PhigrosSongMeta dco_decode_box_autoadd_phigros_song_meta(dynamic raw);
+
+  @protected
   SavedLyric dco_decode_box_autoadd_saved_lyric(dynamic raw);
 
   @protected
@@ -65,6 +68,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<LocalLyricCandidate> dco_decode_list_local_lyric_candidate(dynamic raw);
+
+  @protected
+  List<PhigrosChartMeta> dco_decode_list_phigros_chart_meta(dynamic raw);
 
   @protected
   List<Playlist> dco_decode_list_playlist(dynamic raw);
@@ -94,7 +100,19 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   int? dco_decode_opt_box_autoadd_i_32(dynamic raw);
 
   @protected
+  PhigrosSongMeta? dco_decode_opt_box_autoadd_phigros_song_meta(dynamic raw);
+
+  @protected
   SavedLyric? dco_decode_opt_box_autoadd_saved_lyric(dynamic raw);
+
+  @protected
+  PhigrosChartMeta dco_decode_phigros_chart_meta(dynamic raw);
+
+  @protected
+  PhigrosImportResult dco_decode_phigros_import_result(dynamic raw);
+
+  @protected
+  PhigrosSongMeta dco_decode_phigros_song_meta(dynamic raw);
 
   @protected
   PlaybackProgress dco_decode_playback_progress(dynamic raw);
@@ -145,6 +163,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   int sse_decode_box_autoadd_i_32(SseDeserializer deserializer);
 
   @protected
+  PhigrosSongMeta sse_decode_box_autoadd_phigros_song_meta(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   SavedLyric sse_decode_box_autoadd_saved_lyric(SseDeserializer deserializer);
 
   @protected
@@ -169,6 +192,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<LocalLyricCandidate> sse_decode_list_local_lyric_candidate(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<PhigrosChartMeta> sse_decode_list_phigros_chart_meta(
     SseDeserializer deserializer,
   );
 
@@ -202,9 +230,25 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   int? sse_decode_opt_box_autoadd_i_32(SseDeserializer deserializer);
 
   @protected
+  PhigrosSongMeta? sse_decode_opt_box_autoadd_phigros_song_meta(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   SavedLyric? sse_decode_opt_box_autoadd_saved_lyric(
     SseDeserializer deserializer,
   );
+
+  @protected
+  PhigrosChartMeta sse_decode_phigros_chart_meta(SseDeserializer deserializer);
+
+  @protected
+  PhigrosImportResult sse_decode_phigros_import_result(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  PhigrosSongMeta sse_decode_phigros_song_meta(SseDeserializer deserializer);
 
   @protected
   PlaybackProgress sse_decode_playback_progress(SseDeserializer deserializer);
@@ -258,6 +302,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_box_autoadd_i_32(int self, SseSerializer serializer);
 
   @protected
+  void sse_encode_box_autoadd_phigros_song_meta(
+    PhigrosSongMeta self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_saved_lyric(
     SavedLyric self,
     SseSerializer serializer,
@@ -287,6 +337,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_local_lyric_candidate(
     List<LocalLyricCandidate> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_phigros_chart_meta(
+    List<PhigrosChartMeta> self,
     SseSerializer serializer,
   );
 
@@ -327,8 +383,32 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_opt_box_autoadd_i_32(int? self, SseSerializer serializer);
 
   @protected
+  void sse_encode_opt_box_autoadd_phigros_song_meta(
+    PhigrosSongMeta? self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_box_autoadd_saved_lyric(
     SavedLyric? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_phigros_chart_meta(
+    PhigrosChartMeta self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_phigros_import_result(
+    PhigrosImportResult self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_phigros_song_meta(
+    PhigrosSongMeta self,
     SseSerializer serializer,
   );
 

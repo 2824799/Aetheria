@@ -78,6 +78,12 @@ class TestAudio extends ChangeNotifier implements AudioPlayerProvider {
   @override
   double volume = 0.8;
   @override
+  bool phigrosHitsoundEnabled = true;
+  @override
+  double phigrosHitsoundVolume = 0.75;
+  @override
+  int phigrosHitsoundOffsetMs = 0;
+  @override
   PlayMode playMode = PlayMode.list;
   @override
   void setDetailOpen(bool value) {

@@ -89,6 +89,7 @@ const CREATE_TABLES: &str = "
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL UNIQUE,
         description TEXT,
+        kind TEXT NOT NULL DEFAULT 'normal',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -100,15 +101,50 @@ const CREATE_TABLES: &str = "
         FOREIGN KEY (playlist_id) REFERENCES playlists(id) ON DELETE CASCADE,
         FOREIGN KEY (song_id) REFERENCES songs(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS phigros_songs (
+        song_id TEXT PRIMARY KEY,
+        phigros_id TEXT NOT NULL UNIQUE,
+        chapter TEXT NOT NULL,
+        composer TEXT NOT NULL,
+        illustrator TEXT NOT NULL,
+        selected_difficulty TEXT NOT NULL,
+        hitsound_mode TEXT NOT NULL DEFAULT 'global',
+        hitsound_volume REAL,
+        hitsound_offset_ms INTEGER,
+        FOREIGN KEY (song_id) REFERENCES songs(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS phigros_charts (
+        song_id TEXT NOT NULL,
+        difficulty TEXT NOT NULL,
+        sort_rank INTEGER NOT NULL,
+        rating REAL NOT NULL,
+        charter TEXT NOT NULL,
+        bpm_min REAL NOT NULL,
+        bpm_max REAL NOT NULL,
+        chart_offset_ms INTEGER NOT NULL,
+        note_count INTEGER NOT NULL,
+        tap_count INTEGER NOT NULL,
+        drag_count INTEGER NOT NULL,
+        hold_count INTEGER NOT NULL,
+        flick_count INTEGER NOT NULL,
+        audio_rel_path TEXT,
+        cover_rel_path TEXT,
+        chart_rel_path TEXT NOT NULL,
+        PRIMARY KEY (song_id, difficulty),
+        FOREIGN KEY (song_id) REFERENCES phigros_songs(song_id) ON DELETE CASCADE
+    );
 ";
 
-/// Columns added after the first release: `(column, definition)`. Databases
-/// created by older builds (or pulled from an older peer) gain them here.
-const AUDIO_FILE_MIGRATIONS: [(&str, &str); 4] = [
-    ("md5", "TEXT"),
-    ("bit_depth", "INTEGER"),
-    ("loudness", "REAL"),
-    ("metadata_scanned", "INTEGER DEFAULT 0"),
+/// Columns added after the first release: `(table, column, definition)`.
+/// Databases created by older builds (or pulled from an older peer) gain them here.
+const COLUMN_MIGRATIONS: [(&str, &str, &str); 5] = [
+    ("audio_files", "md5", "TEXT"),
+    ("audio_files", "bit_depth", "INTEGER"),
+    ("audio_files", "loudness", "REAL"),
+    ("audio_files", "metadata_scanned", "INTEGER DEFAULT 0"),
+    ("playlists", "kind", "TEXT NOT NULL DEFAULT 'normal'"),
 ];
 
 // Created after the column migrations because `idx_audio_files_md5` needs `md5`.
@@ -119,16 +155,18 @@ const CREATE_INDEXES: &str = "
     CREATE INDEX IF NOT EXISTS idx_song_tags_tag ON song_tags(tag_id);
     CREATE INDEX IF NOT EXISTS idx_lyrics_song_version
         ON lyrics(song_id, audio_version_id, is_selected);
+    CREATE INDEX IF NOT EXISTS idx_phigros_charts_song
+        ON phigros_charts(song_id, sort_rank);
 ";
 
 /// Creates missing tables, applies column migrations and seeds default tags.
 pub fn migrate(conn: &mut Connection) -> Result<()> {
     let tx = conn.transaction()?;
     tx.execute_batch(CREATE_TABLES)?;
-    for (column, definition) in AUDIO_FILE_MIGRATIONS {
-        if !has_column(&tx, "audio_files", column)? {
+    for (table, column, definition) in COLUMN_MIGRATIONS {
+        if !has_column(&tx, table, column)? {
             tx.execute_batch(&format!(
-                "ALTER TABLE audio_files ADD COLUMN {column} {definition};"
+                "ALTER TABLE {table} ADD COLUMN {column} {definition};"
             ))?;
         }
     }

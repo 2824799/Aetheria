@@ -6,6 +6,7 @@ import 'package:aetheria/features/player/ui/detail/song_tag_editor.dart';
 import 'package:aetheria/features/player/ui/detail/version_list.dart';
 import 'package:aetheria/features/player/ui/lyrics_panel.dart';
 import 'package:aetheria/features/player/version_actions.dart';
+import 'package:aetheria/features/phigros/ui/phigros_detail_panel.dart';
 import 'package:aetheria/src/rust/models/song.dart';
 
 /// Body of one tab of the mobile song detail sheet.
@@ -31,6 +32,8 @@ class MobileDetailTab extends StatelessWidget {
   Widget build(BuildContext context) {
     final cfg = context.tokens;
     switch (tab) {
+      case 'phigros':
+        return PhigrosDetailPanel(song: song);
       case 'versions':
         return SongVersionList(song: song, header: versionHeader);
       case 'tags':

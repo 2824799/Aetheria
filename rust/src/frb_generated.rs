@@ -38,7 +38,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.12.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 450319926;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -2017494938;
 
 // Section: executor
 
@@ -177,6 +177,39 @@ fn wire__crate__api__music__clear_lyrics_impl(
                 transform_result_sse::<_, String>((move || {
                     let output_ok =
                         crate::api::music::clear_lyrics(api_song_id, api_audio_version_id)?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__playback__configure_hitsound_bank_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "configure_hitsound_bank",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_se_dir = <Option<String>>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::api::playback::configure_hitsound_bank(api_se_dir)?;
                     Ok(output_ok)
                 })())
             }
@@ -871,6 +904,39 @@ fn wire__crate__api__music__import_audio_version_for_song_impl(
                         api_song_id,
                         api_filepath,
                     )?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__music__import_phigros_package_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "import_phigros_package",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_package_dir = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::api::music::import_phigros_package(api_package_dir)?;
                     Ok(output_ok)
                 })())
             }
@@ -1573,6 +1639,84 @@ fn wire__crate__api__playback__set_output_latency_mode_impl(
         },
     )
 }
+fn wire__crate__api__music__set_phigros_song_difficulty_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "set_phigros_song_difficulty",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_song_id = <String>::sse_decode(&mut deserializer);
+            let api_difficulty = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::api::music::set_phigros_song_difficulty(
+                        api_song_id,
+                        api_difficulty,
+                    )?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__music__set_phigros_song_hitsound_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "set_phigros_song_hitsound",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_song_id = <String>::sse_decode(&mut deserializer);
+            let api_mode = <String>::sse_decode(&mut deserializer);
+            let api_volume = <Option<f64>>::sse_decode(&mut deserializer);
+            let api_offset_ms = <Option<i32>>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::api::music::set_phigros_song_hitsound(
+                        api_song_id,
+                        api_mode,
+                        api_volume,
+                        api_offset_ms,
+                    )?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
 fn wire__crate__api__playback__set_pitch_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -1700,6 +1844,10 @@ fn wire__crate__api__playback__start_playback_impl(
             let api_pitch = <f64>::sse_decode(&mut deserializer);
             let api_algo = <String>::sse_decode(&mut deserializer);
             let api_normalization_gain = <f32>::sse_decode(&mut deserializer);
+            let api_chart_path = <Option<String>>::sse_decode(&mut deserializer);
+            let api_hitsound_enabled = <bool>::sse_decode(&mut deserializer);
+            let api_hitsound_volume = <f32>::sse_decode(&mut deserializer);
+            let api_hitsound_offset_ms = <i32>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
@@ -1709,6 +1857,10 @@ fn wire__crate__api__playback__start_playback_impl(
                         api_pitch,
                         api_algo,
                         api_normalization_gain,
+                        api_chart_path,
+                        api_hitsound_enabled,
+                        api_hitsound_volume,
+                        api_hitsound_offset_ms,
                     )?;
                     Ok(output_ok)
                 })())
@@ -1812,6 +1964,47 @@ fn wire__crate__api__music__update_lyric_offset_impl(
                 transform_result_sse::<_, String>((move || {
                     let output_ok =
                         crate::api::music::update_lyric_offset(api_lyric_id, api_offset_ms)?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__playback__update_playback_hitsound_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "update_playback_hitsound",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_chart_path = <Option<String>>::sse_decode(&mut deserializer);
+            let api_enabled = <bool>::sse_decode(&mut deserializer);
+            let api_volume = <f32>::sse_decode(&mut deserializer);
+            let api_offset_ms = <i32>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::api::playback::update_playback_hitsound(
+                        api_chart_path,
+                        api_enabled,
+                        api_volume,
+                        api_offset_ms,
+                    )?;
                     Ok(output_ok)
                 })())
             }
@@ -2052,6 +2245,20 @@ impl SseDecode for Vec<crate::models::song::LocalLyricCandidate> {
     }
 }
 
+impl SseDecode for Vec<crate::models::song::PhigrosChartMeta> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::models::song::PhigrosChartMeta>::sse_decode(
+                deserializer,
+            ));
+        }
+        return ans_;
+    }
+}
+
 impl SseDecode for Vec<crate::models::playlist::Playlist> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -2165,6 +2372,19 @@ impl SseDecode for Option<i32> {
     }
 }
 
+impl SseDecode for Option<crate::models::song::PhigrosSongMeta> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::models::song::PhigrosSongMeta>::sse_decode(
+                deserializer,
+            ));
+        } else {
+            return None;
+        }
+    }
+}
+
 impl SseDecode for Option<crate::models::song::SavedLyric> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -2173,6 +2393,86 @@ impl SseDecode for Option<crate::models::song::SavedLyric> {
         } else {
             return None;
         }
+    }
+}
+
+impl SseDecode for crate::models::song::PhigrosChartMeta {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_difficulty = <String>::sse_decode(deserializer);
+        let mut var_sortRank = <i32>::sse_decode(deserializer);
+        let mut var_rating = <f64>::sse_decode(deserializer);
+        let mut var_charter = <String>::sse_decode(deserializer);
+        let mut var_bpmMin = <f64>::sse_decode(deserializer);
+        let mut var_bpmMax = <f64>::sse_decode(deserializer);
+        let mut var_chartOffsetMs = <i32>::sse_decode(deserializer);
+        let mut var_noteCount = <i32>::sse_decode(deserializer);
+        let mut var_tapCount = <i32>::sse_decode(deserializer);
+        let mut var_dragCount = <i32>::sse_decode(deserializer);
+        let mut var_holdCount = <i32>::sse_decode(deserializer);
+        let mut var_flickCount = <i32>::sse_decode(deserializer);
+        let mut var_audioRelPath = <Option<String>>::sse_decode(deserializer);
+        let mut var_coverRelPath = <Option<String>>::sse_decode(deserializer);
+        let mut var_chartRelPath = <String>::sse_decode(deserializer);
+        return crate::models::song::PhigrosChartMeta {
+            difficulty: var_difficulty,
+            sort_rank: var_sortRank,
+            rating: var_rating,
+            charter: var_charter,
+            bpm_min: var_bpmMin,
+            bpm_max: var_bpmMax,
+            chart_offset_ms: var_chartOffsetMs,
+            note_count: var_noteCount,
+            tap_count: var_tapCount,
+            drag_count: var_dragCount,
+            hold_count: var_holdCount,
+            flick_count: var_flickCount,
+            audio_rel_path: var_audioRelPath,
+            cover_rel_path: var_coverRelPath,
+            chart_rel_path: var_chartRelPath,
+        };
+    }
+}
+
+impl SseDecode for crate::models::song::PhigrosImportResult {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_playlistId = <String>::sse_decode(deserializer);
+        let mut var_importedCount = <i32>::sse_decode(deserializer);
+        let mut var_updatedCount = <i32>::sse_decode(deserializer);
+        let mut var_chartCount = <i32>::sse_decode(deserializer);
+        return crate::models::song::PhigrosImportResult {
+            playlist_id: var_playlistId,
+            imported_count: var_importedCount,
+            updated_count: var_updatedCount,
+            chart_count: var_chartCount,
+        };
+    }
+}
+
+impl SseDecode for crate::models::song::PhigrosSongMeta {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_phigrosId = <String>::sse_decode(deserializer);
+        let mut var_chapter = <String>::sse_decode(deserializer);
+        let mut var_composer = <String>::sse_decode(deserializer);
+        let mut var_illustrator = <String>::sse_decode(deserializer);
+        let mut var_selectedDifficulty = <String>::sse_decode(deserializer);
+        let mut var_hitsoundMode = <String>::sse_decode(deserializer);
+        let mut var_hitsoundVolume = <Option<f64>>::sse_decode(deserializer);
+        let mut var_hitsoundOffsetMs = <Option<i32>>::sse_decode(deserializer);
+        let mut var_charts = <Vec<crate::models::song::PhigrosChartMeta>>::sse_decode(deserializer);
+        return crate::models::song::PhigrosSongMeta {
+            phigros_id: var_phigrosId,
+            chapter: var_chapter,
+            composer: var_composer,
+            illustrator: var_illustrator,
+            selected_difficulty: var_selectedDifficulty,
+            hitsound_mode: var_hitsoundMode,
+            hitsound_volume: var_hitsoundVolume,
+            hitsound_offset_ms: var_hitsoundOffsetMs,
+            charts: var_charts,
+        };
     }
 }
 
@@ -2195,11 +2495,13 @@ impl SseDecode for crate::models::playlist::Playlist {
         let mut var_name = <String>::sse_decode(deserializer);
         let mut var_description = <Option<String>>::sse_decode(deserializer);
         let mut var_createdAt = <String>::sse_decode(deserializer);
+        let mut var_kind = <Option<String>>::sse_decode(deserializer);
         return crate::models::playlist::Playlist {
             id: var_id,
             name: var_name,
             description: var_description,
             created_at: var_createdAt,
+            kind: var_kind,
         };
     }
 }
@@ -2267,6 +2569,8 @@ impl SseDecode for crate::models::song::Song {
         let mut var_createdAt = <String>::sse_decode(deserializer);
         let mut var_versions = <Vec<crate::models::song::AudioVersion>>::sse_decode(deserializer);
         let mut var_tags = <Vec<crate::models::song::Tag>>::sse_decode(deserializer);
+        let mut var_phigros =
+            <Option<crate::models::song::PhigrosSongMeta>>::sse_decode(deserializer);
         return crate::models::song::Song {
             id: var_id,
             title: var_title,
@@ -2278,6 +2582,7 @@ impl SseDecode for crate::models::song::Song {
             created_at: var_createdAt,
             versions: var_versions,
             tags: var_tags,
+            phigros: var_phigros,
         };
     }
 }
@@ -2342,117 +2647,144 @@ fn pde_ffi_dispatcher_primary_impl(
             data_len,
         ),
         4 => wire__crate__api__music__clear_lyrics_impl(port, ptr, rust_vec_len, data_len),
-        5 => wire__crate__api__music__create_playlist_impl(port, ptr, rust_vec_len, data_len),
-        6 => wire__crate__api__music__delete_audio_version_impl(port, ptr, rust_vec_len, data_len),
-        7 => wire__crate__api__music__delete_playlist_impl(port, ptr, rust_vec_len, data_len),
-        8 => wire__crate__api__music__delete_song_impl(port, ptr, rust_vec_len, data_len),
-        9 => wire__crate__api__music__delete_tag_impl(port, ptr, rust_vec_len, data_len),
-        10 => wire__crate__api__music__ensure_song_cover_impl(port, ptr, rust_vec_len, data_len),
-        11 => wire__crate__api__music__export_audio_file_impl(port, ptr, rust_vec_len, data_len),
-        13 => wire__crate__api__playback__get_audio_output_info_impl(
+        5 => wire__crate__api__playback__configure_hitsound_bank_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        15 => wire__crate__api__playback__get_default_output_device_name_impl(
+        6 => wire__crate__api__music__create_playlist_impl(port, ptr, rust_vec_len, data_len),
+        7 => wire__crate__api__music__delete_audio_version_impl(port, ptr, rust_vec_len, data_len),
+        8 => wire__crate__api__music__delete_playlist_impl(port, ptr, rust_vec_len, data_len),
+        9 => wire__crate__api__music__delete_song_impl(port, ptr, rust_vec_len, data_len),
+        10 => wire__crate__api__music__delete_tag_impl(port, ptr, rust_vec_len, data_len),
+        11 => wire__crate__api__music__ensure_song_cover_impl(port, ptr, rust_vec_len, data_len),
+        12 => wire__crate__api__music__export_audio_file_impl(port, ptr, rust_vec_len, data_len),
+        14 => wire__crate__api__playback__get_audio_output_info_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        16 => wire__crate__api__music__get_library_path_impl(port, ptr, rust_vec_len, data_len),
-        17 => wire__crate__api__music__get_local_lyric_candidates_impl(
+        16 => wire__crate__api__playback__get_default_output_device_name_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        18 => wire__crate__api__playback__get_playback_progress_impl(
+        17 => wire__crate__api__music__get_library_path_impl(port, ptr, rust_vec_len, data_len),
+        18 => wire__crate__api__music__get_local_lyric_candidates_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        19 => wire__crate__api__music__get_playlist_songs_impl(port, ptr, rust_vec_len, data_len),
-        20 => wire__crate__api__music__get_playlists_impl(port, ptr, rust_vec_len, data_len),
-        21 => wire__crate__api__music__get_selected_lyric_impl(port, ptr, rust_vec_len, data_len),
-        22 => wire__crate__api__music__get_song_ids_with_lyrics_impl(
+        19 => wire__crate__api__playback__get_playback_progress_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        23 => wire__crate__api__music__get_songs_impl(port, ptr, rust_vec_len, data_len),
-        24 => wire__crate__api__music__get_tags_impl(port, ptr, rust_vec_len, data_len),
-        25 => wire__crate__api__music__import_audio_version_for_song_impl(
+        20 => wire__crate__api__music__get_playlist_songs_impl(port, ptr, rust_vec_len, data_len),
+        21 => wire__crate__api__music__get_playlists_impl(port, ptr, rust_vec_len, data_len),
+        22 => wire__crate__api__music__get_selected_lyric_impl(port, ptr, rust_vec_len, data_len),
+        23 => wire__crate__api__music__get_song_ids_with_lyrics_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        26 => wire__crate__api__music__import_song_impl(port, ptr, rust_vec_len, data_len),
-        27 => wire__crate__api__music__import_song_with_metadata_impl(
+        24 => wire__crate__api__music__get_songs_impl(port, ptr, rust_vec_len, data_len),
+        25 => wire__crate__api__music__get_tags_impl(port, ptr, rust_vec_len, data_len),
+        26 => wire__crate__api__music__import_audio_version_for_song_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        28 => wire__crate__api__simple__init_app_impl(port, ptr, rust_vec_len, data_len),
-        29 => {
+        27 => {
+            wire__crate__api__music__import_phigros_package_impl(port, ptr, rust_vec_len, data_len)
+        }
+        28 => wire__crate__api__music__import_song_impl(port, ptr, rust_vec_len, data_len),
+        29 => wire__crate__api__music__import_song_with_metadata_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        30 => wire__crate__api__simple__init_app_impl(port, ptr, rust_vec_len, data_len),
+        31 => {
             wire__crate__api__music__initialize_library_path_impl(port, ptr, rust_vec_len, data_len)
         }
-        31 => wire__crate__api__playback__pause_playback_impl(port, ptr, rust_vec_len, data_len),
-        32 => {
+        33 => wire__crate__api__playback__pause_playback_impl(port, ptr, rust_vec_len, data_len),
+        34 => {
             wire__crate__api__music__preview_audio_metadata_impl(port, ptr, rust_vec_len, data_len)
         }
-        33 => wire__crate__api__music__refresh_audio_file_metadata_impl(
+        35 => wire__crate__api__music__refresh_audio_file_metadata_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        34 => wire__crate__api__music__remove_songs_from_playlist_impl(
+        36 => wire__crate__api__music__remove_songs_from_playlist_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        35 => wire__crate__api__music__rename_playlist_impl(port, ptr, rust_vec_len, data_len),
-        37 => wire__crate__api__music__reset_library_impl(port, ptr, rust_vec_len, data_len),
-        38 => wire__crate__api__playback__resume_playback_impl(port, ptr, rust_vec_len, data_len),
-        39 => wire__crate__api__music__save_lyric_impl(port, ptr, rust_vec_len, data_len),
-        40 => wire__crate__api__music__scan_directory_for_preview_impl(
+        37 => wire__crate__api__music__rename_playlist_impl(port, ptr, rust_vec_len, data_len),
+        39 => wire__crate__api__music__reset_library_impl(port, ptr, rust_vec_len, data_len),
+        40 => wire__crate__api__playback__resume_playback_impl(port, ptr, rust_vec_len, data_len),
+        41 => wire__crate__api__music__save_lyric_impl(port, ptr, rust_vec_len, data_len),
+        42 => wire__crate__api__music__scan_directory_for_preview_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        41 => wire__crate__api__playback__seek_playback_impl(port, ptr, rust_vec_len, data_len),
-        43 => wire__crate__api__playback__set_audio_quality_settings_impl(
+        43 => wire__crate__api__playback__seek_playback_impl(port, ptr, rust_vec_len, data_len),
+        45 => wire__crate__api__playback__set_audio_quality_settings_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        44 => {
+        46 => {
             wire__crate__api__playback__set_output_buffer_ms_impl(port, ptr, rust_vec_len, data_len)
         }
-        45 => wire__crate__api__playback__set_output_latency_mode_impl(
+        47 => wire__crate__api__playback__set_output_latency_mode_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        46 => wire__crate__api__playback__set_pitch_impl(port, ptr, rust_vec_len, data_len),
-        47 => wire__crate__api__music__set_primary_version_impl(port, ptr, rust_vec_len, data_len),
-        48 => wire__crate__api__playback__set_volume_impl(port, ptr, rust_vec_len, data_len),
-        49 => wire__crate__api__playback__start_playback_impl(port, ptr, rust_vec_len, data_len),
-        50 => wire__crate__api__playback__stop_playback_impl(port, ptr, rust_vec_len, data_len),
-        51 => wire__crate__api__music__tag_song_impl(port, ptr, rust_vec_len, data_len),
-        52 => wire__crate__api__music__update_lyric_offset_impl(port, ptr, rust_vec_len, data_len),
-        53 => wire__crate__api__music__update_song_metadata_impl(port, ptr, rust_vec_len, data_len),
-        54 => wire__crate__api__music__update_tag_impl(port, ptr, rust_vec_len, data_len),
+        48 => wire__crate__api__music__set_phigros_song_difficulty_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        49 => wire__crate__api__music__set_phigros_song_hitsound_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        50 => wire__crate__api__playback__set_pitch_impl(port, ptr, rust_vec_len, data_len),
+        51 => wire__crate__api__music__set_primary_version_impl(port, ptr, rust_vec_len, data_len),
+        52 => wire__crate__api__playback__set_volume_impl(port, ptr, rust_vec_len, data_len),
+        53 => wire__crate__api__playback__start_playback_impl(port, ptr, rust_vec_len, data_len),
+        54 => wire__crate__api__playback__stop_playback_impl(port, ptr, rust_vec_len, data_len),
+        55 => wire__crate__api__music__tag_song_impl(port, ptr, rust_vec_len, data_len),
+        56 => wire__crate__api__music__update_lyric_offset_impl(port, ptr, rust_vec_len, data_len),
+        57 => wire__crate__api__playback__update_playback_hitsound_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        58 => wire__crate__api__music__update_song_metadata_impl(port, ptr, rust_vec_len, data_len),
+        59 => wire__crate__api__music__update_tag_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -2465,23 +2797,23 @@ fn pde_ffi_dispatcher_sync_impl(
 ) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
     // Codec=Pde (Serialization + dispatch), see doc to use other codecs
     match func_id {
-        12 => wire__crate__api__playback__export_audio_performance_report_markdown_impl(
+        13 => wire__crate__api__playback__export_audio_performance_report_markdown_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        14 => wire__crate__api__playback__get_audio_performance_report_json_impl(
+        15 => wire__crate__api__playback__get_audio_performance_report_json_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        30 => wire__crate__api__music__is_library_initialized_impl(ptr, rust_vec_len, data_len),
-        36 => wire__crate__api__playback__reset_audio_performance_stats_impl(
+        32 => wire__crate__api__music__is_library_initialized_impl(ptr, rust_vec_len, data_len),
+        38 => wire__crate__api__playback__reset_audio_performance_stats_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        42 => wire__crate__api__playback__set_audio_performance_profiling_enabled_impl(
+        44 => wire__crate__api__playback__set_audio_performance_profiling_enabled_impl(
             ptr,
             rust_vec_len,
             data_len,
@@ -2581,6 +2913,91 @@ impl flutter_rust_bridge::IntoIntoDart<crate::models::song::LocalLyricCandidate>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::models::song::PhigrosChartMeta {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.difficulty.into_into_dart().into_dart(),
+            self.sort_rank.into_into_dart().into_dart(),
+            self.rating.into_into_dart().into_dart(),
+            self.charter.into_into_dart().into_dart(),
+            self.bpm_min.into_into_dart().into_dart(),
+            self.bpm_max.into_into_dart().into_dart(),
+            self.chart_offset_ms.into_into_dart().into_dart(),
+            self.note_count.into_into_dart().into_dart(),
+            self.tap_count.into_into_dart().into_dart(),
+            self.drag_count.into_into_dart().into_dart(),
+            self.hold_count.into_into_dart().into_dart(),
+            self.flick_count.into_into_dart().into_dart(),
+            self.audio_rel_path.into_into_dart().into_dart(),
+            self.cover_rel_path.into_into_dart().into_dart(),
+            self.chart_rel_path.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::models::song::PhigrosChartMeta
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::models::song::PhigrosChartMeta>
+    for crate::models::song::PhigrosChartMeta
+{
+    fn into_into_dart(self) -> crate::models::song::PhigrosChartMeta {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::models::song::PhigrosImportResult {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.playlist_id.into_into_dart().into_dart(),
+            self.imported_count.into_into_dart().into_dart(),
+            self.updated_count.into_into_dart().into_dart(),
+            self.chart_count.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::models::song::PhigrosImportResult
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::models::song::PhigrosImportResult>
+    for crate::models::song::PhigrosImportResult
+{
+    fn into_into_dart(self) -> crate::models::song::PhigrosImportResult {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::models::song::PhigrosSongMeta {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.phigros_id.into_into_dart().into_dart(),
+            self.chapter.into_into_dart().into_dart(),
+            self.composer.into_into_dart().into_dart(),
+            self.illustrator.into_into_dart().into_dart(),
+            self.selected_difficulty.into_into_dart().into_dart(),
+            self.hitsound_mode.into_into_dart().into_dart(),
+            self.hitsound_volume.into_into_dart().into_dart(),
+            self.hitsound_offset_ms.into_into_dart().into_dart(),
+            self.charts.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::models::song::PhigrosSongMeta
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::models::song::PhigrosSongMeta>
+    for crate::models::song::PhigrosSongMeta
+{
+    fn into_into_dart(self) -> crate::models::song::PhigrosSongMeta {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::audio::player::PlaybackProgress {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -2609,6 +3026,7 @@ impl flutter_rust_bridge::IntoDart for crate::models::playlist::Playlist {
             self.name.into_into_dart().into_dart(),
             self.description.into_into_dart().into_dart(),
             self.created_at.into_into_dart().into_dart(),
+            self.kind.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -2693,6 +3111,7 @@ impl flutter_rust_bridge::IntoDart for crate::models::song::Song {
             self.created_at.into_into_dart().into_dart(),
             self.versions.into_into_dart().into_dart(),
             self.tags.into_into_dart().into_dart(),
+            self.phigros.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -2832,6 +3251,16 @@ impl SseEncode for Vec<crate::models::song::LocalLyricCandidate> {
     }
 }
 
+impl SseEncode for Vec<crate::models::song::PhigrosChartMeta> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::models::song::PhigrosChartMeta>::sse_encode(item, serializer);
+        }
+    }
+}
+
 impl SseEncode for Vec<crate::models::playlist::Playlist> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -2923,6 +3352,16 @@ impl SseEncode for Option<i32> {
     }
 }
 
+impl SseEncode for Option<crate::models::song::PhigrosSongMeta> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::models::song::PhigrosSongMeta>::sse_encode(value, serializer);
+        }
+    }
+}
+
 impl SseEncode for Option<crate::models::song::SavedLyric> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -2930,6 +3369,52 @@ impl SseEncode for Option<crate::models::song::SavedLyric> {
         if let Some(value) = self {
             <crate::models::song::SavedLyric>::sse_encode(value, serializer);
         }
+    }
+}
+
+impl SseEncode for crate::models::song::PhigrosChartMeta {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.difficulty, serializer);
+        <i32>::sse_encode(self.sort_rank, serializer);
+        <f64>::sse_encode(self.rating, serializer);
+        <String>::sse_encode(self.charter, serializer);
+        <f64>::sse_encode(self.bpm_min, serializer);
+        <f64>::sse_encode(self.bpm_max, serializer);
+        <i32>::sse_encode(self.chart_offset_ms, serializer);
+        <i32>::sse_encode(self.note_count, serializer);
+        <i32>::sse_encode(self.tap_count, serializer);
+        <i32>::sse_encode(self.drag_count, serializer);
+        <i32>::sse_encode(self.hold_count, serializer);
+        <i32>::sse_encode(self.flick_count, serializer);
+        <Option<String>>::sse_encode(self.audio_rel_path, serializer);
+        <Option<String>>::sse_encode(self.cover_rel_path, serializer);
+        <String>::sse_encode(self.chart_rel_path, serializer);
+    }
+}
+
+impl SseEncode for crate::models::song::PhigrosImportResult {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.playlist_id, serializer);
+        <i32>::sse_encode(self.imported_count, serializer);
+        <i32>::sse_encode(self.updated_count, serializer);
+        <i32>::sse_encode(self.chart_count, serializer);
+    }
+}
+
+impl SseEncode for crate::models::song::PhigrosSongMeta {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.phigros_id, serializer);
+        <String>::sse_encode(self.chapter, serializer);
+        <String>::sse_encode(self.composer, serializer);
+        <String>::sse_encode(self.illustrator, serializer);
+        <String>::sse_encode(self.selected_difficulty, serializer);
+        <String>::sse_encode(self.hitsound_mode, serializer);
+        <Option<f64>>::sse_encode(self.hitsound_volume, serializer);
+        <Option<i32>>::sse_encode(self.hitsound_offset_ms, serializer);
+        <Vec<crate::models::song::PhigrosChartMeta>>::sse_encode(self.charts, serializer);
     }
 }
 
@@ -2948,6 +3433,7 @@ impl SseEncode for crate::models::playlist::Playlist {
         <String>::sse_encode(self.name, serializer);
         <Option<String>>::sse_encode(self.description, serializer);
         <String>::sse_encode(self.created_at, serializer);
+        <Option<String>>::sse_encode(self.kind, serializer);
     }
 }
 
@@ -2993,6 +3479,7 @@ impl SseEncode for crate::models::song::Song {
         <String>::sse_encode(self.created_at, serializer);
         <Vec<crate::models::song::AudioVersion>>::sse_encode(self.versions, serializer);
         <Vec<crate::models::song::Tag>>::sse_encode(self.tags, serializer);
+        <Option<crate::models::song::PhigrosSongMeta>>::sse_encode(self.phigros, serializer);
     }
 }
 

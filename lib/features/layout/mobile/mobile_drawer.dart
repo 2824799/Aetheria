@@ -6,6 +6,7 @@ import 'package:aetheria/core/widgets/aether_icon_button.dart';
 import 'package:aetheria/core/widgets/aether_list_tile.dart';
 import 'package:aetheria/core/widgets/aether_menu.dart';
 import 'package:aetheria/features/library/playlist_actions.dart';
+import 'package:aetheria/features/phigros/phigros_badges.dart';
 import 'package:aetheria/src/rust/models/playlist.dart';
 
 /// Mobile navigation drawer: the whole library and the playlists.
@@ -23,6 +24,14 @@ class MobilePlaylistDrawer extends StatelessWidget {
   Widget build(BuildContext context) {
     final cfg = context.tokens;
     final activeId = library.activePlaylistId;
+    final phigrosPlaylist = library.phigrosPlaylist;
+    final regularPlaylists = [
+      for (final playlist in library.playlists)
+        if (playlist.kind != 'phigros') playlist,
+    ];
+    final phigrosCount = library.songs
+        .where((song) => song.phigros != null)
+        .length;
 
     return Drawer(
       backgroundColor: cfg.bgElevated,
@@ -71,6 +80,28 @@ class MobilePlaylistDrawer extends StatelessWidget {
                     selected: activeId == null,
                     onTap: () => _select(context, null),
                   ),
+                  const SizedBox(height: AetherSpace.xs),
+                  AetherListTile(
+                    icon: Icons.sports_esports_rounded,
+                    title: 'Phigros 专区',
+                    trailing: phigrosPlaylist != null
+                        ? Text(
+                            '$phigrosCount',
+                            style: AetherType.bodySmStyle(cfg.textTertiary),
+                          )
+                        : null,
+                    selected:
+                        phigrosPlaylist != null &&
+                        activeId == phigrosPlaylist.id,
+                    onTap: () {
+                      if (phigrosPlaylist != null) {
+                        _select(context, phigrosPlaylist.id);
+                      } else {
+                        Navigator.of(context).pop();
+                        showPhigrosImportDialog(context, library);
+                      }
+                    },
+                  ),
                   Padding(
                     padding: const EdgeInsets.fromLTRB(
                       AetherSpace.lg,
@@ -83,7 +114,7 @@ class MobilePlaylistDrawer extends StatelessWidget {
                       style: AetherType.labelStyle(cfg.textTertiary),
                     ),
                   ),
-                  if (library.playlists.isEmpty)
+                  if (regularPlaylists.isEmpty)
                     Padding(
                       padding: const EdgeInsets.symmetric(
                         horizontal: AetherSpace.lg,
@@ -93,7 +124,7 @@ class MobilePlaylistDrawer extends StatelessWidget {
                         style: AetherType.bodySmStyle(cfg.textTertiary),
                       ),
                     ),
-                  for (final playlist in library.playlists)
+                  for (final playlist in regularPlaylists)
                     Padding(
                       padding: const EdgeInsets.only(bottom: AetherSpace.xs),
                       child: AetherListTile(

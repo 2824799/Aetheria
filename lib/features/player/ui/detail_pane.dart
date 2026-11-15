@@ -13,6 +13,7 @@ import 'package:aetheria/features/player/ui/detail/version_list.dart';
 import 'package:aetheria/features/player/ui/lyrics_panel.dart';
 import 'package:aetheria/features/player/ui/song_cover_art.dart';
 import 'package:aetheria/features/player/version_actions.dart';
+import 'package:aetheria/features/phigros/ui/phigros_detail_panel.dart';
 import 'package:aetheria/src/rust/models/song.dart';
 
 /// Desktop drawer for the selected song: lyrics, tags and audio versions.
@@ -51,6 +52,11 @@ class DetailPane extends StatelessWidget {
       }
     }
 
+    final hasPhigros = song.phigros != null;
+    final effectiveTab = !hasPhigros && state.tab == 'phigros'
+        ? 'lyrics'
+        : state.tab;
+
     return Container(
       decoration: BoxDecoration(
         color: cfg.bgElevated,
@@ -67,17 +73,19 @@ class DetailPane extends StatelessWidget {
         children: [
           _Header(song: song, onClose: () => audio.setDetailOpen(false)),
           AetherTabBar(
-            value: state.tab,
+            value: effectiveTab,
             onChanged: audio.setActiveTab,
-            tabs: const [
-              AetherTabItem(id: 'lyrics', label: '滚动歌词'),
-              AetherTabItem(id: 'lyric_manager', label: '歌词管理'),
-              AetherTabItem(id: 'tags', label: '标签'),
-              AetherTabItem(id: 'versions', label: '音源版本'),
+            tabs: [
+              if (hasPhigros)
+                const AetherTabItem(id: 'phigros', label: '谱面与音效'),
+              const AetherTabItem(id: 'lyrics', label: '滚动歌词'),
+              const AetherTabItem(id: 'lyric_manager', label: '歌词管理'),
+              const AetherTabItem(id: 'tags', label: '标签'),
+              const AetherTabItem(id: 'versions', label: '音源版本'),
             ],
           ),
           Divider(height: 1, color: cfg.borderSubtle),
-          Expanded(child: _buildTab(state.tab, song, audio, cfg)),
+          Expanded(child: _buildTab(effectiveTab, song, audio, cfg)),
         ],
       ),
     );
@@ -90,6 +98,8 @@ class DetailPane extends StatelessWidget {
     AppThemeConfig cfg,
   ) {
     switch (tab) {
+      case 'phigros':
+        return PhigrosDetailPanel(song: song);
       case 'lyrics':
         return LyricsDisplayPanel(
           song: song,

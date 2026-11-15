@@ -10,6 +10,7 @@ pub mod lyrics;
 pub mod maintenance;
 pub mod paths;
 pub mod playlists;
+pub mod phigros;
 mod probe;
 pub mod songs;
 pub mod tags;

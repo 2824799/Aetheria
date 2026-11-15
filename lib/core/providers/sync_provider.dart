@@ -288,11 +288,7 @@ class SyncProvider extends ChangeNotifier {
           : const <String, dynamic>{};
       final remoteDatabaseSize = (remoteDatabase['size'] as num?)?.toInt() ?? 0;
 
-      final localFilesDir = Directory(
-        _joinPath(libraryProvider.libraryPath, ['files']),
-      );
-      final localFilesMap = await _listLibraryFilesWithSize(
-        localFilesDir,
+      final localFilesMap = await _listManagedSyncFilesWithSize(
         libraryProvider.libraryPath,
       );
       if (remoteFiles.isEmpty &&
@@ -499,12 +495,8 @@ class SyncProvider extends ChangeNotifier {
     String libraryPath,
     List<_RemoteFileInfo> remoteFiles,
   ) async {
-    final filesDir = Directory(_joinPath(libraryPath, ['files']));
-    await filesDir.create(recursive: true);
-    final localFilesMap = await _listLibraryFilesWithSize(
-      filesDir,
-      libraryPath,
-    );
+    await Directory(_joinPath(libraryPath, ['files'])).create(recursive: true);
+    final localFilesMap = await _listManagedSyncFilesWithSize(libraryPath);
     final remoteByPath = {for (final file in remoteFiles) file.path: file};
     final downloads = <_RemoteFileInfo>[];
     final removeOrReplace = <String>{};
@@ -585,7 +577,9 @@ class SyncProvider extends ChangeNotifier {
       final sourcePaths = plan.remoteFiles.map((file) => file.path).toSet();
       final filesDir = Directory(_joinPath(libraryPath, ['files']));
       await filesDir.create(recursive: true);
-      final currentLocalFiles = await _listLibraryFiles(filesDir, libraryPath);
+      final currentLocalFiles =
+          (await _listManagedSyncFilesWithSize(libraryPath)).keys.toList()
+            ..sort();
       final pathsToRemove = currentLocalFiles
           .where((path) => !sourcePaths.contains(path))
           .toList();
@@ -846,11 +840,7 @@ class SyncProvider extends ChangeNotifier {
     final dbFile = File(
       _joinPath(libraryProvider.libraryPath, ['database.db']),
     );
-    final filesDir = Directory(
-      _joinPath(libraryProvider.libraryPath, ['files']),
-    );
-    final localFilesMap = await _listLibraryFilesWithSize(
-      filesDir,
+    final localFilesMap = await _listManagedSyncFilesWithSize(
       libraryProvider.libraryPath,
     );
 
@@ -1099,6 +1089,18 @@ class SyncProvider extends ChangeNotifier {
     return targets.map(InternetAddress.new).toList();
   }
 
+  Future<Map<String, int>> _listManagedSyncFilesWithSize(
+    String libraryPath,
+  ) async {
+    final result = <String, int>{};
+    for (final dirName in const ['files', 'covers', 'phigros']) {
+      final dir = Directory(_joinPath(libraryPath, [dirName]));
+      final entries = await _listLibraryFilesWithSize(dir, libraryPath);
+      result.addAll(entries);
+    }
+    return result;
+  }
+
   Future<Map<String, int>> _listLibraryFilesWithSize(
     Directory filesDir,
     String libraryPath,
@@ -1240,7 +1242,9 @@ class SyncProvider extends ChangeNotifier {
 
   bool _isSafeLibraryFilePath(String path) {
     final normalized = path.replaceAll('\\', '/');
-    if (!normalized.startsWith('files/')) {
+    if (!normalized.startsWith('files/') &&
+        !normalized.startsWith('covers/') &&
+        !normalized.startsWith('phigros/')) {
       return false;
     }
     if (normalized.contains('..') || normalized.contains('//')) {

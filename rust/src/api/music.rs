@@ -3,12 +3,13 @@
 //! Thin wrappers over [`crate::library`]; errors cross the bridge as
 //! user-presentable strings.
 
-use crate::library::{self, import, lyrics, maintenance, paths, playlists, songs, tags};
+use crate::library::{self, import, lyrics, maintenance, paths, phigros, playlists, songs, tags};
 use crate::models::{
-    AudioVersion, LocalLyricCandidate, Playlist, PreviewInfo, SavedLyric, Song, Tag,
+    AudioVersion, LocalLyricCandidate, PhigrosImportResult, Playlist, PreviewInfo, SavedLyric,
+    Song, Tag,
 };
 use flutter_rust_bridge::frb;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 // ---- Library ----
 
@@ -224,4 +225,23 @@ pub fn remove_songs_from_playlist(
     song_ids: Vec<String>,
 ) -> Result<(), String> {
     Ok(playlists::remove_songs(&playlist_id, &song_ids)?)
+}
+
+// ---- Phigros Zone ----
+
+pub fn import_phigros_package(package_dir: String) -> Result<PhigrosImportResult, String> {
+    Ok(phigros::import_package(Path::new(&package_dir))?)
+}
+
+pub fn set_phigros_song_difficulty(song_id: String, difficulty: String) -> Result<(), String> {
+    Ok(phigros::set_difficulty(&song_id, &difficulty)?)
+}
+
+pub fn set_phigros_song_hitsound(
+    song_id: String,
+    mode: String,
+    volume: Option<f64>,
+    offset_ms: Option<i32>,
+) -> Result<(), String> {
+    Ok(phigros::set_hitsound(&song_id, &mode, volume, offset_ms)?)
 }

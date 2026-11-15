@@ -8,6 +8,7 @@ import 'package:aetheria/core/widgets/aether_menu.dart';
 import 'package:aetheria/core/widgets/aether_pressable.dart';
 import 'package:aetheria/features/library/playlist_actions.dart';
 import 'package:aetheria/features/library/ui/settings_modal.dart';
+import 'package:aetheria/features/phigros/phigros_badges.dart';
 import 'package:aetheria/src/rust/models/playlist.dart';
 
 /// Desktop navigation: the whole library, the playlists, and settings.
@@ -20,6 +21,14 @@ class Sidebar extends StatelessWidget {
   Widget build(BuildContext context) {
     final library = context.watch<LibraryProvider>();
     final cfg = context.tokens;
+    final phigrosPlaylist = library.phigrosPlaylist;
+    final regularPlaylists = [
+      for (final playlist in library.playlists)
+        if (playlist.kind != 'phigros') playlist,
+    ];
+    final phigrosCount = library.songs
+        .where((song) => song.phigros != null)
+        .length;
 
     return Container(
       width: width,
@@ -41,6 +50,22 @@ class Sidebar extends StatelessWidget {
                   count: library.songs.length,
                   isActive: library.activePlaylistId == null,
                   onTap: () => library.setActivePlaylist(null),
+                ),
+                const SizedBox(height: AetherSpace.xs),
+                _NavItem(
+                  icon: Icons.sports_esports_rounded,
+                  title: 'Phigros 专区',
+                  count: phigrosPlaylist != null ? phigrosCount : null,
+                  isActive:
+                      phigrosPlaylist != null &&
+                      library.activePlaylistId == phigrosPlaylist.id,
+                  onTap: () {
+                    if (phigrosPlaylist != null) {
+                      library.setActivePlaylist(phigrosPlaylist.id);
+                    } else {
+                      showPhigrosImportDialog(context, library);
+                    }
+                  },
                 ),
                 const SizedBox(height: AetherSpace.xxl),
                 Padding(
@@ -67,7 +92,7 @@ class Sidebar extends StatelessWidget {
                     ],
                   ),
                 ),
-                if (library.playlists.isEmpty)
+                if (regularPlaylists.isEmpty)
                   Padding(
                     padding: const EdgeInsets.symmetric(
                       horizontal: AetherSpace.lg,
@@ -78,7 +103,7 @@ class Sidebar extends StatelessWidget {
                       style: AetherType.bodySmStyle(cfg.textTertiary),
                     ),
                   ),
-                for (final playlist in library.playlists)
+                for (final playlist in regularPlaylists)
                   _NavItem(
                     icon: Icons.queue_music_rounded,
                     title: playlist.name,

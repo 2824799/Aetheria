@@ -11,8 +11,35 @@ pub fn start_playback(
     pitch: f64,
     algo: String,
     normalization_gain: f32,
+    chart_path: Option<String>,
+    hitsound_enabled: bool,
+    hitsound_volume: f32,
+    hitsound_offset_ms: i32,
 ) -> Result<(), String> {
-    player::start_playback(path, volume, pitch, algo, normalization_gain)
+    player::start_playback(
+        path,
+        volume,
+        pitch,
+        algo,
+        normalization_gain,
+        chart_path,
+        hitsound_enabled,
+        hitsound_volume,
+        hitsound_offset_ms,
+    )
+}
+
+pub fn configure_hitsound_bank(se_dir: Option<String>) -> Result<(), String> {
+    player::configure_hitsound_bank(se_dir)
+}
+
+pub fn update_playback_hitsound(
+    chart_path: Option<String>,
+    enabled: bool,
+    volume: f32,
+    offset_ms: i32,
+) -> Result<(), String> {
+    player::update_playback_hitsound(chart_path, enabled, volume, offset_ms)
 }
 
 pub fn pause_playback() -> Result<(), String> {

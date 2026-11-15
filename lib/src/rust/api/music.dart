@@ -217,3 +217,29 @@ Future<void> removeSongsFromPlaylist({
   playlistId: playlistId,
   songIds: songIds,
 );
+
+Future<PhigrosImportResult> importPhigrosPackage({
+  required String packageDir,
+}) => RustLib.instance.api.crateApiMusicImportPhigrosPackage(
+  packageDir: packageDir,
+);
+
+Future<void> setPhigrosSongDifficulty({
+  required String songId,
+  required String difficulty,
+}) => RustLib.instance.api.crateApiMusicSetPhigrosSongDifficulty(
+  songId: songId,
+  difficulty: difficulty,
+);
+
+Future<void> setPhigrosSongHitsound({
+  required String songId,
+  required String mode,
+  double? volume,
+  int? offsetMs,
+}) => RustLib.instance.api.crateApiMusicSetPhigrosSongHitsound(
+  songId: songId,
+  mode: mode,
+  volume: volume,
+  offsetMs: offsetMs,
+);

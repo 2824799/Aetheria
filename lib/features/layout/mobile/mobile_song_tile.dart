@@ -4,6 +4,7 @@ import 'package:aetheria/core/providers/ui_theme_provider.dart';
 import 'package:aetheria/core/utils/audio_quality.dart';
 import 'package:aetheria/core/widgets/aether_pressable.dart';
 import 'package:aetheria/features/library/ui/song_badges.dart';
+import 'package:aetheria/features/phigros/phigros_badges.dart';
 import 'package:aetheria/src/rust/models/song.dart';
 
 /// One song in the mobile list: title, artist, audio quality and tags.
@@ -73,6 +74,10 @@ class MobileSongTile extends StatelessWidget {
                       ).copyWith(fontWeight: FontWeight.w500),
                     ),
                   ),
+                  if (song.phigros != null) ...[
+                    const SizedBox(width: AetherSpace.sm),
+                    PhigrosDifficultyBadge(phigros: song.phigros!),
+                  ],
                   if (hasLyrics) ...[
                     const SizedBox(width: AetherSpace.sm),
                     const LrcBadge(),

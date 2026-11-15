@@ -14,12 +14,35 @@ Future<void> startPlayback({
   required double pitch,
   required String algo,
   required double normalizationGain,
+  String? chartPath,
+  required bool hitsoundEnabled,
+  required double hitsoundVolume,
+  required int hitsoundOffsetMs,
 }) => RustLib.instance.api.crateApiPlaybackStartPlayback(
   path: path,
   volume: volume,
   pitch: pitch,
   algo: algo,
   normalizationGain: normalizationGain,
+  chartPath: chartPath,
+  hitsoundEnabled: hitsoundEnabled,
+  hitsoundVolume: hitsoundVolume,
+  hitsoundOffsetMs: hitsoundOffsetMs,
+);
+
+Future<void> configureHitsoundBank({String? seDir}) =>
+    RustLib.instance.api.crateApiPlaybackConfigureHitsoundBank(seDir: seDir);
+
+Future<void> updatePlaybackHitsound({
+  String? chartPath,
+  required bool enabled,
+  required double volume,
+  required int offsetMs,
+}) => RustLib.instance.api.crateApiPlaybackUpdatePlaybackHitsound(
+  chartPath: chartPath,
+  enabled: enabled,
+  volume: volume,
+  offsetMs: offsetMs,
 );
 
 Future<void> pausePlayback() =>

@@ -180,6 +180,7 @@ Song _copySong(
   required String? lyrics,
   required String? coverPath,
   List<Tag>? tags,
+  PhigrosSongMeta? phigros,
 }) {
   return Song(
     id: song.id,
@@ -192,6 +193,7 @@ Song _copySong(
     createdAt: song.createdAt,
     versions: song.versions,
     tags: tags ?? song.tags,
+    phigros: phigros ?? song.phigros,
   );
 }
 
@@ -205,9 +207,46 @@ class LibraryProvider extends ChangeNotifier {
 
   String? activePlaylistId;
   List<String> playlistSongIds = [];
+  String? activePhigrosChapter;
 
   /// The currently selected playlist, or null when viewing all songs.
   Playlist? get activePlaylist => playlistById(activePlaylistId);
+
+  /// The dedicated Phigros zone playlist if imported/created, else null.
+  Playlist? get phigrosPlaylist {
+    for (final playlist in playlists) {
+      if (playlist.kind == 'phigros') return playlist;
+    }
+    return null;
+  }
+
+  /// Whether the user is currently browsing the Phigros zone playlist.
+  bool get isPhigrosPlaylistActive => activePlaylist?.kind == 'phigros';
+
+  /// Distinct chapter names across Phigros tracks in playlist order.
+  List<String> get phigrosChapters {
+    final chapters = <String>[];
+    final seen = <String>{};
+    for (final song in _phigrosBaseSongs()) {
+      final ch = song.phigros?.chapter;
+      if (ch != null && ch.isNotEmpty && seen.add(ch)) {
+        chapters.add(ch);
+      }
+    }
+    return chapters;
+  }
+
+  Iterable<Song> _phigrosBaseSongs() {
+    final phiPl = phigrosPlaylist;
+    if (phiPl != null && activePlaylistId == phiPl.id && playlistSongIds.isNotEmpty) {
+      final byId = {for (final song in songs) song.id: song};
+      return [
+        for (final id in playlistSongIds)
+          if (byId[id]?.phigros != null) byId[id]!,
+      ];
+    }
+    return songs.where((song) => song.phigros != null);
+  }
 
   /// Returns the playlist matching [id], or null if missing.
   Playlist? playlistById(String? id) {
@@ -947,6 +986,52 @@ class LibraryProvider extends ChangeNotifier {
     }, reload: false);
   }
 
+  // ---------------------------------------------------------------------------
+  // Phigros Zone
+  // ---------------------------------------------------------------------------
+
+  void setActivePhigrosChapter(String? chapter) {
+    if (activePhigrosChapter == chapter) return;
+    activePhigrosChapter = chapter;
+    notifyListeners();
+  }
+
+  Future<PhigrosImportResult> importPhigrosPackage(String packageDir) async {
+    late final PhigrosImportResult result;
+    await _mutate(() async {
+      result = await music.importPhigrosPackage(packageDir: packageDir);
+    });
+    await setActivePlaylist(result.playlistId);
+    return result;
+  }
+
+  Future<Song?> setPhigrosDifficulty(String songId, String difficulty) async {
+    await _mutate(
+      () => music.setPhigrosSongDifficulty(
+        songId: songId,
+        difficulty: difficulty,
+      ),
+    );
+    return songs.where((s) => s.id == songId).firstOrNull;
+  }
+
+  Future<Song?> setPhigrosSongHitsound(
+    String songId, {
+    required String mode,
+    double? volume,
+    int? offsetMs,
+  }) async {
+    await _mutate(
+      () => music.setPhigrosSongHitsound(
+        songId: songId,
+        mode: mode,
+        volume: volume,
+        offsetMs: offsetMs,
+      ),
+    );
+    return songs.where((s) => s.id == songId).firstOrNull;
+  }
+
   Future<void> _reloadActivePlaylistSongs(String playlistId) async {
     if (activePlaylistId != playlistId) {
       return;
@@ -960,6 +1045,7 @@ class LibraryProvider extends ChangeNotifier {
   Future<void> setActivePlaylist(String? playlistId) async {
     final request = ++_playlistRequest;
     activePlaylistId = playlistId;
+    activePhigrosChapter = null;
     playlistSongIds = [];
     notifyListeners();
     if (playlistId == null) {
@@ -1056,6 +1142,11 @@ class LibraryProvider extends ChangeNotifier {
     if (inPlaylist) {
       final byId = {for (final song in songs) song.id: song};
       list = [for (final id in playlistSongIds) ?byId[id]];
+      if (isPhigrosPlaylistActive && activePhigrosChapter != null) {
+        list = list.where(
+          (song) => song.phigros?.chapter == activePhigrosChapter,
+        );
+      }
     }
 
     if (searchQuery.isNotEmpty) {

@@ -35,6 +35,9 @@ class _MobileSongDetailSheetState extends State<MobileSongDetailSheet> {
   @override
   void initState() {
     super.initState();
+    if (widget.initialSong.phigros != null) {
+      activeTab = 'phigros';
+    }
     titleController = TextEditingController(text: widget.initialSong.title);
     artistController = TextEditingController(
       text: widget.initialSong.artist ?? '未知歌手',
@@ -228,6 +231,8 @@ class _MobileSongDetailSheetState extends State<MobileSongDetailSheet> {
               fontSize: AetherType.bodySm,
               indicatorAtTop: true,
               tabs: [
+                if (song.phigros != null)
+                  const AetherTabItem(id: 'phigros', label: '谱面与音效'),
                 const AetherTabItem(id: 'lyrics', label: '滚动歌词'),
                 const AetherTabItem(id: 'lyric_manager', label: '歌词管理'),
                 AetherTabItem(id: 'tags', label: '标签 (${song.tags.length})'),

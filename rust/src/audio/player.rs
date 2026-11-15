@@ -13,9 +13,11 @@ use cpal::{
 };
 
 use crate::audio::dsp::{self, StreamDecoder};
+use crate::audio::hitsound::{HitSoundBank, HitSoundConfig, HitSoundMixer, HitTimeline};
 use crate::audio::profiler;
 use crate::audio::rubberband::RubberBandPitchShifter;
 use crate::audio::sample::{finite_sample, OutputSample, TpdfDither};
+use std::path::Path;
 
 // Thread-safe ring buffer / FIFO used to bridge the decode thread and the cpal
 // hardware callback thread.
@@ -73,6 +75,36 @@ struct OutputDeviceInfo {
     output_latency_mode: String,
 }
 
+#[derive(Default)]
+struct HitSoundShared {
+    se_dir: Mutex<Option<String>>,
+    chart_path: Mutex<Option<String>>,
+    config: Mutex<HitSoundConfig>,
+    se_revision: AtomicU64,
+    chart_revision: AtomicU64,
+}
+
+impl HitSoundShared {
+    fn set_se_dir(&self, dir: Option<String>) {
+        let mut guard = self.se_dir.lock().unwrap_or_else(|e| e.into_inner());
+        if *guard != dir {
+            *guard = dir;
+            self.se_revision.fetch_add(1, Ordering::Release);
+        }
+    }
+
+    fn update(&self, chart_path: Option<String>, config: HitSoundConfig) {
+        {
+            let mut chart_guard = self.chart_path.lock().unwrap_or_else(|e| e.into_inner());
+            if *chart_guard != chart_path {
+                *chart_guard = chart_path;
+                self.chart_revision.fetch_add(1, Ordering::Release);
+            }
+        }
+        *self.config.lock().unwrap_or_else(|e| e.into_inner()) = config;
+    }
+}
+
 #[derive(Clone)]
 struct ProcessingParams {
     pitch: Arc<Mutex<f64>>,
@@ -81,6 +113,7 @@ struct ProcessingParams {
     quality_settings: Arc<Mutex<AudioQualitySettings>>,
     clipped_sample_count: Arc<AtomicU64>,
     peak_bits: Arc<AtomicU64>,
+    hitsound: Arc<HitSoundShared>,
 }
 
 struct DecodePipeline {
@@ -90,6 +123,12 @@ struct DecodePipeline {
     channels: u32,
     params: ProcessingParams,
     pending_output: Vec<f64>,
+    timeline_frame: i64,
+    hitsound_mixer: HitSoundMixer,
+    cached_se_rev: u64,
+    cached_bank: Option<HitSoundBank>,
+    cached_chart_rev: u64,
+    cached_timeline: Option<HitTimeline>,
 }
 
 /// Pitch-shifts the stereo center component while keeping the side component intact.
@@ -234,6 +273,12 @@ impl DecodePipeline {
             channels,
             params,
             pending_output: Vec::new(),
+            timeline_frame: 0,
+            hitsound_mixer: HitSoundMixer::new(),
+            cached_se_rev: u64::MAX,
+            cached_bank: None,
+            cached_chart_rev: u64::MAX,
+            cached_timeline: None,
         })
     }
 
@@ -241,7 +286,66 @@ impl DecodePipeline {
         let _scope = profiler::scope("audio::player::DecodePipeline::seek");
         self.decoder.seek(secs)?;
         self.pending_output.clear();
+        self.hitsound_mixer.reset();
+        self.timeline_frame = (secs * self.sample_rate as f64).round() as i64;
         Ok(())
+    }
+
+    fn mix_hitsounds(&mut self, samples: &mut [f64]) {
+        if samples.is_empty() || self.channels == 0 {
+            return;
+        }
+        let frames = (samples.len() / self.channels as usize) as i64;
+        let block_start = self.timeline_frame;
+        self.timeline_frame += frames;
+
+        let se_rev = self.params.hitsound.se_revision.load(Ordering::Acquire);
+        if se_rev != self.cached_se_rev {
+            let dir_opt = self
+                .params
+                .hitsound
+                .se_dir
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
+            self.cached_bank = dir_opt.and_then(|dir| {
+                HitSoundBank::load_from_dir(Path::new(&dir), self.sample_rate, self.channels).ok()
+            });
+            self.cached_se_rev = se_rev;
+        }
+
+        let chart_rev = self.params.hitsound.chart_revision.load(Ordering::Acquire);
+        if chart_rev != self.cached_chart_rev {
+            let chart_opt = self
+                .params
+                .hitsound
+                .chart_path
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
+            self.cached_timeline =
+                chart_opt.and_then(|path| HitTimeline::load_file(Path::new(&path)).ok());
+            self.cached_chart_rev = chart_rev;
+            self.hitsound_mixer.reset();
+        }
+
+        let cfg = *self
+            .params
+            .hitsound
+            .config
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if let (Some(bank), Some(timeline)) = (&self.cached_bank, &self.cached_timeline) {
+            self.hitsound_mixer.mix_block(
+                samples,
+                self.channels as usize,
+                self.sample_rate,
+                block_start,
+                &cfg,
+                bank,
+                timeline,
+            );
+        }
     }
 
     fn next_block(
@@ -279,6 +383,7 @@ impl DecodePipeline {
                     let tail = shifter.finish();
                     if !tail.is_empty() {
                         let mut tail: Vec<f64> = tail.into_iter().map(f64::from).collect();
+                        self.mix_hitsounds(&mut tail);
                         apply_post_dsp_protection(
                             &mut tail,
                             current_quality.peak_protection_enabled,
@@ -292,6 +397,7 @@ impl DecodePipeline {
                 let tail = shifter.finish();
                 if !tail.is_empty() {
                     let mut tail: Vec<f64> = tail.into_iter().map(f64::from).collect();
+                    self.mix_hitsounds(&mut tail);
                     apply_post_dsp_protection(
                         &mut tail,
                         current_quality.peak_protection_enabled,
@@ -393,6 +499,8 @@ impl DecodePipeline {
         if processed.is_empty() {
             return Ok(Some(processed));
         }
+
+        self.mix_hitsounds(&mut processed);
 
         {
             let _protection_scope =
@@ -514,6 +622,7 @@ struct PlayerState {
     clipped_sample_count: Arc<AtomicU64>,
     peak_bits: Arc<AtomicU64>,
     queue_headroom_history: VecDeque<(Instant, u32)>,
+    hitsound: Arc<HitSoundShared>,
 }
 
 lazy_static::lazy_static! {
@@ -539,6 +648,7 @@ lazy_static::lazy_static! {
         clipped_sample_count: Arc::new(AtomicU64::new(0)),
         peak_bits: Arc::new(AtomicU64::new(0.0f64.to_bits())),
         queue_headroom_history: VecDeque::new(),
+        hitsound: Arc::new(HitSoundShared::default()),
     });
 }
 
@@ -902,6 +1012,10 @@ pub fn start_playback(
     pitch_val: f64,
     pitch_algo: String,
     normalization_gain: f32,
+    chart_path: Option<String>,
+    hitsound_enabled: bool,
+    hitsound_volume: f32,
+    hitsound_offset_ms: i32,
 ) -> Result<(), String> {
     let _scope = profiler::scope("audio::player::start_playback");
     let source = dsp::probe_source_format(&path)?;
@@ -917,6 +1031,14 @@ pub fn start_playback(
     state.buffer = None;
     state.stream_finished.store(false, Ordering::SeqCst);
     state.queue_headroom_history.clear();
+    state.hitsound.update(
+        chart_path,
+        HitSoundConfig {
+            enabled: hitsound_enabled,
+            volume: f64::from(hitsound_volume).clamp(0.0, 1.5),
+            offset_ms: hitsound_offset_ms.clamp(-500, 500),
+        },
+    );
 
     let stop_flag = Arc::new(AtomicBool::new(false));
     let seek_request = Arc::new(Mutex::new(None));
@@ -939,6 +1061,7 @@ pub fn start_playback(
         quality_settings: quality_settings.clone(),
         clipped_sample_count: clipped_sample_count.clone(),
         peak_bits: peak_bits.clone(),
+        hitsound: state.hitsound.clone(),
     };
 
     let (stream, output_info, buffer) = build_output(
@@ -1122,6 +1245,32 @@ pub fn set_pitch(pitch_val: f64, pitch_algo: String) -> Result<(), String> {
     Ok(())
 }
 
+pub fn configure_hitsound_bank(se_dir: Option<String>) -> Result<(), String> {
+    let _scope = profiler::scope("audio::player::configure_hitsound_bank");
+    let state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
+    state.hitsound.set_se_dir(se_dir);
+    Ok(())
+}
+
+pub fn update_playback_hitsound(
+    chart_path: Option<String>,
+    enabled: bool,
+    volume: f32,
+    offset_ms: i32,
+) -> Result<(), String> {
+    let _scope = profiler::scope("audio::player::update_playback_hitsound");
+    let state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
+    state.hitsound.update(
+        chart_path,
+        HitSoundConfig {
+            enabled,
+            volume: f64::from(volume).clamp(0.0, 1.5),
+            offset_ms: offset_ms.clamp(-500, 500),
+        },
+    );
+    Ok(())
+}
+
 pub fn set_output_buffer_ms(ms: i32) -> Result<(), String> {
     let _scope = profiler::scope("audio::player::set_output_buffer_ms");
     let mut state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
@@ -1279,6 +1428,7 @@ mod fidelity_tests {
             quality_settings: Arc::new(Mutex::new(AudioQualitySettings::default())),
             clipped_sample_count: Arc::new(AtomicU64::new(0)),
             peak_bits: Arc::new(AtomicU64::new(0)),
+            hitsound: Arc::new(HitSoundShared::default()),
         }
     }
 
@@ -1452,5 +1602,113 @@ mod fidelity_tests {
         output.extend(processor.finish());
         assert_eq!(output, input);
         assert!(processor.finish().is_empty());
+    }
+
+    #[test]
+    fn decode_pipeline_mixes_hitsounds_with_live_toggle_and_seek_reset() {
+        struct TempDir(std::path::PathBuf);
+        impl Drop for TempDir {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+
+        let dir = TempDir(std::env::temp_dir().join(format!(
+            "aetheria-pipeline-hs-{}",
+            std::process::id()
+        )));
+        let se_dir = dir.0.join("se");
+        std::fs::create_dir_all(&se_dir).unwrap();
+
+        let silence = vec![0.0f64; 48000 * 2];
+        let track = TestWav::float(48000, 2, &silence);
+        let tap_clip = vec![0.5f64; 200 * 2];
+        let tap_wav = TestWav::float(48000, 2, &tap_clip);
+        std::fs::copy(tap_wav.path(), se_dir.join("tap.wav")).unwrap();
+
+        let chart_path = dir.0.join("chart.json");
+        std::fs::write(&chart_path, r#"{"notes":[[0.10,1],[0.80,1]]}"#).unwrap();
+        let chart_str = chart_path.to_string_lossy().into_owned();
+
+        let shared_params = params();
+        let hitsound = shared_params.hitsound.clone();
+        hitsound.set_se_dir(Some(se_dir.to_string_lossy().into_owned()));
+        hitsound.update(
+            Some(chart_str.clone()),
+            HitSoundConfig {
+                enabled: true,
+                volume: 1.0,
+                offset_ms: 0,
+            },
+        );
+
+        let mut pipeline = DecodePipeline::new(track.path(), 48000, 2, shared_params).unwrap();
+        let mut rubberband = None;
+        let mut vocal = None;
+
+        let mut out1 = Vec::new();
+        while out1.len() < 12000 * 2 {
+            let block = pipeline
+                .next_block(&mut rubberband, &mut vocal)
+                .unwrap()
+                .expect("expected initial audio blocks");
+            out1.extend(block);
+        }
+        assert!(
+            out1.len() < 36000 * 2,
+            "initial read exceeded safe pre-second-note window"
+        );
+        assert!(
+            out1[..4800 * 2].iter().all(|s| s.abs() < 1e-6),
+            "frames before first hit note must stay silent"
+        );
+        let first_hit_peak = out1[4800 * 2..5000 * 2]
+            .iter()
+            .fold(0.0f64, |acc, s| acc.max(s.abs()));
+        assert!(
+            first_hit_peak > 0.25,
+            "expected audible tap hit at 0.10s, got peak {first_hit_peak}"
+        );
+
+        hitsound.update(
+            Some(chart_str.clone()),
+            HitSoundConfig {
+                enabled: false,
+                volume: 1.0,
+                offset_ms: 0,
+            },
+        );
+        let mut out2 = Vec::new();
+        while let Some(block) = pipeline.next_block(&mut rubberband, &mut vocal).unwrap() {
+            out2.extend(block);
+        }
+        assert!(
+            out2.iter().all(|s| s.abs() < 1e-6),
+            "live disabling hitsounds must silence upcoming 0.80s hit"
+        );
+
+        hitsound.update(
+            Some(chart_str),
+            HitSoundConfig {
+                enabled: true,
+                volume: 1.0,
+                offset_ms: 0,
+            },
+        );
+        pipeline.seek(0.05).unwrap();
+        let mut out3 = Vec::new();
+        while let Some(block) = pipeline.next_block(&mut rubberband, &mut vocal).unwrap() {
+            out3.extend(block);
+        }
+        let post_seek_first = out3[..8000 * 2]
+            .iter()
+            .fold(0.0f64, |acc, s| acc.max(s.abs()));
+        let post_seek_second = out3[30000 * 2..]
+            .iter()
+            .fold(0.0f64, |acc, s| acc.max(s.abs()));
+        assert!(
+            post_seek_first > 0.25 && post_seek_second > 0.25,
+            "seek reset must allow 0.10s and 0.80s hitsounds to trigger again: {post_seek_first}, {post_seek_second}"
+        );
     }
 }

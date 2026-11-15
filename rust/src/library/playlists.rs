@@ -6,7 +6,7 @@ use crate::models::Playlist;
 use rusqlite::{params, Row};
 use uuid::Uuid;
 
-const PLAYLIST_COLUMNS: &str = "id, name, description, created_at";
+const PLAYLIST_COLUMNS: &str = "id, name, description, created_at, kind";
 
 fn playlist_from_row(row: &Row<'_>) -> rusqlite::Result<Playlist> {
     Ok(Playlist {
@@ -14,7 +14,12 @@ fn playlist_from_row(row: &Row<'_>) -> rusqlite::Result<Playlist> {
         name: row.get(1)?,
         description: row.get(2)?,
         created_at: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+        kind: row.get(4)?,
     })
+}
+
+pub(super) fn playlist_from_row_pub(row: &Row<'_>) -> rusqlite::Result<Playlist> {
+    playlist_from_row(row)
 }
 
 pub fn all() -> Result<Vec<Playlist>> {

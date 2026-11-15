@@ -12,6 +12,8 @@ import 'package:aetheria/features/library/ui/library_import.dart';
 import 'package:aetheria/features/library/ui/song_list_summary.dart';
 import 'package:aetheria/features/library/ui/song_table.dart';
 import 'package:aetheria/features/library/ui/tag_filter.dart';
+import 'package:aetheria/features/phigros/phigros_badges.dart';
+import 'package:aetheria/features/phigros/ui/phigros_zone_header.dart';
 
 /// Desktop library page: title, search, import, tag filter and the song table.
 class MainContent extends StatefulWidget {
@@ -86,6 +88,10 @@ class _MainContentState extends State<MainContent> {
             ],
           ),
           const SizedBox(height: AetherSpace.xl),
+          if (library.isPhigrosPlaylistActive) ...[
+            const PhigrosZoneHeader(),
+            const SizedBox(height: AetherSpace.md),
+          ],
           ValueListenableBuilder<double>(
             valueListenable: _tagCollapseFactor,
             builder: (context, factor, _) => TagFilter(
@@ -176,6 +182,12 @@ class _ImportButton extends StatelessWidget {
           label: '选择文件夹…',
           icon: Icons.folder_outlined,
         ),
+        AetherMenuItem.divider(),
+        AetherMenuItem(
+          value: 'phigros',
+          label: '导入 Phigros 资源包…',
+          icon: Icons.sports_esports_rounded,
+        ),
       ],
     );
     if (!context.mounted) return;
@@ -183,6 +195,8 @@ class _ImportButton extends StatelessWidget {
       await importAudioFiles(context, library);
     } else if (choice == 'folder') {
       await importAudioFolder(context, library);
+    } else if (choice == 'phigros') {
+      await showPhigrosImportDialog(context, library);
     }
   }
 

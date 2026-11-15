@@ -18,6 +18,15 @@ String? managedAudioPath(String libraryPath, String stored) =>
 String? managedCoverPath(String libraryPath, String stored) =>
     _managedPath(libraryPath, 'covers', stored);
 
+String? phigrosSeDirPath(String libraryPath) {
+  if (libraryPath.trim().isEmpty) return null;
+  final clean = libraryPath.replaceAll('\\', '/').replaceAll(RegExp('/+\$'), '');
+  return '$clean/phigros/se';
+}
+
+String? phigrosChartPath(String libraryPath, String stored) =>
+    _managedPath(libraryPath, 'phigros/charts', stored);
+
 String? _managedPath(String libraryPath, String directory, String stored) {
   if (libraryPath.trim().isEmpty) return null;
   final name = managedFileName(stored);
