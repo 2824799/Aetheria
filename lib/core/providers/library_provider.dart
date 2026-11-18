@@ -200,6 +200,7 @@ Song _copySong(
 
 class LibraryProvider extends ChangeNotifier {
   static const String _tagOrderPrefsKey = 'aetheria-tag-order-v1';
+  static const String _activePlaylistPrefsKey = 'aetheria-active-playlist-v1';
 
   List<Song> songs = [];
   List<Tag> tags = [];
@@ -282,6 +283,7 @@ class LibraryProvider extends ChangeNotifier {
   bool _hasLoaded = false;
   int _loadRequest = 0;
   int _playlistRequest = 0;
+  bool _activePlaylistLoaded = false;
   List<Song>? _displaySongsCache;
   TagOrderConfig _tagOrderConfig = const TagOrderConfig();
   bool _tagOrderLoaded = false;
@@ -355,6 +357,40 @@ class LibraryProvider extends ChangeNotifier {
     }
   }
 
+  Future<void> _ensureActivePlaylistLoaded() async {
+    if (_activePlaylistLoaded) return;
+    _activePlaylistLoaded = true;
+    if (activePlaylistId != null) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getString(_activePlaylistPrefsKey);
+      if (activePlaylistId == null && saved != null && saved.isNotEmpty) {
+        activePlaylistId = saved;
+      }
+    } catch (_) {
+      // Pure Dart unit tests may run without a Flutter binding or prefs mock.
+    }
+  }
+
+  Future<void> _saveActivePlaylistToPrefs(
+    String? playlistId, {
+    int? request,
+  }) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (request != null && request != _playlistRequest) {
+        return;
+      }
+      if (playlistId == null || playlistId.isEmpty) {
+        await prefs.remove(_activePlaylistPrefsKey);
+      } else {
+        await prefs.setString(_activePlaylistPrefsKey, playlistId);
+      }
+    } catch (_) {
+      // Pure Dart unit tests may run without a Flutter binding or prefs mock.
+    }
+  }
+
   Song _songWithSortedTags(Song song) {
     if (_tagOrderConfig.isSorted(song.tags)) {
       return song;
@@ -386,6 +422,7 @@ class LibraryProvider extends ChangeNotifier {
       }
 
       await _ensureTagOrderLoaded();
+      await _ensureActivePlaylistLoaded();
       final playlistId = activePlaylistId;
       final (
         loadedSongs,
@@ -413,7 +450,16 @@ class LibraryProvider extends ChangeNotifier {
       playlists = loadedPlaylists;
       libraryPath = loadedPath;
       songIdsWithLyrics = lyricSongIds.toSet();
-      if (activePlaylistId == playlistId) {
+      if (activePlaylistId != null &&
+          !loadedPlaylists.any((playlist) => playlist.id == activePlaylistId)) {
+        final missingId = activePlaylistId;
+        activePlaylistId = null;
+        playlistSongIds = [];
+        activePhigrosChapter = null;
+        if (missingId == playlistId) {
+          unawaited(_saveActivePlaylistToPrefs(null));
+        }
+      } else if (activePlaylistId == playlistId) {
         playlistSongIds = loadedPlaylistSongIds;
       }
     } catch (e) {
@@ -987,8 +1033,12 @@ class LibraryProvider extends ChangeNotifier {
     return _mutate(() async {
       await music.deletePlaylist(id: id);
       if (activePlaylistId == id) {
+        final request = ++_playlistRequest;
+        _activePlaylistLoaded = true;
         activePlaylistId = null;
         playlistSongIds = [];
+        activePhigrosChapter = null;
+        await _saveActivePlaylistToPrefs(null, request: request);
       }
       if (clipboard?.sourcePlaylistId == id) {
         clipboard = null;
@@ -1078,14 +1128,21 @@ class LibraryProvider extends ChangeNotifier {
 
   Future<void> setActivePlaylist(String? playlistId) async {
     final request = ++_playlistRequest;
+    _activePlaylistLoaded = true;
     activePlaylistId = playlistId;
     activePhigrosChapter = null;
     playlistSongIds = [];
     notifyListeners();
+    final persistFuture = _saveActivePlaylistToPrefs(
+      playlistId,
+      request: request,
+    );
     if (playlistId == null) {
+      await persistFuture;
       return;
     }
     final ids = await _playlistSongIdsOrEmpty(playlistId);
+    await persistFuture;
     if (request != _playlistRequest) {
       return;
     }

@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:aetheria/core/providers/library_provider.dart';
 import 'package:aetheria/src/rust/frb_generated.dart';
@@ -162,6 +163,12 @@ class _FakeLibraryApi extends Fake implements RustLibApi {
       }
     }
   }
+
+  @override
+  Future<void> crateApiMusicDeletePlaylist({required String id}) async {
+    dbPlaylists.removeWhere((p) => p.id == id);
+    dbPlaylistSongs.remove(id);
+  }
 }
 
 void main() {
@@ -222,12 +229,20 @@ void main() {
     expect(provider.displaySongs.map((song) => song.id), ['1', '2']);
   });
 
-  group('importSongs playlist targeting', () {
+  group('LibraryProvider persistence & import', () {
     final api = _FakeLibraryApi();
 
-    setUpAll(() => RustLib.initMock(api: api));
+    setUpAll(() {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      RustLib.initMock(api: api);
+    });
     tearDownAll(RustLib.dispose);
-    setUp(api.reset);
+    setUp(() {
+      api.reset();
+      SharedPreferences.setMockInitialValues({});
+    });
+
+    group('importSongs playlist targeting', () {
 
     test('adds imported files to active playlist by default', () async {
       const favorite = Playlist(id: 'pl-fav', name: '我的最爱', createdAt: '');
@@ -379,5 +394,79 @@ void main() {
         expect(provider.songs, hasLength(1));
       },
     );
+  });
+
+    group('active playlist persistence', () {
+
+    test('restores selected playlist across restarts and clears on All Songs or deletion', () async {
+      const pl1 = Playlist(id: 'pl-1', name: '1', createdAt: '');
+      const pl2 = Playlist(id: 'pl-2', name: '2', createdAt: '');
+      api.dbPlaylists.addAll([pl1, pl2]);
+      api.dbSongs.addAll([
+        _song('s1', 'Song One'),
+        _song('s2', 'Song Two'),
+      ]);
+      api.dbPlaylistSongs[pl1.id] = ['s2'];
+
+      final firstSession = LibraryProvider();
+      addTearDown(firstSession.dispose);
+      await firstSession.loadLibrary();
+      expect(firstSession.activePlaylistId, isNull);
+
+      await firstSession.setActivePlaylist(pl1.id);
+      expect(firstSession.activePlaylistId, pl1.id);
+      expect(firstSession.displaySongs.map((s) => s.id), ['s2']);
+
+      // Simulates closing and reopening the app cleanly.
+      final restoredSession = LibraryProvider();
+      addTearDown(restoredSession.dispose);
+      await restoredSession.loadLibrary();
+      expect(restoredSession.activePlaylistId, pl1.id);
+      expect(restoredSession.activePlaylist?.id, pl1.id);
+      expect(restoredSession.playlistSongIds, ['s2']);
+      expect(restoredSession.displaySongs.map((s) => s.id), ['s2']);
+
+      // Selecting All Songs persists null across future launches.
+      await restoredSession.setActivePlaylist(null);
+      final allSongsSession = LibraryProvider();
+      addTearDown(allSongsSession.dispose);
+      await allSongsSession.loadLibrary();
+      expect(allSongsSession.activePlaylistId, isNull);
+      expect(allSongsSession.displaySongs.map((s) => s.id), ['s1', 's2']);
+
+      // Deleting the active playlist clears the persisted selection too.
+      await allSongsSession.setActivePlaylist(pl2.id);
+      await allSongsSession.deletePlaylist(pl2.id);
+      expect(allSongsSession.activePlaylistId, isNull);
+      final afterDeleteSession = LibraryProvider();
+      addTearDown(afterDeleteSession.dispose);
+      await afterDeleteSession.loadLibrary();
+      expect(afterDeleteSession.activePlaylistId, isNull);
+    });
+
+    test('falls back to All Songs when persisted playlist no longer exists', () async {
+      const pl1 = Playlist(id: 'pl-1', name: '1', createdAt: '');
+      api.dbPlaylists.add(pl1);
+      api.dbSongs.add(_song('s1', 'Song One'));
+
+      final firstSession = LibraryProvider();
+      addTearDown(firstSession.dispose);
+      await firstSession.loadLibrary();
+      await firstSession.setActivePlaylist(pl1.id);
+
+      // Playlist vanished externally (e.g., library reset or LAN sync).
+      api.dbPlaylists.clear();
+
+      final reopened = LibraryProvider();
+      addTearDown(reopened.dispose);
+      await reopened.loadLibrary();
+      expect(reopened.activePlaylistId, isNull);
+      expect(reopened.playlistSongIds, isEmpty);
+      expect(reopened.displaySongs.map((s) => s.id), ['s1']);
+
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('aetheria-active-playlist-v1'), isNull);
+    });
+    });
   });
 }
