@@ -17,7 +17,9 @@ import 'package:aetheria/features/layout/mobile/mobile_song_context_menu.dart';
 import 'package:aetheria/features/layout/mobile/mobile_song_reveal.dart';
 import 'package:aetheria/features/layout/mobile/mobile_song_tile.dart';
 import 'package:aetheria/features/library/ui/settings_modal.dart';
+import 'package:aetheria/features/library/ui/song_list_scroll_persistence.dart';
 import 'package:aetheria/features/library/ui/song_list_summary.dart';
+import 'package:aetheria/features/library/ui/song_table/song_table_scroll_controller.dart';
 import 'package:aetheria/features/library/ui/tag_filter.dart';
 import 'package:aetheria/features/library/ui/tag_manager_modal.dart';
 import 'package:aetheria/features/phigros/ui/phigros_zone_header.dart';
@@ -45,22 +47,29 @@ class _MobileLayoutState extends State<MobileLayout>
 
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final TextEditingController _searchController = TextEditingController();
-  final ScrollController _scrollController = ScrollController();
+  late final RestorableScrollController _scrollController;
+  late final SongListScrollPersistence _scrollPersistence;
   final ValueNotifier<double> _tagCollapseFactor = ValueNotifier(0);
-  late final MobileSongRevealer _revealer = MobileSongRevealer(
-    _scrollController,
-  );
+  late final MobileSongRevealer _revealer;
   bool _imeDismissedInBackground = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _scrollController = RestorableScrollController(keepScrollOffset: false);
+    _scrollPersistence = SongListScrollPersistence(
+      viewport: SongListViewport.mobile,
+      controller: _scrollController,
+      isMounted: () => mounted,
+    )..init();
+    _revealer = MobileSongRevealer(_scrollController);
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _scrollPersistence.dispose();
     _searchController.dispose();
     _scrollController.dispose();
     _tagCollapseFactor.dispose();
@@ -73,10 +82,12 @@ class _MobileLayoutState extends State<MobileLayout>
     // foreground unless the focus was dropped while leaving.
     if (state == AppLifecycleState.resumed) {
       _imeDismissedInBackground = false;
-    } else if (state != AppLifecycleState.detached &&
-        !_imeDismissedInBackground) {
-      _imeDismissedInBackground = true;
-      _dismissKeyboard();
+    } else {
+      _scrollPersistence.flushPendingPersist();
+      if (state != AppLifecycleState.detached && !_imeDismissedInBackground) {
+        _imeDismissedInBackground = true;
+        _dismissKeyboard();
+      }
     }
   }
 
@@ -89,6 +100,7 @@ class _MobileLayoutState extends State<MobileLayout>
     final delta = notification.scrollDelta ?? 0;
     if (notification.metrics.axis == Axis.vertical &&
         notification.depth == 0 &&
+        !_scrollPersistence.isRestoring &&
         delta > 0 &&
         _tagCollapseFactor.value < 1) {
       _tagCollapseFactor.value = math.min(
@@ -285,13 +297,16 @@ class _MobileLayoutState extends State<MobileLayout>
     required double bottomPadding,
   }) {
     final songs = library.displaySongs;
+    _scrollPersistence.syncWithLibrary(library, hasSongs: songs.isNotEmpty);
     if (songs.isEmpty) {
       return SongListEmptyState(library: library, touch: true);
     }
 
     return NotificationListener<ScrollUpdateNotification>(
       onNotification: _collapseTagsOnScroll,
-      child: ListView.builder(
+      child: NotificationListener<ScrollEndNotification>(
+        onNotification: _scrollPersistence.handleScrollEnd,
+        child: ListView.builder(
         controller: _scrollController,
         keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
         padding: EdgeInsets.fromLTRB(
@@ -321,6 +336,7 @@ class _MobileLayoutState extends State<MobileLayout>
             ),
           );
         },
+        ),
       ),
     );
   }

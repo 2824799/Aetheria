@@ -43,8 +43,11 @@ class _MainContentState extends State<MainContent> {
     final delta = notification.scrollDelta ?? 0;
     final draggingThumb =
         widget.songTableController?.isScrollbarDragging ?? false;
+    final restoringScroll =
+        widget.songTableController?.isRestoringScroll ?? false;
     if (notification.metrics.axis == Axis.vertical &&
         !draggingThumb &&
+        !restoringScroll &&
         delta > 0 &&
         _tagCollapseFactor.value < 1) {
       _tagCollapseFactor.value = math.min(

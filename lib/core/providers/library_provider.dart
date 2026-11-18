@@ -198,9 +198,13 @@ Song _copySong(
   );
 }
 
+enum SongListViewport { desktop, mobile }
+
 class LibraryProvider extends ChangeNotifier {
   static const String _tagOrderPrefsKey = 'aetheria-tag-order-v1';
   static const String _activePlaylistPrefsKey = 'aetheria-active-playlist-v1';
+  static const String _scrollOffsetsPrefsKey =
+      'aetheria-song-list-scroll-offsets-v1';
 
   List<Song> songs = [];
   List<Tag> tags = [];
@@ -284,6 +288,16 @@ class LibraryProvider extends ChangeNotifier {
   int _loadRequest = 0;
   int _playlistRequest = 0;
   bool _activePlaylistLoaded = false;
+  String? _loadingPlaylistSongsId;
+  final Map<SongListViewport, Map<String, double>> _songListScrollOffsets = {
+    for (final viewport in SongListViewport.values) viewport: <String, double>{},
+  };
+  final Map<SongListViewport, Set<String>> _dirtyScrollScopes = {
+    for (final viewport in SongListViewport.values) viewport: <String>{},
+  };
+  bool _scrollOffsetsLoaded = false;
+  Future<void>? _scrollOffsetsLoadFuture;
+  int _scrollOffsetPersistSeq = 0;
   List<Song>? _displaySongsCache;
   TagOrderConfig _tagOrderConfig = const TagOrderConfig();
   bool _tagOrderLoaded = false;
@@ -391,6 +405,169 @@ class LibraryProvider extends ChangeNotifier {
     }
   }
 
+  /// Whether persisted song list scroll offsets have finished loading.
+  bool get hasLoadedSongListScrollOffsets => _scrollOffsetsLoaded;
+
+  /// True while [activePlaylistId]'s track IDs are still loading asynchronously.
+  bool get isLoadingActivePlaylistSongs =>
+      _loadingPlaylistSongsId != null &&
+      _loadingPlaylistSongsId == activePlaylistId;
+
+  /// Scroll-offset persistence key for the current unfiltered view, or null
+  /// when search/tag filters temporarily narrow the list.
+  String? get songListScrollScope {
+    if (searchQuery.isNotEmpty ||
+        selectedTags.isNotEmpty ||
+        excludedTags.isNotEmpty) {
+      return null;
+    }
+    final playlistId = activePlaylistId;
+    if (playlistId == null) {
+      return 'all';
+    }
+    if (isPhigrosPlaylistActive && activePhigrosChapter != null) {
+      return 'playlist:$playlistId:$activePhigrosChapter';
+    }
+    return 'playlist:$playlistId';
+  }
+
+  /// Returns the saved scroll offset for [viewport] and [scope], or `0.0`.
+  double savedSongListScrollOffset(SongListViewport viewport, String? scope) {
+    if (scope == null) {
+      return 0.0;
+    }
+    return _songListScrollOffsets[viewport]![scope] ?? 0.0;
+  }
+
+  /// Updates the in-memory scroll offset for [viewport] and [scope] without
+  /// notifying listeners. Returns true when the stored value changed.
+  bool recordSongListScrollOffset(
+    SongListViewport viewport,
+    String scope,
+    double offset,
+  ) {
+    if (!offset.isFinite || offset < 0) {
+      return false;
+    }
+    final normalized = offset <= 0.5 ? 0.0 : offset;
+    final map = _songListScrollOffsets[viewport]!;
+    final previous = map[scope] ?? 0.0;
+    if ((previous - normalized).abs() < 0.5) {
+      return false;
+    }
+    _dirtyScrollScopes[viewport]!.add(scope);
+    if (normalized == 0.0) {
+      map.remove(scope);
+    } else {
+      map[scope] = normalized;
+    }
+    return true;
+  }
+
+  Future<void> ensureSongListScrollOffsetsLoaded() {
+    if (_scrollOffsetsLoaded) {
+      return Future<void>.value();
+    }
+    return _scrollOffsetsLoadFuture ??= _loadScrollOffsetsFromPrefs();
+  }
+
+  Future<void> _loadScrollOffsetsFromPrefs() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_scrollOffsetsPrefsKey);
+      if (raw != null && raw.isNotEmpty) {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map) {
+          for (final viewport in SongListViewport.values) {
+            final bucket = decoded[viewport.name];
+            if (bucket is! Map) continue;
+            final target = _songListScrollOffsets[viewport]!;
+            final dirty = _dirtyScrollScopes[viewport]!;
+            for (final entry in bucket.entries) {
+              final key = entry.key;
+              final val = entry.value;
+              if (key is String && val is num && !dirty.contains(key)) {
+                final offset = val.toDouble();
+                if (offset.isFinite && offset > 0.5) {
+                  target[key] = offset;
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch (_) {
+      // Pure Dart unit tests may run without a Flutter binding or prefs mock.
+    } finally {
+      _scrollOffsetsLoaded = true;
+      _scrollOffsetsLoadFuture = null;
+    }
+  }
+
+  String? _encodeScrollOffsets() {
+    final encoded = <String, Object?>{};
+    for (final viewport in SongListViewport.values) {
+      final map = _songListScrollOffsets[viewport]!;
+      if (map.isNotEmpty) {
+        encoded[viewport.name] = Map<String, double>.from(map);
+      }
+    }
+    return encoded.isEmpty ? null : jsonEncode(encoded);
+  }
+
+  Future<void> persistSongListScrollOffsets() async {
+    final seq = ++_scrollOffsetPersistSeq;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (seq != _scrollOffsetPersistSeq) {
+        return;
+      }
+      final payload = _encodeScrollOffsets();
+      if (payload == null) {
+        await prefs.remove(_scrollOffsetsPrefsKey);
+      } else {
+        await prefs.setString(_scrollOffsetsPrefsKey, payload);
+      }
+    } catch (_) {
+      // Pure Dart unit tests may run without a Flutter binding or prefs mock.
+    }
+  }
+
+  bool _matchesPlaylistId(String rest, String id) =>
+      rest == id || rest.startsWith('$id:');
+
+  bool _removePlaylistScrollScopesWhere(bool Function(String rest) shouldRemove) {
+    const prefix = 'playlist:';
+    var removedAny = false;
+    for (final viewport in SongListViewport.values) {
+      final map = _songListScrollOffsets[viewport]!;
+      final keysToRemove = <String>[
+        for (final key in map.keys)
+          if (key.startsWith(prefix) &&
+              shouldRemove(key.substring(prefix.length)))
+            key,
+      ];
+      for (final key in keysToRemove) {
+        map.remove(key);
+        _dirtyScrollScopes[viewport]!.add(key);
+        removedAny = true;
+      }
+    }
+    return removedAny;
+  }
+
+  bool _removePlaylistScrollOffsets(String playlistId) =>
+      _removePlaylistScrollScopesWhere(
+        (rest) => _matchesPlaylistId(rest, playlistId),
+      );
+
+  bool _pruneMissingPlaylistScrollOffsets(List<Playlist> validPlaylists) {
+    final validIds = [for (final playlist in validPlaylists) playlist.id];
+    return _removePlaylistScrollScopesWhere(
+      (rest) => !validIds.any((id) => _matchesPlaylistId(rest, id)),
+    );
+  }
+
   Song _songWithSortedTags(Song song) {
     if (_tagOrderConfig.isSorted(song.tags)) {
       return song;
@@ -423,6 +600,7 @@ class LibraryProvider extends ChangeNotifier {
 
       await _ensureTagOrderLoaded();
       await _ensureActivePlaylistLoaded();
+      await ensureSongListScrollOffsetsLoaded();
       final playlistId = activePlaylistId;
       final (
         loadedSongs,
@@ -450,6 +628,9 @@ class LibraryProvider extends ChangeNotifier {
       playlists = loadedPlaylists;
       libraryPath = loadedPath;
       songIdsWithLyrics = lyricSongIds.toSet();
+      if (_pruneMissingPlaylistScrollOffsets(loadedPlaylists)) {
+        unawaited(persistSongListScrollOffsets());
+      }
       if (activePlaylistId != null &&
           !loadedPlaylists.any((playlist) => playlist.id == activePlaylistId)) {
         final missingId = activePlaylistId;
@@ -1035,10 +1216,14 @@ class LibraryProvider extends ChangeNotifier {
       if (activePlaylistId == id) {
         final request = ++_playlistRequest;
         _activePlaylistLoaded = true;
+        _loadingPlaylistSongsId = null;
         activePlaylistId = null;
         playlistSongIds = [];
         activePhigrosChapter = null;
         await _saveActivePlaylistToPrefs(null, request: request);
+      }
+      if (_removePlaylistScrollOffsets(id)) {
+        await persistSongListScrollOffsets();
       }
       if (clipboard?.sourcePlaylistId == id) {
         clipboard = null;
@@ -1132,6 +1317,7 @@ class LibraryProvider extends ChangeNotifier {
     activePlaylistId = playlistId;
     activePhigrosChapter = null;
     playlistSongIds = [];
+    _loadingPlaylistSongsId = playlistId;
     notifyListeners();
     final persistFuture = _saveActivePlaylistToPrefs(
       playlistId,
@@ -1146,6 +1332,7 @@ class LibraryProvider extends ChangeNotifier {
     if (request != _playlistRequest) {
       return;
     }
+    _loadingPlaylistSongsId = null;
     playlistSongIds = ids;
     notifyListeners();
   }

@@ -5,8 +5,35 @@ import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:flutter/scheduler.dart' show Ticker, TickerProvider;
 import 'package:flutter/widgets.dart';
 
+/// Allows a [ScrollController] to update the initial offset used the next time
+/// a [ScrollPosition] attaches (e.g. cold startup or returning from empty).
+mixin PendingInitialScrollOffset on ScrollController {
+  double? pendingInitialScrollOffset;
+
+  @override
+  double get initialScrollOffset =>
+      pendingInitialScrollOffset ?? super.initialScrollOffset;
+}
+
+/// Plain [ScrollController] that supports updating [pendingInitialScrollOffset].
+class RestorableScrollController extends ScrollController
+    with PendingInitialScrollOffset {
+  RestorableScrollController({
+    super.initialScrollOffset,
+    super.keepScrollOffset,
+    super.debugLabel,
+  });
+}
+
 /// Smooth discrete mouse wheel steps, while thumb and touch drags stay direct.
-class SongTableScrollController extends ScrollController {
+class SongTableScrollController extends ScrollController
+    with PendingInitialScrollOffset {
+  SongTableScrollController({
+    super.initialScrollOffset,
+    super.keepScrollOffset,
+    super.debugLabel,
+  });
+
   bool smoothWheel = true;
   PointerDeviceKind pointerKind = PointerDeviceKind.mouse;
 
@@ -19,6 +46,8 @@ class SongTableScrollController extends ScrollController {
     physics: physics,
     context: context,
     oldPosition: oldPosition,
+    initialPixels: initialScrollOffset,
+    keepScrollOffset: keepScrollOffset,
     smoothWheel: () => smoothWheel && pointerKind == PointerDeviceKind.mouse,
   );
 }
@@ -28,6 +57,8 @@ class _SongTableScrollPosition extends ScrollPositionWithSingleContext {
     required super.physics,
     required super.context,
     super.oldPosition,
+    super.initialPixels,
+    super.keepScrollOffset,
     required this.smoothWheel,
   });
 

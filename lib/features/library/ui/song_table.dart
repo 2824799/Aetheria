@@ -10,6 +10,7 @@ import 'package:aetheria/core/providers/audio_player_provider.dart';
 import 'package:aetheria/core/providers/library_provider.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
 import 'package:aetheria/core/widgets/aether_toast.dart';
+import 'package:aetheria/features/library/ui/song_list_scroll_persistence.dart';
 import 'package:aetheria/features/library/ui/song_list_summary.dart';
 import 'package:aetheria/features/library/ui/song_table/song_tag_alignment.dart';
 import 'package:aetheria/features/library/ui/song_table/song_table_actions.dart';
@@ -31,6 +32,11 @@ class SongTableController {
   _SongTableState? _state;
 
   bool get isScrollbarDragging => _state?._isScrollbarDragging ?? false;
+
+  bool get isRestoringScroll => _state?._scrollPersistence.isRestoring ?? false;
+
+  void flushScrollPersistence() =>
+      _state?._scrollPersistence.flushPendingPersist();
 
   /// Scrolls [songId] into view. Returns false when it is not in the list.
   Future<bool> revealSong(String songId) async {
@@ -63,8 +69,8 @@ class _SongTableState extends State<SongTable> {
   static const double _scrollbarHitTestWidth = 18;
 
   final SongTableTextCache _textCache = SongTableTextCache();
-  final SongTableScrollController _verticalController =
-      SongTableScrollController();
+  late final SongTableScrollController _verticalController;
+  late final SongListScrollPersistence _scrollPersistence;
   final SongTableSelection _selection = SongTableSelection();
   final SongTableColumnLayout _layout = SongTableColumnLayout();
   late final SongTableCells _cells = SongTableCells(
@@ -88,6 +94,12 @@ class _SongTableState extends State<SongTable> {
   @override
   void initState() {
     super.initState();
+    _verticalController = SongTableScrollController(keepScrollOffset: false);
+    _scrollPersistence = SongListScrollPersistence(
+      viewport: SongListViewport.desktop,
+      controller: _verticalController,
+      isMounted: () => mounted,
+    )..init();
     widget.controller?._attach(this);
     _verticalController.addListener(_textCache.deferWarmup);
     _layout
@@ -107,6 +119,7 @@ class _SongTableState extends State<SongTable> {
   @override
   void dispose() {
     widget.controller?._detach(this);
+    _scrollPersistence.dispose();
     _layout.dispose();
     _textCache.dispose();
     _verticalController.dispose();
@@ -331,6 +344,7 @@ class _SongTableState extends State<SongTable> {
     );
     final cfg = context.tokens;
     final songs = library.displaySongs;
+    _scrollPersistence.syncWithLibrary(library, hasSongs: songs.isNotEmpty);
 
     _textCache.configurePrefetch(
       revision: songs,
@@ -418,33 +432,36 @@ class _SongTableState extends State<SongTable> {
       onPointerCancel: (_) => _selection.pressEnd(),
       child: Stack(
         children: [
-          ListView.builder(
-            controller: _verticalController,
-            itemExtent: _rowHeight,
-            // Fast thumb jumps replace most visible rows. Keep the speculative
-            // work bounded instead of building many extra rows of text and
-            // tag scrollables.
-            scrollCacheExtent: const ScrollCacheExtent.pixels(_rowHeight * 2),
-            addAutomaticKeepAlives: false,
-            itemCount: songs.length,
-            itemBuilder: (context, index) {
-              final song = songs[index];
-              return SongTableRow(
-                song: song,
-                width: tableWidth,
-                height: _rowHeight,
-                leadingWidth: _leadingColumnWidth,
-                hasLyrics: library.songHasLyrics(song),
-                cells: _cells,
-                tagAlignmentPlan: tagAlignmentPlan,
-                selection: _selection,
-                onTap: () => _handleRowTap(song, index, songs),
-                onPlayPressed: (isLoaded) =>
-                    _handlePlayPressed(song, songs, isLoaded),
-                onContextMenu: (position) =>
-                    _openContextMenu(position, song, index),
-              );
-            },
+          NotificationListener<ScrollEndNotification>(
+            onNotification: _scrollPersistence.handleScrollEnd,
+            child: ListView.builder(
+              controller: _verticalController,
+              itemExtent: _rowHeight,
+              // Fast thumb jumps replace most visible rows. Keep the speculative
+              // work bounded instead of building many extra rows of text and
+              // tag scrollables.
+              scrollCacheExtent: const ScrollCacheExtent.pixels(_rowHeight * 2),
+              addAutomaticKeepAlives: false,
+              itemCount: songs.length,
+              itemBuilder: (context, index) {
+                final song = songs[index];
+                return SongTableRow(
+                  song: song,
+                  width: tableWidth,
+                  height: _rowHeight,
+                  leadingWidth: _leadingColumnWidth,
+                  hasLyrics: library.songHasLyrics(song),
+                  cells: _cells,
+                  tagAlignmentPlan: tagAlignmentPlan,
+                  selection: _selection,
+                  onTap: () => _handleRowTap(song, index, songs),
+                  onPlayPressed: (isLoaded) =>
+                      _handlePlayPressed(song, songs, isLoaded),
+                  onContextMenu: (position) =>
+                      _openContextMenu(position, song, index),
+                );
+              },
+            ),
           ),
           Positioned.fill(
             child: IgnorePointer(

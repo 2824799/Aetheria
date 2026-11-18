@@ -468,5 +468,180 @@ void main() {
       expect(prefs.getString('aetheria-active-playlist-v1'), isNull);
     });
     });
+
+    group('song list scroll offset persistence', () {
+      test('persists offsets per viewport and scope across restarts', () async {
+        const pl1 = Playlist(id: 'pl-1', name: '1', createdAt: '');
+        const phi = Playlist(
+          id: 'pl-phi',
+          name: 'Phigros',
+          createdAt: '',
+          kind: 'phigros',
+        );
+        api.dbPlaylists.addAll([pl1, phi]);
+        api.dbSongs.addAll([
+          _song('s1', 'Song One'),
+          _song('s2', 'Song Two'),
+        ]);
+
+        final session1 = LibraryProvider();
+        addTearDown(session1.dispose);
+        await session1.loadLibrary();
+
+        expect(session1.songListScrollScope, 'all');
+        expect(
+          session1.recordSongListScrollOffset(
+            SongListViewport.desktop,
+            'all',
+            624.0,
+          ),
+          isTrue,
+        );
+        expect(
+          session1.recordSongListScrollOffset(
+            SongListViewport.desktop,
+            'playlist:pl-1',
+            1248.0,
+          ),
+          isTrue,
+        );
+        expect(
+          session1.recordSongListScrollOffset(
+            SongListViewport.mobile,
+            'all',
+            310.0,
+          ),
+          isTrue,
+        );
+        await session1.persistSongListScrollOffsets();
+
+        await session1.setActivePlaylist(phi.id);
+        expect(session1.songListScrollScope, 'playlist:pl-phi');
+        session1.setActivePhigrosChapter('Legacy');
+        expect(session1.songListScrollScope, 'playlist:pl-phi:Legacy');
+        session1.recordSongListScrollOffset(
+          SongListViewport.desktop,
+          'playlist:pl-phi:Legacy',
+          416.0,
+        );
+        await session1.persistSongListScrollOffsets();
+
+        // Active search or tag filters temporarily hide the persisted scope.
+        session1.setSearchQuery('Song');
+        expect(session1.songListScrollScope, isNull);
+        session1.setSearchQuery('');
+        expect(session1.songListScrollScope, 'playlist:pl-phi:Legacy');
+        session1.toggleTag(1);
+        expect(session1.songListScrollScope, isNull);
+        session1.clearTagFilters();
+
+        final session2 = LibraryProvider();
+        addTearDown(session2.dispose);
+        await session2.loadLibrary();
+
+        expect(
+          session2.savedSongListScrollOffset(SongListViewport.desktop, 'all'),
+          624.0,
+        );
+        expect(
+          session2.savedSongListScrollOffset(
+            SongListViewport.desktop,
+            'playlist:pl-1',
+          ),
+          1248.0,
+        );
+        expect(
+          session2.savedSongListScrollOffset(
+            SongListViewport.desktop,
+            'playlist:pl-phi:Legacy',
+          ),
+          416.0,
+        );
+        expect(
+          session2.savedSongListScrollOffset(SongListViewport.mobile, 'all'),
+          310.0,
+        );
+
+        // Returning to the very top clears the stored offset across restarts.
+        expect(
+          session2.recordSongListScrollOffset(
+            SongListViewport.desktop,
+            'all',
+            0.0,
+          ),
+          isTrue,
+        );
+        await session2.persistSongListScrollOffsets();
+
+        final session3 = LibraryProvider();
+        addTearDown(session3.dispose);
+        await session3.loadLibrary();
+        expect(
+          session3.savedSongListScrollOffset(SongListViewport.desktop, 'all'),
+          0.0,
+        );
+      });
+
+      test('prunes offsets for deleted or vanished playlists', () async {
+        const pl1 = Playlist(id: 'pl-1', name: '1', createdAt: '');
+        const pl2 = Playlist(id: 'pl-2', name: '2', createdAt: '');
+        api.dbPlaylists.addAll([pl1, pl2]);
+        api.dbSongs.add(_song('s1', 'Song One'));
+
+        final session1 = LibraryProvider();
+        addTearDown(session1.dispose);
+        await session1.loadLibrary();
+        session1.recordSongListScrollOffset(
+          SongListViewport.desktop,
+          'all',
+          200.0,
+        );
+        session1.recordSongListScrollOffset(
+          SongListViewport.desktop,
+          'playlist:pl-1',
+          500.0,
+        );
+        session1.recordSongListScrollOffset(
+          SongListViewport.desktop,
+          'playlist:pl-2',
+          700.0,
+        );
+        await session1.persistSongListScrollOffsets();
+
+        await session1.deletePlaylist(pl1.id);
+        expect(
+          session1.savedSongListScrollOffset(
+            SongListViewport.desktop,
+            'playlist:pl-1',
+          ),
+          0.0,
+        );
+        expect(
+          session1.savedSongListScrollOffset(
+            SongListViewport.desktop,
+            'playlist:pl-2',
+          ),
+          700.0,
+        );
+
+        // Simulate external removal of pl-2 before next startup.
+        api.dbPlaylists.removeWhere((p) => p.id == pl2.id);
+
+        final session2 = LibraryProvider();
+        addTearDown(session2.dispose);
+        await session2.loadLibrary();
+        expect(
+          session2.savedSongListScrollOffset(SongListViewport.desktop, 'all'),
+          200.0,
+        );
+        expect(
+          session2.savedSongListScrollOffset(
+            SongListViewport.desktop,
+            'playlist:pl-2',
+          ),
+          0.0,
+        );
+      });
+    });
   });
 }

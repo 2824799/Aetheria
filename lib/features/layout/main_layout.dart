@@ -80,9 +80,13 @@ class _MainLayoutState extends State<MainLayout>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused ||
-        state == AppLifecycleState.hidden) {
-      _dismissKeyboard();
-      _imeDismissedInBackground = true;
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.detached) {
+      _songTableController.flushScrollPersistence();
+      if (state != AppLifecycleState.detached) {
+        _dismissKeyboard();
+        _imeDismissedInBackground = true;
+      }
     } else if (state == AppLifecycleState.resumed &&
         _imeDismissedInBackground) {
       _imeDismissedInBackground = false;
