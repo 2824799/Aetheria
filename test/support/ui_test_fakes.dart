@@ -74,6 +74,8 @@ class TestAudio extends ChangeNotifier implements AudioPlayerProvider {
   @override
   bool isPlaying = false;
   @override
+  double playbackRate = 1.0;
+  @override
   bool isDetailOpen = false;
   @override
   double volume = 0.8;

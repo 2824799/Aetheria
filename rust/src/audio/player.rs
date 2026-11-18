@@ -19,10 +19,23 @@ use crate::audio::rubberband::RubberBandPitchShifter;
 use crate::audio::sample::{finite_sample, OutputSample, TpdfDither};
 use std::path::Path;
 
+#[derive(Clone, Copy, Debug)]
+struct AudioTimelineSegment {
+    remaining_out_frames: usize,
+    source_frame: f64,
+    source_frames_per_out_frame: f64,
+}
+
+struct BufferState {
+    samples: VecDeque<f64>,
+    segments: VecDeque<AudioTimelineSegment>,
+}
+
 // Thread-safe ring buffer / FIFO used to bridge the decode thread and the cpal
-// hardware callback thread.
+// hardware callback thread while tracking the source-song frame position of
+// every buffered output frame.
 pub struct AudioBuffer {
-    data: Mutex<VecDeque<f64>>,
+    data: Mutex<BufferState>,
     capacity: usize,
     len_samples: AtomicUsize,
 }
@@ -116,14 +129,20 @@ struct ProcessingParams {
     hitsound: Arc<HitSoundShared>,
 }
 
+struct ProcessedBlock {
+    samples: Vec<f64>,
+    source_start_frame: f64,
+    source_frames: f64,
+}
+
 struct DecodePipeline {
     decoder: StreamDecoder,
     block_frames: usize,
     sample_rate: u32,
     channels: u32,
     params: ProcessingParams,
-    pending_output: Vec<f64>,
-    timeline_frame: i64,
+    pending_output: Option<ProcessedBlock>,
+    source_position_frames: f64,
     hitsound_mixer: HitSoundMixer,
     cached_se_rev: u64,
     cached_bank: Option<HitSoundBank>,
@@ -272,8 +291,8 @@ impl DecodePipeline {
             sample_rate,
             channels,
             params,
-            pending_output: Vec::new(),
-            timeline_frame: 0,
+            pending_output: None,
+            source_position_frames: 0.0,
             hitsound_mixer: HitSoundMixer::new(),
             cached_se_rev: u64::MAX,
             cached_bank: None,
@@ -285,19 +304,16 @@ impl DecodePipeline {
     fn seek(&mut self, secs: f64) -> Result<(), String> {
         let _scope = profiler::scope("audio::player::DecodePipeline::seek");
         self.decoder.seek(secs)?;
-        self.pending_output.clear();
+        self.pending_output = None;
         self.hitsound_mixer.reset();
-        self.timeline_frame = (secs * self.sample_rate as f64).round() as i64;
+        self.source_position_frames = secs.max(0.0) * self.sample_rate as f64;
         Ok(())
     }
 
-    fn mix_hitsounds(&mut self, samples: &mut [f64]) {
+    fn mix_hitsounds(&mut self, samples: &mut [f64], source_start_frame: f64, source_frames: f64) {
         if samples.is_empty() || self.channels == 0 {
             return;
         }
-        let frames = (samples.len() / self.channels as usize) as i64;
-        let block_start = self.timeline_frame;
-        self.timeline_frame += frames;
 
         let se_rev = self.params.hitsound.se_revision.load(Ordering::Acquire);
         if se_rev != self.cached_se_rev {
@@ -336,11 +352,12 @@ impl DecodePipeline {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         if let (Some(bank), Some(timeline)) = (&self.cached_bank, &self.cached_timeline) {
-            self.hitsound_mixer.mix_block(
+            self.hitsound_mixer.mix_block_scaled(
                 samples,
                 self.channels as usize,
                 self.sample_rate,
-                block_start,
+                source_start_frame,
+                source_frames,
                 &cfg,
                 bank,
                 timeline,
@@ -348,14 +365,40 @@ impl DecodePipeline {
         }
     }
 
+    fn finalize_block(
+        &mut self,
+        mut samples: Vec<f64>,
+        source_frames: f64,
+        peak_protection_enabled: bool,
+    ) -> ProcessedBlock {
+        let source_start_frame = self.source_position_frames;
+        self.source_position_frames += source_frames;
+        self.mix_hitsounds(&mut samples, source_start_frame, source_frames);
+        {
+            let _protection_scope =
+                profiler::scope("audio::player::DecodePipeline::post_dsp_protection");
+            apply_post_dsp_protection(
+                &mut samples,
+                peak_protection_enabled,
+                &self.params.clipped_sample_count,
+                &self.params.peak_bits,
+            );
+        }
+        ProcessedBlock {
+            samples,
+            source_start_frame,
+            source_frames,
+        }
+    }
+
     fn next_block(
         &mut self,
         rubberband_shifter: &mut Option<RubberBandPitchShifter>,
         vocal_only_shifter: &mut Option<VocalOnlyPitchProcessor>,
-    ) -> Result<Option<Vec<f64>>, String> {
+    ) -> Result<Option<ProcessedBlock>, String> {
         let _scope = profiler::scope("audio::player::DecodePipeline::next_block");
-        if !self.pending_output.is_empty() {
-            return Ok(Some(std::mem::take(&mut self.pending_output)));
+        if let Some(pending) = self.pending_output.take() {
+            return Ok(Some(pending));
         }
         let current_quality = self
             .params
@@ -378,38 +421,24 @@ impl DecodePipeline {
 
         let mut block = self.decoder.read_block(self.block_frames)?;
         if block.is_empty() {
-            if vocal_only_active {
-                if let Some(shifter) = vocal_only_shifter {
-                    let tail = shifter.finish();
-                    if !tail.is_empty() {
-                        let mut tail: Vec<f64> = tail.into_iter().map(f64::from).collect();
-                        self.mix_hitsounds(&mut tail);
-                        apply_post_dsp_protection(
-                            &mut tail,
-                            current_quality.peak_protection_enabled,
-                            &self.params.clipped_sample_count,
-                            &self.params.peak_bits,
-                        );
-                        return Ok(Some(tail));
-                    }
-                }
-            } else if let Some(shifter) = rubberband_shifter {
-                let tail = shifter.finish();
-                if !tail.is_empty() {
-                    let mut tail: Vec<f64> = tail.into_iter().map(f64::from).collect();
-                    self.mix_hitsounds(&mut tail);
-                    apply_post_dsp_protection(
-                        &mut tail,
-                        current_quality.peak_protection_enabled,
-                        &self.params.clipped_sample_count,
-                        &self.params.peak_bits,
-                    );
-                    return Ok(Some(tail));
-                }
+            let tail = if vocal_only_active {
+                vocal_only_shifter.as_mut().map(VocalOnlyPitchProcessor::finish)
+            } else {
+                rubberband_shifter.as_mut().map(RubberBandPitchShifter::finish)
+            };
+            if let Some(tail) = tail.filter(|t| !t.is_empty()) {
+                let tail: Vec<f64> = tail.into_iter().map(f64::from).collect();
+                let frames = (tail.len() / self.channels.max(1) as usize) as f64;
+                return Ok(Some(self.finalize_block(
+                    tail,
+                    frames,
+                    current_quality.peak_protection_enabled,
+                )));
             }
             return Ok(None);
         }
 
+        let in_frames = block.len() / self.channels.max(1) as usize;
         let total_gain = *self
             .params
             .loudness_normalization_gain
@@ -421,18 +450,22 @@ impl DecodePipeline {
             }
         }
 
-        let mut processed = if current_pitch.abs() > 0.01 && self.channels == 2 {
+        let (processed, source_frames) = if current_pitch.abs() > 0.01 && self.channels == 2 {
             let _pitch_scope = profiler::scope("audio::player::DecodePipeline::pitch_shift");
             let pitch_factor = 2.0f64.powf(current_pitch / 12.0);
-            let block: Vec<f32> = block.iter().map(|&s| s as f32).collect();
-            let shifted = match current_algo.as_str() {
+            let block_f32: Vec<f32> = block.iter().map(|&s| s as f32).collect();
+            match current_algo.as_str() {
                 "resample" => {
                     *rubberband_shifter = None;
                     *vocal_only_shifter = None;
-                    dsp::pitch_shift_resample(&block, pitch_factor)
+                    let shifted: Vec<f64> = dsp::pitch_shift_resample(&block_f32, pitch_factor)
+                        .into_iter()
+                        .map(f64::from)
+                        .collect();
+                    (shifted, in_frames as f64)
                 }
                 _ => {
-                    if vocal_only_active {
+                    let shifted = if vocal_only_active {
                         *rubberband_shifter = None;
                         if vocal_only_shifter.is_none() {
                             match VocalOnlyPitchProcessor::new(
@@ -456,9 +489,9 @@ impl DecodePipeline {
                             shifter.set_formant_preserved(
                                 current_quality.rubberband_formant_preserved,
                             );
-                            shifter.process(&block, pitch_factor)
+                            shifter.process(&block_f32, pitch_factor)
                         } else {
-                            block
+                            block_f32
                         }
                     } else {
                         *vocal_only_shifter = None;
@@ -482,37 +515,35 @@ impl DecodePipeline {
                             shifter.set_formant_preserved(
                                 current_quality.rubberband_formant_preserved,
                             );
-                            shifter.process(&block, pitch_factor)
+                            shifter.process(&block_f32, pitch_factor)
                         } else {
-                            block
+                            block_f32
                         }
-                    }
+                    };
+                    let shifted_f64: Vec<f64> = shifted.into_iter().map(f64::from).collect();
+                    let out_frames = (shifted_f64.len() / self.channels.max(1) as usize) as f64;
+                    (shifted_f64, out_frames)
                 }
-            };
-            shifted.into_iter().map(f64::from).collect()
+            }
         } else {
             *rubberband_shifter = None;
             *vocal_only_shifter = None;
-            block
+            (block, in_frames as f64)
         };
 
         if processed.is_empty() {
-            return Ok(Some(processed));
+            return Ok(Some(ProcessedBlock {
+                samples: processed,
+                source_start_frame: self.source_position_frames,
+                source_frames: 0.0,
+            }));
         }
 
-        self.mix_hitsounds(&mut processed);
-
-        {
-            let _protection_scope =
-                profiler::scope("audio::player::DecodePipeline::post_dsp_protection");
-            apply_post_dsp_protection(
-                &mut processed,
-                current_quality.peak_protection_enabled,
-                &self.params.clipped_sample_count,
-                &self.params.peak_bits,
-            );
-        }
-        Ok(Some(processed))
+        Ok(Some(self.finalize_block(
+            processed,
+            source_frames,
+            current_quality.peak_protection_enabled,
+        )))
     }
 }
 
@@ -520,7 +551,10 @@ impl AudioBuffer {
     pub fn new(capacity: usize) -> Self {
         let _scope = profiler::scope("audio::player::AudioBuffer::new");
         Self {
-            data: Mutex::new(VecDeque::with_capacity(capacity)),
+            data: Mutex::new(BufferState {
+                samples: VecDeque::with_capacity(capacity),
+                segments: VecDeque::new(),
+            }),
             capacity,
             len_samples: AtomicUsize::new(0),
         }
@@ -530,27 +564,74 @@ impl AudioBuffer {
     /// the block) if `stop_flag` becomes set, so the decode thread can always be joined even
     /// when the output stream is paused and therefore not draining the buffer.
     pub fn push(&self, samples: &[f64], stop_flag: &AtomicBool) {
+        self.push_timed(samples, 2, 0.0, 0.0, stop_flag);
+    }
+
+    pub fn push_timed(
+        &self,
+        samples: &[f64],
+        channels: usize,
+        source_start_frame: f64,
+        source_frames: f64,
+        stop_flag: &AtomicBool,
+    ) {
         let _scope = profiler::scope("audio::player::AudioBuffer::push");
-        for chunk in samples.chunks(self.capacity.max(1)) {
+        let ch = channels.max(1);
+        let max_chunk_samples = ((self.capacity / ch).max(1)) * ch;
+        let total_out_frames = samples.len() / ch;
+        let mut cursor_src_frame = source_start_frame;
+
+        for chunk in samples.chunks(max_chunk_samples.max(1)) {
+            let chunk_frames = chunk.len() / ch;
+            let chunk_src_frames = if total_out_frames > 0 && source_frames > 0.0 {
+                source_frames * (chunk_frames as f64 / total_out_frames as f64)
+            } else {
+                0.0
+            };
             loop {
                 if stop_flag.load(Ordering::SeqCst) {
                     return;
                 }
-                if self.try_push(chunk) {
+                if self.try_push_timed(chunk, ch, cursor_src_frame, chunk_src_frames) {
                     break;
                 }
                 thread::sleep(Duration::from_millis(2));
             }
+            cursor_src_frame += chunk_src_frames;
         }
     }
 
     pub fn try_push(&self, samples: &[f64]) -> bool {
+        self.try_push_timed(samples, 2, 0.0, 0.0)
+    }
+
+    pub fn try_push_timed(
+        &self,
+        samples: &[f64],
+        channels: usize,
+        source_start_frame: f64,
+        source_frames: f64,
+    ) -> bool {
         let _scope = profiler::scope("audio::player::AudioBuffer::try_push");
         let mut queue = self.data.lock().unwrap_or_else(|e| e.into_inner());
-        if queue.len() + samples.len() > self.capacity {
+        if queue.samples.len() + samples.len() > self.capacity {
             return false;
         }
-        queue.extend(samples.iter().cloned());
+        queue.samples.extend(samples.iter().cloned());
+        let ch = channels.max(1);
+        let out_frames = samples.len() / ch;
+        if out_frames > 0 {
+            let rate = if source_frames > 0.0 {
+                source_frames / out_frames as f64
+            } else {
+                1.0
+            };
+            queue.segments.push_back(AudioTimelineSegment {
+                remaining_out_frames: out_frames,
+                source_frame: source_start_frame,
+                source_frames_per_out_frame: rate,
+            });
+        }
         self.len_samples.fetch_add(samples.len(), Ordering::Relaxed);
         true
     }
@@ -559,6 +640,7 @@ impl AudioBuffer {
         self.capacity
     }
 
+    #[cfg(test)]
     fn pop<T: OutputSample>(
         &self,
         out: &mut [T],
@@ -567,23 +649,58 @@ impl AudioBuffer {
         dither: &mut TpdfDither,
         enabled: bool,
     ) -> usize {
+        self.pop_with_timeline(out, channels, volume, dither, enabled).0
+    }
+
+    fn pop_with_timeline<T: OutputSample>(
+        &self,
+        out: &mut [T],
+        channels: usize,
+        volume: f64,
+        dither: &mut TpdfDither,
+        enabled: bool,
+    ) -> (usize, Option<(f64, f64)>) {
         let _scope = profiler::scope("audio::player::AudioBuffer::pop");
         let mut queue = self.data.lock().unwrap_or_else(|e| e.into_inner());
-        let len = out.len().min(queue.len()) / channels * channels;
+        let len = out.len().min(queue.samples.len()) / channels * channels;
         for i in 0..len {
-            out[i] = T::encode(queue.pop_front().unwrap_or(0.0) * volume, dither, enabled);
+            out[i] = T::encode(
+                queue.samples.pop_front().unwrap_or(0.0) * volume,
+                dither,
+                enabled,
+            );
         }
+        let mut timeline_update = None;
         if len > 0 {
             self.len_samples.fetch_sub(len, Ordering::Relaxed);
+            let mut remaining = len / channels;
+            while remaining > 0 {
+                let Some(mut seg) = queue.segments.pop_front() else {
+                    break;
+                };
+                if seg.remaining_out_frames <= remaining {
+                    remaining -= seg.remaining_out_frames;
+                    let end_frame = seg.source_frame
+                        + seg.remaining_out_frames as f64 * seg.source_frames_per_out_frame;
+                    timeline_update = Some((end_frame, seg.source_frames_per_out_frame));
+                } else {
+                    seg.remaining_out_frames -= remaining;
+                    seg.source_frame += remaining as f64 * seg.source_frames_per_out_frame;
+                    timeline_update = Some((seg.source_frame, seg.source_frames_per_out_frame));
+                    queue.segments.push_front(seg);
+                    remaining = 0;
+                }
+            }
         }
         out[len..].fill(T::SILENCE);
-        len
+        (len, timeline_update)
     }
 
     pub fn clear(&self) {
         let _scope = profiler::scope("audio::player::AudioBuffer::clear");
         let mut queue = self.data.lock().unwrap_or_else(|e| e.into_inner());
-        queue.clear();
+        queue.samples.clear();
+        queue.segments.clear();
         self.len_samples.store(0, Ordering::Relaxed);
     }
 
@@ -600,13 +717,24 @@ pub struct SendStream(pub cpal::Stream);
 unsafe impl Send for SendStream {}
 unsafe impl Sync for SendStream {}
 
+fn effective_playback_rate(pitch: f64, algo: &str, channels: u32) -> f64 {
+    if channels == 2 && algo == "resample" && pitch.abs() > 0.01 {
+        let factor = 2.0f64.powf(pitch / 12.0);
+        if factor.is_finite() && factor > 0.0 && (factor - 1.0).abs() >= 0.001 {
+            return factor;
+        }
+    }
+    1.0
+}
+
 struct PlayerState {
     thread_handle: Option<thread::JoinHandle<()>>,
     stream: Option<SendStream>,
     buffer: Option<Arc<AudioBuffer>>,
     stop_flag: Arc<AtomicBool>,
     seek_request: Arc<Mutex<Option<f64>>>,
-    frames_played: Arc<AtomicU64>,
+    source_frame_bits: Arc<AtomicU64>,
+    playback_rate_bits: Arc<AtomicU64>,
     stream_finished: Arc<AtomicBool>,
     sample_rate: u32,
     channels: u32,
@@ -632,7 +760,8 @@ lazy_static::lazy_static! {
         buffer: None,
         stop_flag: Arc::new(AtomicBool::new(false)),
         seek_request: Arc::new(Mutex::new(None)),
-        frames_played: Arc::new(AtomicU64::new(0)),
+        source_frame_bits: Arc::new(AtomicU64::new(0.0f64.to_bits())),
+        playback_rate_bits: Arc::new(AtomicU64::new(1.0f64.to_bits())),
         stream_finished: Arc::new(AtomicBool::new(false)),
         sample_rate: 44100,
         channels: 2,
@@ -770,15 +899,21 @@ fn prefill_audio_buffer(
         .max((pipeline.channels as usize).max(1) * pipeline.block_frames);
     let target_samples = requested_samples.min(buffer.capacity().saturating_mul(2) / 3);
 
+    let ch = (pipeline.channels as usize).max(1);
     while buffer.len() < target_samples && !stop_flag.load(Ordering::SeqCst) {
         let Some(block) = pipeline.next_block(rubberband_shifter, vocal_only_shifter)? else {
             break;
         };
-        if block.is_empty() {
+        if block.samples.is_empty() {
             continue;
         }
-        if !buffer.try_push(&block) {
-            pipeline.pending_output = block;
+        if !buffer.try_push_timed(
+            &block.samples,
+            ch,
+            block.source_start_frame,
+            block.source_frames,
+        ) {
+            pipeline.pending_output = Some(block);
             break;
         }
     }
@@ -862,7 +997,8 @@ fn output_candidates(
 /// application stream attributes, not proof of the physical DAC/mixer configuration.
 fn build_output(
     source: dsp::SourceFormat,
-    frames_played: Arc<AtomicU64>,
+    source_frame_bits: Arc<AtomicU64>,
+    playback_rate_bits: Arc<AtomicU64>,
     underrun_count: Arc<AtomicU64>,
     live_volume: Arc<Mutex<f32>>,
     quality_settings: Arc<Mutex<AudioQualitySettings>>,
@@ -911,7 +1047,8 @@ fn build_output(
         macro_rules! build_typed_stream {
             ($config:expr, $ty:ty) => {{
                 let buf = buffer.clone();
-                let fp = frames_played.clone();
+                let sf = source_frame_bits.clone();
+                let pr = playback_rate_bits.clone();
                 let uc = underrun_count.clone();
                 let vol = live_volume.clone();
                 let qs = quality_settings.clone();
@@ -924,11 +1061,15 @@ fn build_output(
                             let volume = current_output_volume(&vol);
                             let enabled =
                                 qs.lock().unwrap_or_else(|e| e.into_inner()).dither_enabled;
-                            let n = buf.pop(data, ch, volume, &mut dither, enabled);
+                            let (n, timeline) =
+                                buf.pop_with_timeline(data, ch, volume, &mut dither, enabled);
                             if n < data.len() {
                                 uc.fetch_add(1, Ordering::Relaxed);
                             }
-                            fp.fetch_add((n / ch) as u64, Ordering::Relaxed);
+                            if let Some((src_frame, rate)) = timeline {
+                                sf.store(src_frame.to_bits(), Ordering::Relaxed);
+                                pr.store(rate.to_bits(), Ordering::Relaxed);
+                            }
                         },
                         err_fn,
                         None,
@@ -1042,7 +1183,8 @@ pub fn start_playback(
 
     let stop_flag = Arc::new(AtomicBool::new(false));
     let seek_request = Arc::new(Mutex::new(None));
-    let frames_played = Arc::new(AtomicU64::new(0));
+    let source_frame_bits = Arc::new(AtomicU64::new(0.0f64.to_bits()));
+    let playback_rate_bits = Arc::new(AtomicU64::new(1.0f64.to_bits()));
     let stream_finished = Arc::new(AtomicBool::new(false));
     let volume = Arc::new(Mutex::new(vol));
     let pitch = Arc::new(Mutex::new(pitch_val));
@@ -1066,7 +1208,8 @@ pub fn start_playback(
 
     let (stream, output_info, buffer) = build_output(
         source,
-        frames_played.clone(),
+        source_frame_bits.clone(),
+        playback_rate_bits.clone(),
         underrun_count.clone(),
         volume.clone(),
         quality_settings.clone(),
@@ -1075,6 +1218,12 @@ pub fn start_playback(
     )?;
     let sample_rate = output_info.sample_rate;
     let channels = output_info.channels;
+    let initial_rate = effective_playback_rate(
+        *pitch.lock().unwrap_or_else(|e| e.into_inner()),
+        &algo.lock().unwrap_or_else(|e| e.into_inner()),
+        channels,
+    );
+    playback_rate_bits.store(initial_rate.to_bits(), Ordering::Relaxed);
     let mut pipeline = DecodePipeline::new(&path, sample_rate, channels, processing_params)?;
     // Keep the same processor state from prefill through playback, including its
     // delayed samples. Starting a pitch stream with an empty queue causes avoidable underruns.
@@ -1096,7 +1245,8 @@ pub fn start_playback(
     state.channels = channels;
     state.stop_flag = stop_flag.clone();
     state.seek_request = seek_request.clone();
-    state.frames_played = frames_played.clone();
+    state.source_frame_bits = source_frame_bits.clone();
+    state.playback_rate_bits = playback_rate_bits.clone();
     state.stream_finished = stream_finished.clone();
     state.volume = volume.clone();
     state.pitch = pitch.clone();
@@ -1107,6 +1257,8 @@ pub fn start_playback(
     state.clipped_sample_count = clipped_sample_count.clone();
     state.peak_bits = peak_bits.clone();
 
+    let thread_pitch = pitch.clone();
+    let thread_algo = algo.clone();
     let handle = thread::Builder::new()
         .name("aetheria-audio-decode".to_string())
         .spawn(move || {
@@ -1120,6 +1272,7 @@ pub fn start_playback(
                 {
                     let mut req = seek_request.lock().unwrap_or_else(|e| e.into_inner());
                     if let Some(sec) = req.take() {
+                        buffer.clear();
                         if let Err(e) = pipeline.seek(sec) {
                             eprintln!("Seek error: {}", e);
                         }
@@ -1129,9 +1282,18 @@ pub fn start_playback(
                         if let Some(shifter) = &mut vocal_only_shifter {
                             shifter.reset();
                         }
-                        buffer.clear();
                         // A seek starts a fresh five-second headroom window.
                         stream_finished.store(false, Ordering::SeqCst);
+                        source_frame_bits.store(
+                            (sec.max(0.0) * sample_rate as f64).to_bits(),
+                            Ordering::SeqCst,
+                        );
+                        let rate = effective_playback_rate(
+                            *thread_pitch.lock().unwrap_or_else(|e| e.into_inner()),
+                            &thread_algo.lock().unwrap_or_else(|e| e.into_inner()),
+                            channels,
+                        );
+                        playback_rate_bits.store(rate.to_bits(), Ordering::Relaxed);
                         if let Err(e) = prefill_audio_buffer(
                             &mut pipeline,
                             &mut rubberband_shifter,
@@ -1142,8 +1304,6 @@ pub fn start_playback(
                         ) {
                             eprintln!("Prefill error after seek: {}", e);
                         }
-                        frames_played
-                            .store((sec * sample_rate as f64).round() as u64, Ordering::SeqCst);
                     }
                 }
 
@@ -1165,12 +1325,18 @@ pub fn start_playback(
                         }
                     };
 
-                if block.is_empty() {
+                if block.samples.is_empty() {
                     continue;
                 }
                 {
                     let _push_scope = profiler::scope("audio::player::AudioBuffer::push_wait");
-                    buffer.push(&block, &stop_flag);
+                    buffer.push_timed(
+                        &block.samples,
+                        channels as usize,
+                        block.source_start_frame,
+                        block.source_frames,
+                        &stop_flag,
+                    );
                 }
             }
         })
@@ -1207,10 +1373,18 @@ pub fn seek_playback(secs: f64) -> Result<(), String> {
         b.clear();
     }
     *state.seek_request.lock().unwrap_or_else(|e| e.into_inner()) = Some(secs);
-    state.frames_played.store(
-        (secs * state.sample_rate as f64).round() as u64,
+    state.source_frame_bits.store(
+        (secs.max(0.0) * state.sample_rate as f64).to_bits(),
         Ordering::SeqCst,
     );
+    let rate = effective_playback_rate(
+        *state.pitch.lock().unwrap_or_else(|e| e.into_inner()),
+        &state.algo.lock().unwrap_or_else(|e| e.into_inner()),
+        state.channels,
+    );
+    state
+        .playback_rate_bits
+        .store(rate.to_bits(), Ordering::Relaxed);
     state.stream_finished.store(false, Ordering::SeqCst);
     state.queue_headroom_history.clear();
     Ok(())
@@ -1240,8 +1414,14 @@ pub fn set_volume(vol: f32) -> Result<(), String> {
 pub fn set_pitch(pitch_val: f64, pitch_algo: String) -> Result<(), String> {
     let _scope = profiler::scope("audio::player::set_pitch");
     let state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
+    let rate = effective_playback_rate(pitch_val, &pitch_algo, state.channels);
     *state.pitch.lock().unwrap_or_else(|e| e.into_inner()) = pitch_val;
     *state.algo.lock().unwrap_or_else(|e| e.into_inner()) = pitch_algo;
+    if state.buffer.as_ref().is_none_or(|b| b.len() == 0) {
+        state
+            .playback_rate_bits
+            .store(rate.to_bits(), Ordering::Relaxed);
+    }
     Ok(())
 }
 
@@ -1381,6 +1561,8 @@ pub fn get_output_info() -> AudioOutputInfo {
 #[derive(Clone, Copy, Debug)]
 pub struct PlaybackProgress {
     pub position_secs: f64,
+    /// Effective source-timeline speed (`1.0` normally; scales under `resample` pitch shift).
+    pub playback_rate: f64,
     /// The stream reached its end and every queued sample has been played.
     pub finished: bool,
 }
@@ -1388,13 +1570,20 @@ pub struct PlaybackProgress {
 pub fn get_progress() -> PlaybackProgress {
     let _scope = profiler::scope("audio::player::get_progress");
     let state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
-    let frames = state.frames_played.load(Ordering::Relaxed);
+    let source_frames = f64::from_bits(state.source_frame_bits.load(Ordering::Relaxed));
+    let raw_rate = f64::from_bits(state.playback_rate_bits.load(Ordering::Relaxed));
+    let playback_rate = if raw_rate.is_finite() && raw_rate > 0.0 {
+        raw_rate
+    } else {
+        1.0
+    };
     PlaybackProgress {
-        position_secs: if state.sample_rate == 0 {
+        position_secs: if state.sample_rate == 0 || !source_frames.is_finite() {
             0.0
         } else {
-            frames as f64 / state.sample_rate as f64
+            (source_frames / state.sample_rate as f64).max(0.0)
         },
+        playback_rate,
         finished: state.stream_finished.load(Ordering::Relaxed),
     }
 }
@@ -1450,7 +1639,7 @@ mod fidelity_tests {
         )
         .unwrap();
         assert!(
-            !pipeline.pending_output.is_empty(),
+            pipeline.pending_output.is_some(),
             "test must fill beyond queue capacity"
         );
         let mut output = vec![0i32; buffer.len()];
@@ -1458,7 +1647,12 @@ mod fidelity_tests {
         let len = output.len();
         assert_eq!(buffer.pop(&mut output, 2, 1.0, &mut dither, true), len);
         while let Some(block) = pipeline.next_block(&mut rubberband, &mut vocal).unwrap() {
-            output.extend(block.into_iter().map(|s| i32::encode(s, &mut dither, true)));
+            output.extend(
+                block
+                    .samples
+                    .into_iter()
+                    .map(|s| i32::encode(s, &mut dither, true)),
+            );
         }
         assert_eq!(output, samples);
     }
@@ -1576,6 +1770,7 @@ mod fidelity_tests {
                 precision_bits: 24,
             },
             Arc::new(AtomicU64::new(0)),
+            Arc::new(AtomicU64::new(1.0f64.to_bits())),
             Arc::new(AtomicU64::new(0)),
             Arc::new(Mutex::new(0.0)),
             Arc::new(Mutex::new(AudioQualitySettings::default())),
@@ -1652,7 +1847,7 @@ mod fidelity_tests {
                 .next_block(&mut rubberband, &mut vocal)
                 .unwrap()
                 .expect("expected initial audio blocks");
-            out1.extend(block);
+            out1.extend(block.samples);
         }
         assert!(
             out1.len() < 36000 * 2,
@@ -1680,7 +1875,7 @@ mod fidelity_tests {
         );
         let mut out2 = Vec::new();
         while let Some(block) = pipeline.next_block(&mut rubberband, &mut vocal).unwrap() {
-            out2.extend(block);
+            out2.extend(block.samples);
         }
         assert!(
             out2.iter().all(|s| s.abs() < 1e-6),
@@ -1698,7 +1893,7 @@ mod fidelity_tests {
         pipeline.seek(0.05).unwrap();
         let mut out3 = Vec::new();
         while let Some(block) = pipeline.next_block(&mut rubberband, &mut vocal).unwrap() {
-            out3.extend(block);
+            out3.extend(block.samples);
         }
         let post_seek_first = out3[..8000 * 2]
             .iter()
@@ -1710,5 +1905,127 @@ mod fidelity_tests {
             post_seek_first > 0.25 && post_seek_second > 0.25,
             "seek reset must allow 0.10s and 0.80s hitsounds to trigger again: {post_seek_first}, {post_seek_second}"
         );
+    }
+
+    #[test]
+    fn decode_pipeline_resample_tracks_source_timeline_across_speed_and_seek() {
+        struct TempDir(std::path::PathBuf);
+        impl Drop for TempDir {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+
+        let dir = TempDir(std::env::temp_dir().join(format!(
+            "aetheria-resample-tl-{}",
+            std::process::id()
+        )));
+        let se_dir = dir.0.join("se");
+        std::fs::create_dir_all(&se_dir).unwrap();
+
+        let total_src_frames = 48000usize;
+        let silence = vec![0.0f64; total_src_frames * 2];
+        let track = TestWav::float(48000, 2, &silence);
+        let tap_clip = vec![0.5f64; 100 * 2];
+        let tap_wav = TestWav::float(48000, 2, &tap_clip);
+        std::fs::copy(tap_wav.path(), se_dir.join("tap.wav")).unwrap();
+
+        let chart_path = dir.0.join("chart.json");
+        std::fs::write(&chart_path, r#"{"notes":[[0.40,1]]}"#).unwrap();
+
+        let shared_params = params();
+        *shared_params.pitch.lock().unwrap() = 12.0; // +12 st = 2.0x speed
+        *shared_params.algo.lock().unwrap() = "resample".to_string();
+        shared_params
+            .hitsound
+            .set_se_dir(Some(se_dir.to_string_lossy().into_owned()));
+        shared_params.hitsound.update(
+            Some(chart_path.to_string_lossy().into_owned()),
+            HitSoundConfig {
+                enabled: true,
+                volume: 1.0,
+                offset_ms: 0,
+            },
+        );
+
+        let mut pipeline =
+            DecodePipeline::new(track.path(), 48000, 2, shared_params.clone()).unwrap();
+        let buffer = AudioBuffer::new(48000 * 2);
+        let mut rubberband = None;
+        let mut vocal = None;
+
+        // Play first half in 2.0x resample, then switch live back to 1.0x bypass.
+        let mut played_out_samples = Vec::new();
+        let mut last_timeline = (0.0f64, 1.0f64);
+        let mut dither = TpdfDither::new(7);
+        let mut out_chunk = [0.0f64; 1024];
+
+        let b1 = pipeline
+            .next_block(&mut rubberband, &mut vocal)
+            .unwrap()
+            .unwrap();
+        assert!((b1.source_frames / (b1.samples.len() / 2) as f64 - 2.0).abs() < 0.01);
+        assert!(buffer.try_push_timed(&b1.samples, 2, b1.source_start_frame, b1.source_frames));
+
+        // Switch pitch off while remainder decodes.
+        *shared_params.pitch.lock().unwrap() = 0.0;
+        while let Some(block) = pipeline.next_block(&mut rubberband, &mut vocal).unwrap() {
+            assert!(buffer.try_push_timed(
+                &block.samples,
+                2,
+                block.source_start_frame,
+                block.source_frames
+            ));
+        }
+
+        let mut observed_rates = Vec::new();
+        loop {
+            let (n, tl) = buffer.pop_with_timeline(&mut out_chunk, 2, 1.0, &mut dither, false);
+            if n == 0 {
+                break;
+            }
+            played_out_samples.extend_from_slice(&out_chunk[..n]);
+            if let Some((sf, rate)) = tl {
+                assert!(
+                    sf >= last_timeline.0,
+                    "source timeline regressed across live speed switch: {} -> {sf}",
+                    last_timeline.0
+                );
+                last_timeline = (sf, rate);
+                observed_rates.push(rate);
+            }
+        }
+        assert!((last_timeline.0 - total_src_frames as f64).abs() < 4.0);
+        assert!(observed_rates.first().is_some_and(|&r| (r - 2.0).abs() < 0.01));
+        assert!(observed_rates.last().is_some_and(|&r| (r - 1.0).abs() < 0.01));
+
+        // Seek back to 0.20s at 2.0x resample: note at 0.40s chart time must trigger ~0.10s (4800 frames) after seek!
+        *shared_params.pitch.lock().unwrap() = 12.0;
+        buffer.clear();
+        pipeline.seek(0.20).unwrap();
+        let mut after_seek = Vec::new();
+        while let Some(block) = pipeline.next_block(&mut rubberband, &mut vocal).unwrap() {
+            assert!(buffer.try_push_timed(
+                &block.samples,
+                2,
+                block.source_start_frame,
+                block.source_frames
+            ));
+            loop {
+                let (n, _) = buffer.pop_with_timeline(&mut out_chunk, 2, 1.0, &mut dither, false);
+                if n == 0 {
+                    break;
+                }
+                after_seek.extend_from_slice(&out_chunk[..n]);
+            }
+        }
+        let early_peak = after_seek[..4600 * 2]
+            .iter()
+            .fold(0.0f64, |acc, s| acc.max(s.abs()));
+        let accelerated_hit_peak = after_seek[4700 * 2..5000 * 2]
+            .iter()
+            .fold(0.0f64, |acc, s| acc.max(s.abs()));
+        assert!(early_peak < 1e-6);
+        assert!(accelerated_hit_peak > 0.25);
     }
 }

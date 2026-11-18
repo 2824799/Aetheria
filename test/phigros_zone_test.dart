@@ -118,7 +118,7 @@ class _FakePhigrosApi extends Fake implements RustLibApi {
 
   @override
   Future<PlaybackProgress> crateApiPlaybackGetPlaybackProgress() async =>
-      const PlaybackProgress(positionSecs: 0, finished: false);
+      const PlaybackProgress(positionSecs: 0, playbackRate: 1.0, finished: false);
 
   @override
   Future<void> crateApiMusicSetPhigrosSongDifficulty({

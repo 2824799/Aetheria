@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:aetheria/core/providers/audio_player_provider.dart';
 import 'package:aetheria/features/lyrics/lyric_timeline.dart';
 import 'package:aetheria/src/rust/api/music.dart' as music;
@@ -100,32 +102,58 @@ class PlayingLyricTracker {
   }
 }
 
-/// Interpolates the playback position between two provider updates, so lyric
-/// output can advance smoothly at its own refresh rate.
+/// Interpolates the playback position between two provider updates, scaled by
+/// [AudioPlayerProvider.playbackRate] so lyric output stays synchronized even
+/// under speed-changing pitch modes (`resample`).
 class PlaybackPositionEstimator {
   int _anchorPositionMs = 0;
   int _anchorReadAtMs = 0;
   bool _anchorWasPlaying = false;
+  double _anchorRate = 1.0;
+  int _lastProviderPositionMs = -1;
 
   /// Whether playback was running the last time a position was estimated.
   bool get wasPlaying => _anchorWasPlaying;
 
   /// Forgets the current anchor; the next estimate starts from the provider.
-  void reset() => _anchorReadAtMs = 0;
+  void reset() {
+    _anchorReadAtMs = 0;
+    _lastProviderPositionMs = -1;
+  }
 
   int positionMs(AudioPlayerProvider audio, int nowMs) {
     final currentMs = audio.currentPosition.inMilliseconds;
-    final moved = (currentMs - _anchorPositionMs).abs() > 120;
-    if (moved || audio.isPlaying != _anchorWasPlaying || _anchorReadAtMs == 0) {
+    final rate = audio.playbackRate > 0 ? audio.playbackRate : 1.0;
+    final totalMs = audio.totalDuration.inMilliseconds;
+    final maxMs = totalMs > 0 ? totalMs : 1 << 31;
+
+    if (!audio.isPlaying) {
       _anchorPositionMs = currentMs;
       _anchorReadAtMs = nowMs;
-      _anchorWasPlaying = audio.isPlaying;
-    }
-    if (!audio.isPlaying) {
+      _anchorWasPlaying = false;
+      _anchorRate = rate;
+      _lastProviderPositionMs = currentMs;
       return currentMs;
     }
-    final estimated = _anchorPositionMs + (nowMs - _anchorReadAtMs);
-    final totalMs = audio.totalDuration.inMilliseconds;
-    return estimated.clamp(0, totalMs > 0 ? totalMs : 1 << 31);
+
+    if (!_anchorWasPlaying ||
+        _anchorReadAtMs == 0 ||
+        currentMs != _lastProviderPositionMs) {
+      _anchorPositionMs = currentMs;
+      _anchorReadAtMs = nowMs;
+      _anchorWasPlaying = true;
+      _anchorRate = rate;
+      _lastProviderPositionMs = currentMs;
+      return currentMs.clamp(0, maxMs);
+    }
+
+    final elapsedMs = math.max(0, nowMs - _anchorReadAtMs);
+    final estimated = _anchorPositionMs + (elapsedMs * _anchorRate).round();
+    if ((rate - _anchorRate).abs() > 0.005) {
+      _anchorPositionMs = estimated;
+      _anchorReadAtMs = nowMs;
+      _anchorRate = rate;
+    }
+    return estimated.clamp(0, maxMs);
   }
 }

@@ -120,6 +120,7 @@ class _SuperLyricBridgeState extends State<SuperLyricBridge> {
       final secondary = line.timeMs == null
           ? ''
           : lyric.romanizedByTime[line.timeMs]?.trim() ?? '';
+      final playbackRate = audio.playbackRate > 0 ? audio.playbackRate : 1.0;
       final signature = <Object?>[
         song.id,
         audio.playingVersion?.id,
@@ -130,6 +131,7 @@ class _SuperLyricBridgeState extends State<SuperLyricBridge> {
         translation,
         secondary,
         offsetMs,
+        playbackRate.toStringAsFixed(3),
       ].join('|');
       if (!_stopped && signature == _lastPublishedSignature) {
         return;
@@ -144,6 +146,7 @@ class _SuperLyricBridgeState extends State<SuperLyricBridge> {
           translation: translation,
           secondary: secondary,
           offsetMs: offsetMs,
+          playbackRate: playbackRate,
         ),
       );
       if (published) {
@@ -237,6 +240,7 @@ Map<String, dynamic> buildSuperLyricPayload({
   String translation = '',
   String secondary = '',
   int offsetMs = 0,
+  double playbackRate = 1.0,
 }) {
   final payload = buildSuperLyricMetadata(
     title: title,
@@ -244,22 +248,42 @@ Map<String, dynamic> buildSuperLyricPayload({
     album: album,
   )..['line'] = line.text;
 
+  final rate = playbackRate.isFinite && playbackRate > 0 ? playbackRate : 1.0;
+  int scaleRelativeToLineStart(int rawLineStart, int lineStart, int rawTime) {
+    final adjusted = math.max(0, rawTime - offsetMs);
+    if ((rate - 1.0).abs() <= 0.005) {
+      return adjusted;
+    }
+    final delta = rawTime - rawLineStart;
+    return math.max(lineStart, lineStart + (delta / rate).round());
+  }
+
   final rawStart = line.timeMs;
   final rawEnd = line.endMs;
   if (rawStart != null && rawEnd != null) {
     final startTime = math.max(0, rawStart - offsetMs);
-    final endTime = math.max(startTime + 1, rawEnd - offsetMs);
+    final scaledEnd = scaleRelativeToLineStart(rawStart, startTime, rawEnd);
+    final endTime = math.max(startTime + 1, scaledEnd);
     payload['startTimeMs'] = startTime;
     payload['endTimeMs'] = endTime;
 
     final words = line.segments
         .where((segment) => segment.text.isNotEmpty)
         .map((segment) {
-          final wordStart = math.max(0, segment.startMs - offsetMs);
+          final wordStart = scaleRelativeToLineStart(
+            rawStart,
+            startTime,
+            segment.startMs,
+          );
+          final wordEnd = scaleRelativeToLineStart(
+            rawStart,
+            startTime,
+            segment.endMs,
+          );
           return <String, dynamic>{
             'text': segment.text,
             'startTimeMs': wordStart,
-            'endTimeMs': math.max(wordStart + 1, segment.endMs - offsetMs),
+            'endTimeMs': math.max(wordStart + 1, wordEnd),
           };
         })
         .toList(growable: false);

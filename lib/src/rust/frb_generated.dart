@@ -2508,11 +2508,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   PlaybackProgress dco_decode_playback_progress(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 2)
-      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
     return PlaybackProgress(
       positionSecs: dco_decode_f_64(arr[0]),
-      finished: dco_decode_bool(arr[1]),
+      playbackRate: dco_decode_f_64(arr[1]),
+      finished: dco_decode_bool(arr[2]),
     );
   }
 
@@ -3026,9 +3027,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   PlaybackProgress sse_decode_playback_progress(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_positionSecs = sse_decode_f_64(deserializer);
+    var var_playbackRate = sse_decode_f_64(deserializer);
     var var_finished = sse_decode_bool(deserializer);
     return PlaybackProgress(
       positionSecs: var_positionSecs,
+      playbackRate: var_playbackRate,
       finished: var_finished,
     );
   }
@@ -3494,6 +3497,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_f_64(self.positionSecs, serializer);
+    sse_encode_f_64(self.playbackRate, serializer);
     sse_encode_bool(self.finished, serializer);
   }
 

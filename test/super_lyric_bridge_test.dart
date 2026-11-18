@@ -1,6 +1,9 @@
 import 'package:aetheria/features/lyrics/lyric_timeline.dart';
+import 'package:aetheria/features/lyrics/playing_lyric.dart';
 import 'package:aetheria/features/lyrics/super_lyric_bridge.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'support/ui_test_fakes.dart';
 
 void main() {
   test(
@@ -99,4 +102,53 @@ void main() {
     expect(resumedAfterLongGap.text, 'Please, stay true');
     expect(shouldHoldSuperLyricLine(resumedAfterLongGap), isFalse);
   });
+
+  test(
+    'PlaybackPositionEstimator scales interpolation with playbackRate and smoothly handles rate shifts',
+    () {
+      final audio = TestAudio()
+        ..isPlaying = true
+        ..totalDuration = const Duration(seconds: 180)
+        ..positionListenable.value = const Duration(seconds: 10)
+        ..playbackRate = 2.0;
+
+      final estimator = PlaybackPositionEstimator();
+      expect(estimator.positionMs(audio, 1000), 10000);
+      // 150ms of wall time at 2.0x speed advances song timeline by 300ms (must NOT snap back >120ms!).
+      expect(estimator.positionMs(audio, 1150), 10300);
+
+      // Live switch back to 1.0x between polls rebases from current estimated position smoothly.
+      audio.playbackRate = 1.0;
+      expect(estimator.positionMs(audio, 1150), 10300);
+      expect(estimator.positionMs(audio, 1250), 10400);
+
+      // Fresh poll update from Rust re-anchors directly to provider position.
+      audio.positionListenable.value = const Duration(milliseconds: 10450);
+      expect(estimator.positionMs(audio, 1260), 10450);
+
+      audio.isPlaying = false;
+      expect(estimator.positionMs(audio, 1500), 10450);
+    },
+  );
+
+  test(
+    'buildSuperLyricPayload compresses line and word spans at accelerated playbackRate',
+    () {
+      final line = LyricLine(1000, 3000, '你好世界', <LyricSegment>[
+        LyricSegment(1000, 2000, '你好'),
+        LyricSegment(2000, 3000, '世界'),
+      ]);
+      final payload = buildSuperLyricPayload(
+        title: '加速测试',
+        line: line,
+        playbackRate: 2.0,
+      );
+      expect(payload['startTimeMs'], 1000);
+      expect(payload['endTimeMs'], 2000);
+      expect(payload['words'], <Map<String, dynamic>>[
+        <String, dynamic>{'text': '你好', 'startTimeMs': 1000, 'endTimeMs': 1500},
+        <String, dynamic>{'text': '世界', 'startTimeMs': 1500, 'endTimeMs': 2000},
+      ]);
+    },
+  );
 }

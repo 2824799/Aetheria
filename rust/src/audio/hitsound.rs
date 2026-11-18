@@ -276,6 +276,33 @@ impl HitSoundMixer {
         bank: &HitSoundBank,
         timeline: &HitTimeline,
     ) {
+        if channels == 0 {
+            return;
+        }
+        let block_frames = block.len() / channels;
+        self.mix_block_scaled(
+            block,
+            channels,
+            sample_rate,
+            block_start_frame as f64,
+            block_frames as f64,
+            cfg,
+            bank,
+            timeline,
+        );
+    }
+
+    pub fn mix_block_scaled(
+        &mut self,
+        block: &mut [f64],
+        channels: usize,
+        sample_rate: u32,
+        block_start_src_frame: f64,
+        src_span_frames: f64,
+        cfg: &HitSoundConfig,
+        bank: &HitSoundBank,
+        timeline: &HitTimeline,
+    ) {
         if block.is_empty() || channels == 0 || sample_rate == 0 {
             return;
         }
@@ -291,7 +318,6 @@ impl HitSoundMixer {
         if block_frames == 0 {
             return;
         }
-        let block_end_frame = block_start_frame + block_frames as i64;
         let gain = DEFAULT_MIX_SCALE * cfg.volume.clamp(0.0, 1.5);
 
         // 1. Continue rendering active voices carried over from previous blocks.
@@ -322,27 +348,28 @@ impl HitSoundMixer {
             }
         }
 
-        // 2. Spawn new note hits whose shifted trigger frame falls inside this block.
+        // 2. Spawn new note hits whose shifted trigger frame falls inside this block's source window.
         let events = timeline.events();
-        if events.is_empty() {
+        if events.is_empty() || src_span_frames <= 0.0 {
             return;
         }
         let offset_secs = cfg.offset_ms as f64 / 1000.0;
         let sr = sample_rate as f64;
-        let trigger_frame = |e: &HitEvent| -> i64 { ((e.time_secs + offset_secs) * sr).round() as i64 };
+        let speed_ratio = src_span_frames / block_frames as f64;
+        let block_end_src_frame = block_start_src_frame + src_span_frames;
+        let trigger_frame = |e: &HitEvent| -> f64 { ((e.time_secs + offset_secs) * sr).round() };
 
-        let start_idx = events.partition_point(|e| trigger_frame(e) < block_start_frame);
-        let end_idx = events.partition_point(|e| trigger_frame(e) < block_end_frame);
+        let start_idx = events.partition_point(|e| trigger_frame(e) < block_start_src_frame);
+        let end_idx = events.partition_point(|e| trigger_frame(e) < block_end_src_frame);
 
         for ev in &events[start_idx..end_idx] {
             let tf = trigger_frame(ev);
-            if tf < 0 {
+            if tf < 0.0 {
                 continue;
             }
-            let local_frame = (tf - block_start_frame) as usize;
-            if local_frame >= block_frames {
-                continue;
-            }
+            let local_frame = ((tf - block_start_src_frame) / speed_ratio)
+                .round()
+                .clamp(0.0, (block_frames - 1) as f64) as usize;
             let clip = bank.clip(ev.kind);
             let clip_frames = clip.len() / channels;
             if clip_frames == 0 {
@@ -493,5 +520,26 @@ mod tests {
         assert!(block[2].abs() < 1e-9);
         assert!((block[5] - 0.4 * DEFAULT_MIX_SCALE).abs() < 1e-9);
         assert!((block[6] - 0.2 * DEFAULT_MIX_SCALE).abs() < 1e-9);
+    }
+
+    #[test]
+    fn mix_block_scaled_maps_accelerated_notes_to_compressed_output_frames() {
+        let bank = test_bank();
+        let timeline = HitTimeline::from_events(vec![HitEvent {
+            time_secs: 0.12, // frame 12 at 100 Hz source timeline
+            kind: HitNoteKind::Tap,
+        }]);
+        let cfg = HitSoundConfig {
+            enabled: true,
+            volume: 1.0,
+            offset_ms: 0,
+        };
+        let mut mixer = HitSoundMixer::new();
+        // 2.0x speed: 20 source frames compressed into 10 output frames
+        let mut block = vec![0.0; 10];
+        mixer.mix_block_scaled(&mut block, 1, 100, 0.0, 20.0, &cfg, &bank, &timeline);
+        // Source frame 12 at 2.0x speed triggers at output frame 6
+        assert!((block[6] - DEFAULT_MIX_SCALE).abs() < 1e-9);
+        assert!(block[5].abs() < 1e-9);
     }
 }

@@ -72,13 +72,21 @@ class AudioOutputInfo {
 class PlaybackProgress {
   final double positionSecs;
 
+  /// Effective source-timeline speed (`1.0` normally; scales under `resample` pitch shift).
+  final double playbackRate;
+
   /// The stream reached its end and every queued sample has been played.
   final bool finished;
 
-  const PlaybackProgress({required this.positionSecs, required this.finished});
+  const PlaybackProgress({
+    required this.positionSecs,
+    required this.playbackRate,
+    required this.finished,
+  });
 
   @override
-  int get hashCode => positionSecs.hashCode ^ finished.hashCode;
+  int get hashCode =>
+      positionSecs.hashCode ^ playbackRate.hashCode ^ finished.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -86,5 +94,6 @@ class PlaybackProgress {
       other is PlaybackProgress &&
           runtimeType == other.runtimeType &&
           positionSecs == other.positionSecs &&
+          playbackRate == other.playbackRate &&
           finished == other.finished;
 }

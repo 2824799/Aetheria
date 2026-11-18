@@ -45,10 +45,10 @@ class AudioPlayerProvider extends ChangeNotifier {
   /// Loudness assumed for versions that have not been measured, in dBFS.
   static const double _defaultLoudnessDb = -15.0;
 
-  static const Duration _positionPollInterval = Duration(milliseconds: 250);
+  static const Duration _positionPollInterval = Duration(milliseconds: 100);
 
   /// Consecutive unchanged position polls near the end that count as EOF.
-  static const int _stallTicksAtEnd = 6;
+  static const int _stallTicksAtEnd = 12;
 
   Song? activeSong;
   Song? playingSong;
@@ -57,6 +57,7 @@ class AudioPlayerProvider extends ChangeNotifier {
   List<Song> currentQueue = [];
 
   bool isPlaying = false;
+  double playbackRate = 1.0;
   final ValueNotifier<Duration> _position = ValueNotifier(Duration.zero);
   ValueListenable<Duration> get positionListenable => _position;
   Duration get currentPosition => _position.value;
@@ -461,11 +462,25 @@ class AudioPlayerProvider extends ChangeNotifier {
 
   double get _effectivePitchSemitones => pitchEnabled ? pitchSemitones : 0.0;
 
-  Future<void> _pushPitch() {
-    return playback.setPitch(
+  double _expectedPlaybackRate() {
+    if (pitchEnabled &&
+        pitchAlgorithm == 'resample' &&
+        pitchSemitones.abs() > 0.01) {
+      final factor = math.pow(2.0, pitchSemitones / 12.0).toDouble();
+      if (factor.isFinite && factor > 0 && (factor - 1.0).abs() >= 0.001) {
+        return factor;
+      }
+    }
+    return 1.0;
+  }
+
+  Future<void> _pushPitch() async {
+    await playback.setPitch(
       pitch: _effectivePitchSemitones,
       algo: pitchAlgorithm,
     );
+    playbackRate = _expectedPlaybackRate();
+    _updateNotification();
   }
 
   Future<void> _pushQualitySettings() {
@@ -715,6 +730,7 @@ class AudioPlayerProvider extends ChangeNotifier {
     }
     if (superseded()) return;
 
+    playbackRate = _expectedPlaybackRate();
     isPlaying = !startPaused;
     if (startPaused) {
       _stopPositionTimer();
@@ -766,9 +782,18 @@ class AudioPlayerProvider extends ChangeNotifier {
     try {
       final progress = await playback.getPlaybackProgress();
       if (!timer.isActive || !isPlaying) return;
+      final nextRate =
+          progress.playbackRate.isFinite && progress.playbackRate > 0
+          ? progress.playbackRate
+          : 1.0;
+      final rateChanged = (nextRate - playbackRate).abs() > 0.005;
+      playbackRate = nextRate;
       currentPosition = Duration(
         milliseconds: (progress.positionSecs * 1000).round(),
       );
+      if (rateChanged) {
+        _updateNotification();
+      }
 
       final hasDuration = totalDuration > Duration.zero;
       final reachedEnd = hasDuration && currentPosition >= totalDuration;
@@ -989,6 +1014,7 @@ class AudioPlayerProvider extends ChangeNotifier {
     _stopPositionTimer();
     _stopOutputInfoTimer();
     isPlaying = false;
+    playbackRate = 1.0;
     _hasPreparedPlayback = false;
     playingSong = null;
     playingVersion = null;
@@ -1222,6 +1248,7 @@ class AudioPlayerProvider extends ChangeNotifier {
         'durationMs': totalDuration.inMilliseconds,
         'hasPrevious': canSkip,
         'hasNext': canSkip,
+        'playbackSpeed': isPlaying ? playbackRate : 0.0,
         'audioPath': ?audioPath,
       }),
     );

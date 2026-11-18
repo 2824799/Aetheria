@@ -133,6 +133,8 @@ class MainActivity : FlutterActivity() {
                     val durationMs = call.argument<Number>("durationMs")?.toInt() ?: 0
                     val hasPrevious = call.argument<Boolean>("hasPrevious") ?: false
                     val hasNext = call.argument<Boolean>("hasNext") ?: false
+                    val playbackSpeed = call.argument<Number>("playbackSpeed")?.toFloat()
+                        ?: if (isPlaying) 1.0f else 0.0f
                     val audioPath = call.argument<String>("audioPath")
                     showPlaybackNotification(
                         title,
@@ -142,6 +144,7 @@ class MainActivity : FlutterActivity() {
                         durationMs,
                         hasPrevious,
                         hasNext,
+                        playbackSpeed,
                         audioPath,
                     )
                     result.success(null)
@@ -346,6 +349,7 @@ class MainActivity : FlutterActivity() {
         durationMs: Int,
         hasPrevious: Boolean,
         hasNext: Boolean,
+        playbackSpeed: Float,
         audioPath: String?,
     ) {
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -391,6 +395,7 @@ class MainActivity : FlutterActivity() {
             safeDurationMs,
             hasPrevious,
             hasNext,
+            playbackSpeed,
             effectiveArtwork,
         )
 
@@ -583,6 +588,7 @@ class MainActivity : FlutterActivity() {
         durationMs: Int,
         hasPrevious: Boolean,
         hasNext: Boolean,
+        playbackSpeed: Float,
         artwork: Bitmap?,
     ) {
         val actions = PlaybackStateCompat.ACTION_PLAY_PAUSE or
@@ -608,7 +614,7 @@ class MainActivity : FlutterActivity() {
                 .setState(
                     if (isPlaying) PlaybackStateCompat.STATE_PLAYING else PlaybackStateCompat.STATE_PAUSED,
                     positionMs.toLong(),
-                    if (isPlaying) 1.0f else 0.0f,
+                    if (isPlaying) playbackSpeed else 0.0f,
                 )
                 .build()
         )

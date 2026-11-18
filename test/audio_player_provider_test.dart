@@ -13,12 +13,26 @@ class _PlaybackApi extends Fake implements RustLibApi {
   var openGate = Completer<void>();
   final paths = <String>[];
   String? enginePath;
+  PlaybackProgress nextProgress = const PlaybackProgress(
+    positionSecs: 0,
+    playbackRate: 1.0,
+    finished: false,
+  );
+  double? lastPitch;
+  String? lastAlgo;
 
   void reset() {
     started = Completer<void>();
     openGate = Completer<void>();
     paths.clear();
     enginePath = null;
+    nextProgress = const PlaybackProgress(
+      positionSecs: 0,
+      playbackRate: 1.0,
+      finished: false,
+    );
+    lastPitch = null;
+    lastAlgo = null;
   }
 
   @override
@@ -56,11 +70,20 @@ class _PlaybackApi extends Fake implements RustLibApi {
   }
 
   @override
+  Future<void> crateApiPlaybackSetPitch({
+    required double pitch,
+    required String algo,
+  }) async {
+    lastPitch = pitch;
+    lastAlgo = algo;
+  }
+
+  @override
   Future<String> crateApiPlaybackGetDefaultOutputDeviceName() async => '';
 
   @override
   Future<PlaybackProgress> crateApiPlaybackGetPlaybackProgress() async =>
-      const PlaybackProgress(positionSecs: 0, finished: false);
+      nextProgress;
 }
 
 class _Audio extends AudioPlayerProvider {
@@ -191,4 +214,28 @@ void main() {
     expect(api.paths, isEmpty);
     expect(audio.isPlaying, isFalse);
   });
+
+  test(
+    'playbackRate reflects resample speed shifts and live progress updates',
+    () async {
+      final song = _song('a');
+      api.openGate.complete();
+      await audio.setPitchAlgorithm('resample');
+      await audio.setPitchSemitones(12.0);
+      await audio.setPitchEnabled(true);
+      await audio.playSong(song, [song], library.path);
+
+      expect(audio.playbackRate, closeTo(2.0, 0.001));
+
+      api.nextProgress = const PlaybackProgress(
+        positionSecs: 18.0,
+        playbackRate: 1.7818,
+        finished: false,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 130));
+
+      expect(audio.currentPosition, const Duration(seconds: 18));
+      expect(audio.playbackRate, closeTo(1.7818, 0.001));
+    },
+  );
 }

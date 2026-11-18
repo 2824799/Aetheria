@@ -2480,9 +2480,11 @@ impl SseDecode for crate::audio::player::PlaybackProgress {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_positionSecs = <f64>::sse_decode(deserializer);
+        let mut var_playbackRate = <f64>::sse_decode(deserializer);
         let mut var_finished = <bool>::sse_decode(deserializer);
         return crate::audio::player::PlaybackProgress {
             position_secs: var_positionSecs,
+            playback_rate: var_playbackRate,
             finished: var_finished,
         };
     }
@@ -3002,6 +3004,7 @@ impl flutter_rust_bridge::IntoDart for crate::audio::player::PlaybackProgress {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
             self.position_secs.into_into_dart().into_dart(),
+            self.playback_rate.into_into_dart().into_dart(),
             self.finished.into_into_dart().into_dart(),
         ]
         .into_dart()
@@ -3422,6 +3425,7 @@ impl SseEncode for crate::audio::player::PlaybackProgress {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <f64>::sse_encode(self.position_secs, serializer);
+        <f64>::sse_encode(self.playback_rate, serializer);
         <bool>::sse_encode(self.finished, serializer);
     }
 }
