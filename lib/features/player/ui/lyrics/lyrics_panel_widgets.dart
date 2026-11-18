@@ -37,40 +37,48 @@ class LyricPanelHeader extends StatelessWidget {
             if (offset != 0) '偏移 ${offset > 0 ? '+' : ''}$offset ms',
           ].join(' · ');
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        AetherSpace.xl,
-        AetherSpace.md,
-        AetherSpace.md,
-        AetherSpace.xs,
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  audioVersion?.originalName ?? '歌曲通用歌词',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AetherType.bodySmStyle(
-                    cfg.textSecondary,
-                  ).copyWith(fontWeight: FontWeight.w600),
-                ),
-                Text(
-                  source,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AetherType.captionStyle(
-                    cfg.textTertiary,
-                  ).copyWith(fontSize: AetherType.bodySm - 1, height: 1.5),
-                ),
-              ],
+    return SelectionArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          AetherSpace.xl,
+          AetherSpace.md,
+          AetherSpace.md,
+          AetherSpace.xs,
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    audioVersion?.originalName ?? '歌曲通用歌词',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AetherType.bodySmStyle(
+                      cfg.textSecondary,
+                    ).copyWith(fontWeight: FontWeight.w600),
+                  ),
+                  Text(
+                    source,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AetherType.captionStyle(
+                      cfg.textTertiary,
+                    ).copyWith(fontSize: AetherType.bodySm - 1, height: 1.5),
+                  ),
+                ],
+              ),
             ),
-          ),
-          ...actions,
-        ],
+            if (actions.isNotEmpty)
+              SelectionContainer.disabled(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: actions,
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -86,11 +94,13 @@ class LyricPanelError extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: AetherSpace.xl),
-      child: Text(
-        message,
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
-        style: AetherType.bodySmStyle(context.tokens.warning),
+      child: SelectionArea(
+        child: Text(
+          message,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: AetherType.bodySmStyle(context.tokens.warning),
+        ),
       ),
     );
   }

@@ -24,26 +24,28 @@ class SongVersionList extends StatelessWidget {
     return Column(
       children: [
         Expanded(
-          child: ListView(
-            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-            padding: const EdgeInsets.fromLTRB(
-              AetherSpace.xl,
-              AetherSpace.md,
-              AetherSpace.xl,
-              AetherSpace.md,
-            ),
-            children: [
-              ?header,
-              for (final version in song.versions)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: AetherSpace.md),
-                  child: _VersionCard(
-                    song: song,
-                    version: version,
-                    canDelete: canDelete,
+          child: SelectionArea(
+            child: ListView(
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              padding: const EdgeInsets.fromLTRB(
+                AetherSpace.xl,
+                AetherSpace.md,
+                AetherSpace.xl,
+                AetherSpace.md,
+              ),
+              children: [
+                if (header != null) SelectionContainer.disabled(child: header),
+                for (final version in song.versions)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: AetherSpace.md),
+                    child: _VersionCard(
+                      song: song,
+                      version: version,
+                      canDelete: canDelete,
+                    ),
                   ),
-                ),
-            ],
+              ],
+            ),
           ),
         ),
         Padding(
@@ -100,30 +102,42 @@ class _VersionCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                child: Text(
-                  version.originalName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AetherType.bodyStyle(
-                    cfg.textPrimary,
-                  ).copyWith(fontWeight: FontWeight.w600),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: 28),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      version.originalName,
+                      style: AetherType.bodyStyle(
+                        cfg.textPrimary,
+                      ).copyWith(fontWeight: FontWeight.w600),
+                    ),
+                  ),
                 ),
               ),
-              AetherIconButton.dense(
-                icon: Icons.file_download_outlined,
-                color: cfg.textSecondary,
-                tooltip: '导出文件',
-                onPressed: () => exportVersion(context, version),
-              ),
-              if (canDelete)
-                AetherIconButton.dense(
-                  icon: Icons.delete_outline_rounded,
-                  color: cfg.danger,
-                  tooltip: '删除版本',
-                  onPressed: () => deleteVersion(context, version),
+              SelectionContainer.disabled(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    AetherIconButton.dense(
+                      icon: Icons.file_download_outlined,
+                      color: cfg.textSecondary,
+                      tooltip: '导出文件',
+                      onPressed: () => exportVersion(context, version),
+                    ),
+                    if (canDelete)
+                      AetherIconButton.dense(
+                        icon: Icons.delete_outline_rounded,
+                        color: cfg.danger,
+                        tooltip: '删除版本',
+                        onPressed: () => deleteVersion(context, version),
+                      ),
+                  ],
                 ),
+              ),
             ],
           ),
           Padding(
@@ -140,36 +154,38 @@ class _VersionCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: AetherSpace.sm),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: AetherPressable(
-              onTap: isPrimary
-                  ? null
-                  : () => makeVersionPrimary(context, song, version),
-              borderRadius: BorderRadius.circular(AetherRadius.sm),
-              tooltip: isPrimary
-                  ? '播放这首歌时优先使用这个版本'
-                  : '改用这个版本播放；若正在播放，会按当前进度切换',
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: AetherSpace.xs),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      isPrimary
-                          ? Icons.radio_button_checked_rounded
-                          : Icons.radio_button_off_rounded,
-                      size: AetherIconSize.md,
-                      color: isPrimary ? cfg.accent : cfg.textTertiary,
-                    ),
-                    const SizedBox(width: AetherSpace.sm),
-                    Text(
-                      isPrimary ? '默认播放版本' : '设为默认播放版本',
-                      style: AetherType.bodySmStyle(
-                        isPrimary ? cfg.textPrimary : cfg.textSecondary,
+          SelectionContainer.disabled(
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: AetherPressable(
+                onTap: isPrimary
+                    ? null
+                    : () => makeVersionPrimary(context, song, version),
+                borderRadius: BorderRadius.circular(AetherRadius.sm),
+                tooltip: isPrimary
+                    ? '播放这首歌时优先使用这个版本'
+                    : '改用这个版本播放；若正在播放，会按当前进度切换',
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: AetherSpace.xs),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        isPrimary
+                            ? Icons.radio_button_checked_rounded
+                            : Icons.radio_button_off_rounded,
+                        size: AetherIconSize.md,
+                        color: isPrimary ? cfg.accent : cfg.textTertiary,
                       ),
-                    ),
-                  ],
+                      const SizedBox(width: AetherSpace.sm),
+                      Text(
+                        isPrimary ? '默认播放版本' : '设为默认播放版本',
+                        style: AetherType.bodySmStyle(
+                          isPrimary ? cfg.textPrimary : cfg.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),

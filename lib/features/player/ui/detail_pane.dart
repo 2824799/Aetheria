@@ -152,27 +152,29 @@ class _Header extends StatelessWidget {
           ),
           const SizedBox(width: AetherSpace.md),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const SizedBox(height: AetherSpace.xs),
-                EditableMetadataText(
-                  value: song.title,
-                  emptyText: '未命名歌曲',
-                  tooltip: '点击修改歌曲名称',
-                  style: AetherType.titleStyle(cfg.textPrimary),
-                  onSave: (value) =>
-                      saveSongMetadata(context, song, title: value),
-                ),
-                EditableMetadataText(
-                  value: song.artist ?? '',
-                  emptyText: '未知歌手',
-                  tooltip: '点击修改歌手',
-                  style: AetherType.bodySmStyle(cfg.textSecondary),
-                  onSave: (value) =>
-                      saveSongMetadata(context, song, artist: value),
-                ),
-              ],
+            child: SelectionArea(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(height: AetherSpace.xs),
+                  EditableMetadataText(
+                    value: song.title,
+                    emptyText: '未命名歌曲',
+                    tooltip: '点击修改歌曲名称，拖动可选中复制',
+                    style: AetherType.titleStyle(cfg.textPrimary),
+                    onSave: (value) =>
+                        saveSongMetadata(context, song, title: value),
+                  ),
+                  EditableMetadataText(
+                    value: song.artist ?? '',
+                    emptyText: '未知歌手',
+                    tooltip: '点击修改歌手，拖动可选中复制',
+                    style: AetherType.bodySmStyle(cfg.textSecondary),
+                    onSave: (value) =>
+                        saveSongMetadata(context, song, artist: value),
+                  ),
+                ],
+              ),
             ),
           ),
           AetherIconButton(

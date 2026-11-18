@@ -32,38 +32,42 @@ class PhigrosDetailPanel extends StatelessWidget {
     final activeChart = AudioPlayerProvider.activePhigrosChartFor(phigros);
     final effective = audio.resolveHitsoundForSong(song);
 
-    return ListView(
-      padding: const EdgeInsets.all(AetherSpace.xl),
-      children: [
-        _SongMetadataCard(phigros: phigros, activeChart: activeChart, cfg: cfg),
-        const SizedBox(height: AetherSpace.lg),
-        _DifficultySelectorCard(
-          song: song,
-          phigros: phigros,
-          activeChart: activeChart,
-          cfg: cfg,
-          onSelect: (diff) => _selectDifficulty(context, library, diff),
-        ),
-        const SizedBox(height: AetherSpace.lg),
-        _PerSongHitsoundCard(
-          song: song,
-          phigros: phigros,
-          globalEnabled: audio.phigrosHitsoundEnabled,
-          globalVolume: audio.phigrosHitsoundVolume,
-          globalOffsetMs: audio.phigrosHitsoundOffsetMs,
-          effectiveEnabled: effective.enabled,
-          effectiveVolume: effective.volume,
-          effectiveOffsetMs: effective.offsetMs,
-          cfg: cfg,
-          onUpdate: ({required mode, volume, offsetMs}) => _updateHitsound(
-            context,
-            library,
-            mode: mode,
-            volume: volume,
-            offsetMs: offsetMs,
+    return SelectionArea(
+      child: ListView(
+        padding: const EdgeInsets.all(AetherSpace.xl),
+        children: [
+          _SongMetadataCard(phigros: phigros, activeChart: activeChart, cfg: cfg),
+          const SizedBox(height: AetherSpace.lg),
+          _DifficultySelectorCard(
+            song: song,
+            phigros: phigros,
+            activeChart: activeChart,
+            cfg: cfg,
+            onSelect: (diff) => _selectDifficulty(context, library, diff),
           ),
-        ),
-      ],
+          const SizedBox(height: AetherSpace.lg),
+          SelectionContainer.disabled(
+            child: _PerSongHitsoundCard(
+              song: song,
+              phigros: phigros,
+              globalEnabled: audio.phigrosHitsoundEnabled,
+              globalVolume: audio.phigrosHitsoundVolume,
+              globalOffsetMs: audio.phigrosHitsoundOffsetMs,
+              effectiveEnabled: effective.enabled,
+              effectiveVolume: effective.volume,
+              effectiveOffsetMs: effective.offsetMs,
+              cfg: cfg,
+              onUpdate: ({required mode, volume, offsetMs}) => _updateHitsound(
+                context,
+                library,
+                mode: mode,
+                volume: volume,
+                offsetMs: offsetMs,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -235,18 +239,20 @@ class _DifficultySelectorCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: AetherSpace.md),
-          Wrap(
-            spacing: AetherSpace.sm,
-            runSpacing: AetherSpace.sm,
-            children: [
-              for (final chart in phigros.charts)
-                _DifficultyChip(
-                  chart: chart,
-                  selected: chart.difficulty == phigros.selectedDifficulty,
-                  cfg: cfg,
-                  onTap: () => onSelect(chart.difficulty),
-                ),
-            ],
+          SelectionContainer.disabled(
+            child: Wrap(
+              spacing: AetherSpace.sm,
+              runSpacing: AetherSpace.sm,
+              children: [
+                for (final chart in phigros.charts)
+                  _DifficultyChip(
+                    chart: chart,
+                    selected: chart.difficulty == phigros.selectedDifficulty,
+                    cfg: cfg,
+                    onTap: () => onSelect(chart.difficulty),
+                  ),
+              ],
+            ),
           ),
           if (activeChart != null) ...[
             const SizedBox(height: AetherSpace.lg),

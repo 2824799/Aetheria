@@ -136,6 +136,7 @@ class _EditableMetadataTextState extends State<EditableMetadataText> {
       onExit: (_) => setState(() => _isHovered = false),
       child: AetherPressable(
         pressScale: 1,
+        cursor: _isEditing ? null : SystemMouseCursors.text,
         onTap: _startEditing,
         tooltip: _isEditing ? null : widget.tooltip,
         child: AnimatedContainer(
@@ -152,25 +153,34 @@ class _EditableMetadataTextState extends State<EditableMetadataText> {
             ),
           ),
           child: _isEditing
-              ? Focus(
-                  onKeyEvent: _handleKey,
-                  child: AetherTextField.plain(
-                    controller: _controller,
-                    focusNode: _focusNode,
-                    textAlign: TextAlign.left,
-                    enabled: !_isSaving,
-                    onSubmitted: (_) => _commit(),
-                    style: widget.style,
-                    contentPadding: EdgeInsets.zero,
+              ? SelectionContainer.disabled(
+                  child: Focus(
+                    onKeyEvent: _handleKey,
+                    child: AetherTextField.plain(
+                      controller: _controller,
+                      focusNode: _focusNode,
+                      textAlign: TextAlign.left,
+                      enabled: !_isSaving,
+                      onSubmitted: (_) => _commit(),
+                      style: widget.style,
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ),
+                )
+              : value.isEmpty
+              ? SelectionContainer.disabled(
+                  child: Text(
+                    widget.emptyText,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: widget.style.copyWith(color: cfg.textTertiary),
                   ),
                 )
               : Text(
-                  value.isEmpty ? widget.emptyText : value,
+                  value,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: value.isEmpty
-                      ? widget.style.copyWith(color: cfg.textTertiary)
-                      : widget.style,
+                  style: widget.style,
                 ),
         ),
       ),
