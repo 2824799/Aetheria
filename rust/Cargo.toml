@@ -10,13 +10,14 @@ crate-type = ["cdylib", "staticlib"]
 flutter_rust_bridge = "=2.12.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-rusqlite = { version = "0.31", features = ["bundled"] }
+rusqlite = { version = "0.31", features = ["bundled", "serialize"] }
 lofty = "0.21"
 uuid = { version = "1.8", features = ["v4", "fast-rng", "serde"] }
 symphonia = { version = "0.5.3", features = ["all"] }
 cpal = { version = "0.15", features = ["oboe-shared-stdcxx"] }
 lazy_static = "1.4"
 md5 = "0.7"
+ebur128 = "0.1.10"
 
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.21.1"

@@ -123,15 +123,17 @@ class SettingsLibraryTab extends StatelessWidget {
                       }
                       showAetherToast(
                         context,
-                        message: '歌曲数据已全部刷新完成！',
-                        kind: AetherToastKind.success,
+                        message: libraryProvider.error ?? '歌曲数据已全部刷新完成！',
+                        kind: libraryProvider.error == null
+                            ? AetherToastKind.success
+                            : AetherToastKind.warning,
                       );
                     },
             ),
             AetherButton.secondary(
               label: libraryProvider.isRefreshingDatabase
                   ? '正在扫描...'
-                  : '仅扫描新增文件',
+                  : '补扫待测音源',
               icon: Icons.library_add_check_outlined,
               size: AetherButtonSize.sm,
               onPressed: libraryProvider.isRefreshingDatabase
@@ -145,8 +147,10 @@ class SettingsLibraryTab extends StatelessWidget {
                       }
                       showAetherToast(
                         context,
-                        message: '新增歌曲扫描已完成！',
-                        kind: AetherToastKind.success,
+                        message: libraryProvider.error ?? '待测音源扫描完成。',
+                        kind: libraryProvider.error == null
+                            ? AetherToastKind.success
+                            : AetherToastKind.warning,
                       );
                     },
             ),
@@ -182,7 +186,7 @@ class SettingsLibraryTab extends StatelessWidget {
         ],
         const SizedBox(height: AetherSpace.md),
         Text(
-          '* 全量扫描会重新处理所有音频；新增扫描只处理尚未完整扫描的版本。完整扫描会写入标记，后续新增扫描会自动跳过它们。',
+          '旧库在启动后逐首补测响度，可在这里查看进度或重试未完成的音源。',
           style: AetherType.captionStyle(cfg.textSecondary).copyWith(height: 1.5),
         ),
       ],

@@ -374,6 +374,17 @@ impl DecodePipeline {
         let source_start_frame = self.source_position_frames;
         self.source_position_frames += source_frames;
         self.mix_hitsounds(&mut samples, source_start_frame, source_frames);
+        let total_gain = *self
+            .params
+            .loudness_normalization_gain
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if total_gain != 1.0 {
+            for sample in samples.iter_mut() {
+                *sample *= total_gain as f64;
+            }
+        }
+
         {
             let _protection_scope =
                 profiler::scope("audio::player::DecodePipeline::post_dsp_protection");
@@ -419,7 +430,7 @@ impl DecodePipeline {
             && current_algo == "rubberband"
             && current_quality.rubberband_vocal_only_pitch;
 
-        let mut block = self.decoder.read_block(self.block_frames)?;
+        let block = self.decoder.read_block(self.block_frames)?;
         if block.is_empty() {
             let tail = if vocal_only_active {
                 vocal_only_shifter.as_mut().map(VocalOnlyPitchProcessor::finish)
@@ -439,17 +450,6 @@ impl DecodePipeline {
         }
 
         let in_frames = block.len() / self.channels.max(1) as usize;
-        let total_gain = *self
-            .params
-            .loudness_normalization_gain
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        if total_gain != 1.0 {
-            for sample in block.iter_mut() {
-                *sample *= total_gain as f64;
-            }
-        }
-
         let (processed, source_frames) = if current_pitch.abs() > 0.01 && self.channels == 2 {
             let _pitch_scope = profiler::scope("audio::player::DecodePipeline::pitch_shift");
             let pitch_factor = 2.0f64.powf(current_pitch / 12.0);
@@ -1890,6 +1890,7 @@ mod fidelity_tests {
                 offset_ms: 0,
             },
         );
+        *pipeline.params.loudness_normalization_gain.lock().unwrap() = 0.5;
         pipeline.seek(0.05).unwrap();
         let mut out3 = Vec::new();
         while let Some(block) = pipeline.next_block(&mut rubberband, &mut vocal).unwrap() {
@@ -1902,7 +1903,8 @@ mod fidelity_tests {
             .iter()
             .fold(0.0f64, |acc, s| acc.max(s.abs()));
         assert!(
-            post_seek_first > 0.25 && post_seek_second > 0.25,
+            (post_seek_first - 0.5 * first_hit_peak).abs() < 1e-6
+                && (post_seek_second - post_seek_first).abs() < 1e-6,
             "seek reset must allow 0.10s and 0.80s hitsounds to trigger again: {post_seek_first}, {post_seek_second}"
         );
     }

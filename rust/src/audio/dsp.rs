@@ -42,70 +42,10 @@ pub fn default_track(format: &dyn FormatReader) -> Result<&Track, String> {
         .ok_or_else(|| "No audio track found".to_string())
 }
 
-fn make_decoder(track: &Track) -> Result<Box<dyn Decoder>, String> {
+pub(super) fn make_decoder(track: &Track) -> Result<Box<dyn Decoder>, String> {
     symphonia::default::get_codecs()
         .make(&track.codec_params, &DecoderOptions::default())
         .map_err(|e| e.to_string())
-}
-
-/// How much of a file a loudness measurement decodes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum LoudnessScan {
-    /// Roughly the first 5-10 seconds; fast enough to run during import.
-    Quick,
-    /// The whole file; used when the user asks for a metadata refresh.
-    Full,
-}
-
-const QUICK_LOUDNESS_PACKETS: usize = 300;
-
-/// Average RMS level of an audio file in dBFS, clamped to `-60.0..=0.0`.
-///
-/// Fails when the file yields no decodable samples, so callers never store a
-/// made-up level.
-pub fn calculate_loudness(path: &str, scan: LoudnessScan) -> Result<f64, String> {
-    let _scope = profiler::scope(match scan {
-        LoudnessScan::Quick => "audio::dsp::calculate_loudness",
-        LoudnessScan::Full => "audio::dsp::calculate_loudness_full",
-    });
-    let mut format = open_format(path)?;
-    let track = default_track(format.as_ref())?;
-    let track_id = track.id;
-    let mut decoder = make_decoder(track)?;
-
-    let mut sample_count = 0u64;
-    let mut sum_squares = 0.0f64;
-    let mut packet_count = 0usize;
-    loop {
-        let packet = match format.next_packet() {
-            Ok(packet) => packet,
-            Err(Error::IoError(ref e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
-            Err(e) => return Err(e.to_string()),
-        };
-        if packet.track_id() != track_id {
-            continue;
-        }
-        let decoded = match decoder.decode(&packet) {
-            Ok(buffer) => buffer,
-            Err(Error::DecodeError(_)) => continue,
-            Err(e) => return Err(e.to_string()),
-        };
-        let (samples, _) = packet_to_interleaved_f64(&decoded);
-        for sample in samples.into_iter().filter(|sample| sample.is_finite()) {
-            sum_squares += sample * sample;
-            sample_count += 1;
-        }
-        packet_count += 1;
-        if scan == LoudnessScan::Quick && packet_count > QUICK_LOUDNESS_PACKETS {
-            break;
-        }
-    }
-
-    if sample_count == 0 {
-        return Err("No decodable audio samples".to_string());
-    }
-    let rms = (sum_squares / sample_count as f64).sqrt();
-    Ok((20.0 * rms.log10()).clamp(-60.0, 0.0))
 }
 
 #[derive(Clone, Copy, Debug)]

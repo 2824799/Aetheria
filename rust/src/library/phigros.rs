@@ -1,6 +1,7 @@
 //! Phigros zone playlist, chart metadata, and extracted asset package import.
 
 use super::{paths, playlists, probe, songs, LibraryError, Result};
+use crate::audio::loudness::{self, Profile};
 use crate::database::connection;
 use crate::models::{PhigrosChartMeta, PhigrosImportResult, PhigrosSongMeta, Playlist};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -317,6 +318,20 @@ pub fn import_package(package_dir: &Path) -> Result<PhigrosImportResult> {
         }
     }
 
+    // Complete the expensive decodes before acquiring the package's SQLite writer lock.
+    // Several difficulties often reference the same source.
+    let mut profiles = HashMap::new();
+    for item in manifest.songs.iter().filter(|s| !s.charts.is_empty()) {
+        let sources = std::iter::once(&item.audio_file)
+            .chain(item.charts.iter().filter_map(|chart| chart.audio_file.as_ref()));
+        for rel in sources {
+            if !profiles.contains_key(rel) {
+                let src = safe_join(package_dir, rel)?;
+                profiles.insert(rel, loudness::scan(&src).ok());
+            }
+        }
+    }
+
     let mut conn = connection::open()?;
     let tx = conn.transaction()?;
     let playlist = ensure_phigros_playlist(&tx)?;
@@ -372,8 +387,6 @@ pub fn import_package(package_dir: &Path) -> Result<PhigrosImportResult> {
                     existing_id
                 ],
             )?;
-            // Refresh primary audio metadata if file updated.
-            upsert_primary_audio(&tx, &existing_id, &main_rel_audio, &main_audio_src, item)?;
             existing_id
         } else {
             imported_count += 1;
@@ -383,9 +396,12 @@ pub fn import_package(package_dir: &Path) -> Result<PhigrosImportResult> {
                  VALUES (?1, ?2, ?3, ?4, ?5, 0)",
                 params![new_id, item.title, item.composer, item.chapter, main_cover_rel],
             )?;
-            upsert_primary_audio(&tx, &new_id, &main_rel_audio, &main_audio_src, item)?;
             new_id
         };
+
+        upsert_primary_audio(
+            &tx, &song_id, &main_rel_audio, &main_audio_src, item, profiles[&item.audio_file],
+        )?;
 
         let existing_selection: Option<String> = tx
             .query_row(
@@ -478,8 +494,8 @@ pub fn import_package(package_dir: &Path) -> Result<PhigrosImportResult> {
                 "INSERT INTO phigros_charts (
                     song_id, difficulty, sort_rank, rating, charter, bpm_min, bpm_max,
                     chart_offset_ms, note_count, tap_count, drag_count, hold_count,
-                    flick_count, audio_rel_path, cover_rel_path, chart_rel_path
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+                    flick_count, audio_rel_path, cover_rel_path, chart_rel_path, balance_db
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
                 params![
                     song_id,
                     chart.difficulty,
@@ -497,6 +513,7 @@ pub fn import_package(package_dir: &Path) -> Result<PhigrosImportResult> {
                     diff_audio_rel,
                     diff_cover_rel,
                     chart_rel,
+                    chart.audio_file.as_ref().and_then(|rel| profiles[rel]).map(|p| p.attenuation_db),
                 ],
             )?;
             total_charts += 1;
@@ -527,6 +544,7 @@ fn upsert_primary_audio(
     rel_audio: &str,
     src_path: &Path,
     item: &ManifestSong,
+    profile: Option<Profile>,
 ) -> Result<()> {
     let dest_path = paths::audio_file(rel_audio)
         .ok_or_else(|| LibraryError::new("目标音频路径无效。"))?;
@@ -569,7 +587,7 @@ fn upsert_primary_audio(
             "UPDATE audio_files
              SET filepath = ?1, original_name = ?2, format = ?3, bitrate = ?4,
                  sample_rate = ?5, duration = ?6, file_size = ?7, md5 = ?8,
-                 bit_depth = ?9, metadata_scanned = 1
+                 bit_depth = ?9, integrated_lufs = ?11, balance_db = ?12, metadata_scanned = ?13
              WHERE id = ?10",
             params![
                 rel_audio,
@@ -582,6 +600,9 @@ fn upsert_primary_audio(
                 md5,
                 bit_depth,
                 ver_id,
+                profile.and_then(|p| p.integrated),
+                profile.map(|p| p.attenuation_db),
+                profile.is_some(),
             ],
         )?;
     } else {
@@ -589,8 +610,8 @@ fn upsert_primary_audio(
             "INSERT INTO audio_files (
                 id, song_id, filepath, original_name, format, bitrate,
                 sample_rate, duration, file_size, is_enabled, is_primary,
-                md5, bit_depth, loudness, metadata_scanned
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1, 1, ?10, ?11, NULL, 1)",
+                md5, bit_depth, integrated_lufs, balance_db, metadata_scanned
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1, 1, ?10, ?11, ?12, ?13, ?14)",
             params![
                 Uuid::new_v4().to_string(),
                 song_id,
@@ -603,6 +624,9 @@ fn upsert_primary_audio(
                 file_size,
                 md5,
                 bit_depth,
+                profile.and_then(|p| p.integrated),
+                profile.map(|p| p.attenuation_db),
+                profile.is_some(),
             ],
         )?;
     }
@@ -752,6 +776,7 @@ mod tests {
                             "drag_count": 1,
                             "hold_count": 1,
                             "flick_count": 1,
+                            "audio_file": "audio/alt.wav",
                             "chart_file": "charts/glac_in.json"
                         }
                     ]
@@ -767,6 +792,9 @@ mod tests {
         let pkg = lib.scratch_dir().join("pkg");
         write_test_package(&pkg);
 
+        let tone: Vec<_> = (0..48000).map(|n| (std::f64::consts::TAU * 997.0 * n as f64 / 48000.0).sin()).collect();
+        let alt = TestWav::float(48000, 1, &tone);
+        fs::copy(&alt.path, pkg.join("audio/alt.wav")).unwrap();
         let first = import_package(&pkg).unwrap();
         assert_eq!(first.imported_count, 1);
         assert_eq!(first.updated_count, 0);
@@ -783,6 +811,19 @@ mod tests {
             loaded[0].phigros.as_ref().unwrap().selected_difficulty,
             "IN"
         );
+
+        let version = &loaded[0].versions[0];
+        let main_path = paths::audio_file(&version.filepath).unwrap();
+        let chart = &loaded[0].phigros.as_ref().unwrap().charts[1];
+        let alt_path = paths::audio_file(chart.audio_rel_path.as_deref().unwrap()).unwrap();
+        assert_eq!(songs::playback_gain(&version.id, &main_path, 1.0).unwrap(), 1.0);
+        assert!(songs::playback_gain(&version.id, &alt_path, 1.0).unwrap() < 0.25);
+        let conn = connection::open().unwrap();
+        conn.execute("UPDATE phigros_charts SET balance_db=NULL", []).unwrap();
+        assert!(!songs::load_version(&conn, &version.id).unwrap().metadata_scanned);
+        maintenance::refresh_metadata(&version.id).unwrap();
+        assert!(songs::load_version(&conn, &version.id).unwrap().metadata_scanned);
+        assert!(songs::playback_gain(&version.id, &alt_path, 1.0).unwrap() < 0.25);
 
         set_difficulty(&song_id, "EZ").unwrap();
         set_hitsound(&song_id, "off", Some(0.4), Some(-15)).unwrap();

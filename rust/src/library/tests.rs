@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 /// A short stereo WAV whose contents (and therefore MD5) depend on `seed`.
 fn wav(seed: i32) -> TestWav {
-    let samples: Vec<i32> = (0..4_410).map(|i| (i * seed) % 8_000).collect();
+    let samples: Vec<i32> = (0..44_100).map(|i| (i * seed) % 8_000).collect();
     TestWav::pcm(44_100, 2, 16, &samples)
 }
 
@@ -51,7 +51,7 @@ fn import_registers_a_song_with_one_primary_version() {
     assert!(version.is_primary && version.is_enabled);
     assert_eq!(version.format.as_deref(), Some("wav"));
     assert_eq!(version.sample_rate, Some(44_100));
-    assert!((version.duration - 0.05).abs() < 0.001);
+    assert!((version.duration - 0.5).abs() < 0.001);
     assert!(version.md5.is_some());
     assert!(version.loudness.is_some());
     assert!(paths::audio_file(&version.filepath).unwrap().is_file());
@@ -401,7 +401,7 @@ fn refresh_and_export_work_on_managed_files() {
     let source = wav(3);
     let song = import::import_song(source.path()).unwrap();
     let version = &song.versions[0];
-    assert!(!version.metadata_scanned);
+    assert!(version.metadata_scanned);
 
     maintenance::refresh_metadata(&version.id).unwrap();
     let refreshed = songs::all().unwrap().remove(0).versions.remove(0);
@@ -542,4 +542,51 @@ fn databases_from_older_builds_gain_the_missing_columns() {
     assert_eq!(version.loudness, None);
     assert!(!version.metadata_scanned);
     assert_eq!(tags::all().unwrap().len(), 11);
+}
+
+#[test]
+fn legacy_rms_is_pending_and_playback_reads_the_profile_after_backfill() {
+    let _library = TestLibrary::new();
+    let pcm: Vec<_> = (0..48000)
+        .map(|n| (std::f64::consts::TAU * 997.0 * n as f64 / 48000.0).sin())
+        .collect();
+    let source = TestWav::float(48000, 1, &pcm);
+    let song = import::import_song(source.path()).unwrap();
+    let version = &song.versions[0];
+    let path = paths::audio_file(&version.filepath).unwrap();
+    let conn = connection::open().unwrap();
+    conn.execute("UPDATE audio_files SET loudness=-60, integrated_lufs=NULL, balance_db=NULL, metadata_scanned=1", []).unwrap();
+    let old = songs::load_version(&conn, &version.id).unwrap();
+    assert!(!old.metadata_scanned && old.loudness.is_none());
+    assert_eq!(songs::playback_gain(&version.id, &path, 1.0).unwrap(), 1.0);
+    maintenance::refresh_metadata(&version.id).unwrap();
+    let new = songs::load_version(&conn, &version.id).unwrap();
+    assert!(new.metadata_scanned && (new.loudness.unwrap() + 3.01).abs() < 0.1);
+    let full = songs::playback_gain(&version.id, &path, 1.0).unwrap();
+    let half = songs::playback_gain(&version.id, &path, 0.5).unwrap();
+    assert!((20.0 * full.log10() + 13.0).abs() < 0.1);
+    assert!((half * half - full).abs() < 1e-5);
+    assert_eq!(songs::playback_gain(&version.id, &path, 0.0).unwrap(), 1.0);
+}
+
+#[test]
+fn sync_snapshot_contains_committed_wal_and_stays_stable_during_backfill() {
+    let lib = TestLibrary::new();
+    let conn = connection::open().unwrap();
+    let track = wav(3);
+    let song = import::import_song(track.path()).unwrap();
+    let before = super::snapshot().unwrap();
+    conn.execute("UPDATE audio_files SET balance_db = 42", [])
+        .unwrap();
+    let copy = lib.scratch_dir().join("snapshot.db");
+    fs::write(&copy, before).unwrap();
+    let snapshot = rusqlite::Connection::open(copy).unwrap();
+    let db: f64 = snapshot
+        .query_row(
+            "SELECT balance_db FROM audio_files WHERE id=?1",
+            [&song.versions[0].id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(db < 42.0);
 }

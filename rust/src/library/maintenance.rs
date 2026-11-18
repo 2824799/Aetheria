@@ -1,7 +1,7 @@
 //! Whole-library and per-file maintenance: reset, metadata refresh, export.
 
 use super::{paths, probe, songs, LibraryError, Result};
-use crate::audio::dsp;
+use crate::audio::loudness;
 use crate::database::{connection, schema};
 use rusqlite::{params, OptionalExtension};
 use std::fs;
@@ -29,7 +29,11 @@ pub fn reset() -> Result<()> {
 
     // The rows are gone; files that cannot be removed right now (e.g. still
     // open in the player on Windows) are merely orphans.
-    for dir in [paths::files_dir(), paths::covers_dir(), paths::phigros_dir()] {
+    for dir in [
+        paths::files_dir(),
+        paths::covers_dir(),
+        paths::phigros_dir(),
+    ] {
         let _ = fs::remove_dir_all(&dir);
     }
     paths::ensure_dirs()?;
@@ -38,52 +42,82 @@ pub fn reset() -> Result<()> {
 
 /// Re-reads stream properties and measures full-file loudness for a version.
 pub fn refresh_metadata(version_id: &str) -> Result<()> {
-    let conn = connection::open()?;
-    let stored: String = conn
+    let mut conn = connection::open()?;
+    // A read snapshot ensures a concurrent package replacement cannot receive the old
+    // file's measurements. SQLite rejects promotion of a stale snapshot to a writer.
+    let tx = conn.transaction()?;
+    let (stored, song_id, primary): (String, String, bool) = tx
         .query_row(
-            "SELECT filepath FROM audio_files WHERE id = ?1",
-            params![version_id],
-            |row| row.get(0),
+            "SELECT filepath, song_id, is_primary FROM audio_files WHERE id = ?1",
+            [version_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .optional()?
         .ok_or_else(songs::version_not_found)?;
-    let path = paths::audio_file(&stored)
-        .filter(|path| path.is_file())
-        .ok_or_else(missing_file)?;
-
-    // A failed measurement keeps the previous value instead of inventing one.
-    let loudness = dsp::calculate_loudness(&path.to_string_lossy(), dsp::LoudnessScan::Full).ok();
-    match probe::open(&path) {
-        Ok(file) => {
-            let properties = probe::properties(&path, &file);
-            conn.execute(
-                "UPDATE audio_files SET
-                     bitrate = ?1,
-                     sample_rate = ?2,
-                     duration = CASE WHEN ?3 > 0 THEN ?3 ELSE duration END,
-                     bit_depth = ?4,
-                     loudness = COALESCE(?5, loudness),
-                     metadata_scanned = 1
-                 WHERE id = ?6",
-                params![
-                    properties.bitrate,
-                    properties.sample_rate,
-                    properties.duration,
-                    properties.bit_depth,
-                    loudness,
-                    version_id,
-                ],
-            )?;
-        }
-        Err(_) => {
-            conn.execute(
-                "UPDATE audio_files SET loudness = COALESCE(?1, loudness), metadata_scanned = 1
-                 WHERE id = ?2",
-                params![loudness, version_id],
-            )?;
+    let path = paths::audio_file(&stored).ok_or_else(missing_file)?;
+    let profile = loudness::scan(&path);
+    let mut scan_error = profile.as_ref().err().cloned();
+    let properties = probe::open(&path)
+        .ok()
+        .map(|file| probe::properties(&path, &file));
+    let mut chart_profiles = Vec::new();
+    if primary {
+        let mut stmt = tx.prepare(
+            "SELECT DISTINCT audio_rel_path FROM phigros_charts
+            WHERE song_id = ?1 AND audio_rel_path IS NOT NULL",
+        )?;
+        for rel in stmt.query_map([&song_id], |r| r.get::<_, String>(0))? {
+            let rel = rel?;
+            let measurement = match paths::audio_file(&rel) {
+                Some(chart) if chart == path => profile.clone(),
+                Some(chart) => loudness::scan(&chart),
+                None => Err(missing_file().to_string()),
+            };
+            match measurement {
+                Ok(profile) => chart_profiles.push((rel, profile.attenuation_db)),
+                Err(message) => {
+                    scan_error.get_or_insert(message);
+                }
+            }
         }
     }
-    Ok(())
+    if let Some(p) = properties {
+        tx.execute(
+            "UPDATE audio_files SET bitrate = ?1, sample_rate = ?2,
+            duration = CASE WHEN ?3 > 0 THEN ?3 ELSE duration END, bit_depth = ?4 WHERE id = ?5",
+            params![
+                p.bitrate,
+                p.sample_rate,
+                p.duration,
+                p.bit_depth,
+                version_id
+            ],
+        )?;
+    }
+    if let Ok(profile) = profile {
+        tx.execute(
+            "UPDATE audio_files SET integrated_lufs = ?1, balance_db = ?2, metadata_scanned = 1 WHERE id = ?3",
+            params![profile.integrated, profile.attenuation_db, version_id],
+        )?;
+    }
+    if scan_error.is_some() {
+        // Keep the last valid measurement and mark this version for another attempt.
+        tx.execute(
+            "UPDATE audio_files SET metadata_scanned = 0 WHERE id = ?1",
+            [version_id],
+        )?;
+    }
+    for (rel, db) in chart_profiles {
+        tx.execute(
+            "UPDATE phigros_charts SET balance_db = ?1 WHERE song_id = ?2 AND audio_rel_path = ?3",
+            params![db, song_id, rel],
+        )?;
+    }
+    tx.commit()?;
+    match scan_error {
+        Some(message) => Err(LibraryError::new(message)),
+        None => Ok(()),
+    }
 }
 
 /// Copies a managed audio file out of the library. `destination` is either a

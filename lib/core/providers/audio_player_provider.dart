@@ -42,8 +42,6 @@ class AudioPlayerProvider extends ChangeNotifier {
   static const String _phigrosHitsoundOffsetMsKey =
       'aetheria-phigros-hitsound-offset-ms';
 
-  /// Loudness assumed for versions that have not been measured, in dBFS.
-  static const double _defaultLoudnessDb = -15.0;
 
   static const Duration _positionPollInterval = Duration(milliseconds: 100);
 
@@ -614,36 +612,6 @@ class AudioPlayerProvider extends ChangeNotifier {
     return _audioPath(version);
   }
 
-  /// Gain that pulls louder tracks down towards the quietest primary version
-  /// in the queue, scaled by [volumeBalanceStrength].
-  double _normalizationGain(AudioVersion version) {
-    if (!volumeBalanceEnabled) {
-      return 1.0;
-    }
-    final target = _quietestPrimaryLoudness();
-    final loudness = version.loudness ?? _defaultLoudnessDb;
-    if (loudness <= target) {
-      return 1.0;
-    }
-    final deltaDb = volumeBalanceStrength * (target - loudness);
-    return math.pow(10, deltaDb / 20).toDouble();
-  }
-
-  double _quietestPrimaryLoudness() {
-    double? quietest;
-    for (final song in currentQueue) {
-      for (final version in song.versions) {
-        final loudness = version.loudness;
-        if (version.isPrimary &&
-            loudness != null &&
-            (quietest == null || loudness < quietest)) {
-          quietest = loudness;
-        }
-      }
-    }
-    return quietest ?? _defaultLoudnessDb;
-  }
-
   /// Reopens the current stream at the current position so settings that are
   /// fixed at stream start (device, buffer, gain, resampler) take effect.
   Future<void> _restartStream() async {
@@ -708,7 +676,8 @@ class AudioPlayerProvider extends ChangeNotifier {
         volume: volume,
         pitch: _effectivePitchSemitones,
         algo: pitchAlgorithm,
-        normalizationGain: _normalizationGain(version),
+        versionId: version.id,
+        balanceStrength: volumeBalanceEnabled ? volumeBalanceStrength : 0,
         chartPath: hitsound.chartPath,
         hitsoundEnabled: hitsound.enabled,
         hitsoundVolume: hitsound.volume,

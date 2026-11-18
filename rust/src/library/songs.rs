@@ -10,8 +10,40 @@ use std::path::Path;
 
 const SONG_COLUMNS: &str = "id, title, artist, album, lyrics, cover_path, rating, created_at";
 const VERSION_COLUMNS: &str = "id, song_id, filepath, original_name, format, bitrate, \
-     sample_rate, duration, file_size, is_enabled, is_primary, md5, bit_depth, loudness, \
-     metadata_scanned";
+     sample_rate, duration, file_size, is_enabled, is_primary, md5, bit_depth, integrated_lufs, \
+     metadata_scanned AND balance_db IS NOT NULL AND (NOT is_primary OR NOT EXISTS(
+         SELECT 1 FROM phigros_charts c WHERE c.song_id = audio_files.song_id
+         AND c.audio_rel_path IS NOT NULL AND c.balance_db IS NULL))";
+
+/// Look up the exact source that was opened, including alternate chart audio. Reading
+/// on stream open also picks up completed background scans in an existing play queue.
+pub(crate) fn playback_gain(version_id: &str, path: &Path, strength: f32) -> Result<f32> {
+    if !strength.is_finite() || strength <= 0.0 {
+        return Ok(1.0);
+    }
+    let conn = connection::open()?;
+    let (stored, song_id, mut db): (String, String, Option<f64>) = conn.query_row(
+        "SELECT filepath, song_id, balance_db FROM audio_files WHERE id = ?1",
+        [version_id],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+    )?;
+    if paths::audio_file(&stored).as_deref() != Some(path) {
+        db = None;
+        let mut stmt = conn.prepare(
+            "SELECT audio_rel_path, balance_db FROM phigros_charts
+            WHERE song_id = ?1 AND audio_rel_path IS NOT NULL",
+        )?;
+        let mut rows = stmt.query([song_id])?;
+        while let Some(row) = rows.next()? {
+            if paths::audio_file(&row.get::<_, String>(0)?).as_deref() == Some(path) {
+                db = row.get(1)?;
+                break;
+            }
+        }
+    }
+    let attenuation = db.filter(|v| v.is_finite() && *v > 0.0).unwrap_or_default();
+    Ok(10.0_f64.powf(-attenuation * f64::from(strength.min(1.0)) / 20.0) as f32)
+}
 
 /// The UI shows this placeholder for songs without an artist; it must never
 /// be stored as a real artist name.

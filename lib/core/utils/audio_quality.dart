@@ -27,7 +27,7 @@ String audioQualityText(AudioVersion? version) {
       '${(sampleRate / 1000).toStringAsFixed(1).replaceAll('.0', '')}k',
     if (bitDepth != null) '${bitDepth}b',
     if (bitrate != null) '${(bitrate / 1000).round()}kbps',
-    if (loudness != null) '${loudness.toStringAsFixed(1)}dB',
+    if (loudness != null) '${loudness.toStringAsFixed(1)} LUFS',
   ].join('/');
   return text.isEmpty ? '未知' : text;
 }

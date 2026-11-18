@@ -49,3 +49,9 @@ pub fn checkpoint() -> Result<()> {
     conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
     Ok(())
 }
+
+pub fn snapshot() -> Result<Vec<u8>> {
+    let conn = connection::open()?;
+    let bytes = conn.serialize(rusqlite::DatabaseName::Main)?;
+    Ok(bytes.to_vec())
+}

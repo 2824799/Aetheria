@@ -38,7 +38,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.12.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -2017494938;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -633852056;
 
 // Section: executor
 
@@ -1817,6 +1817,38 @@ fn wire__crate__api__playback__set_volume_impl(
         },
     )
 }
+fn wire__crate__api__music__snapshot_library_database_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "snapshot_library_database",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::api::music::snapshot_library_database()?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
 fn wire__crate__api__playback__start_playback_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -1843,7 +1875,8 @@ fn wire__crate__api__playback__start_playback_impl(
             let api_volume = <f32>::sse_decode(&mut deserializer);
             let api_pitch = <f64>::sse_decode(&mut deserializer);
             let api_algo = <String>::sse_decode(&mut deserializer);
-            let api_normalization_gain = <f32>::sse_decode(&mut deserializer);
+            let api_version_id = <String>::sse_decode(&mut deserializer);
+            let api_balance_strength = <f32>::sse_decode(&mut deserializer);
             let api_chart_path = <Option<String>>::sse_decode(&mut deserializer);
             let api_hitsound_enabled = <bool>::sse_decode(&mut deserializer);
             let api_hitsound_volume = <f32>::sse_decode(&mut deserializer);
@@ -1856,7 +1889,8 @@ fn wire__crate__api__playback__start_playback_impl(
                         api_volume,
                         api_pitch,
                         api_algo,
-                        api_normalization_gain,
+                        api_version_id,
+                        api_balance_strength,
                         api_chart_path,
                         api_hitsound_enabled,
                         api_hitsound_volume,
@@ -2775,18 +2809,24 @@ fn pde_ffi_dispatcher_primary_impl(
         50 => wire__crate__api__playback__set_pitch_impl(port, ptr, rust_vec_len, data_len),
         51 => wire__crate__api__music__set_primary_version_impl(port, ptr, rust_vec_len, data_len),
         52 => wire__crate__api__playback__set_volume_impl(port, ptr, rust_vec_len, data_len),
-        53 => wire__crate__api__playback__start_playback_impl(port, ptr, rust_vec_len, data_len),
-        54 => wire__crate__api__playback__stop_playback_impl(port, ptr, rust_vec_len, data_len),
-        55 => wire__crate__api__music__tag_song_impl(port, ptr, rust_vec_len, data_len),
-        56 => wire__crate__api__music__update_lyric_offset_impl(port, ptr, rust_vec_len, data_len),
-        57 => wire__crate__api__playback__update_playback_hitsound_impl(
+        53 => wire__crate__api__music__snapshot_library_database_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        58 => wire__crate__api__music__update_song_metadata_impl(port, ptr, rust_vec_len, data_len),
-        59 => wire__crate__api__music__update_tag_impl(port, ptr, rust_vec_len, data_len),
+        54 => wire__crate__api__playback__start_playback_impl(port, ptr, rust_vec_len, data_len),
+        55 => wire__crate__api__playback__stop_playback_impl(port, ptr, rust_vec_len, data_len),
+        56 => wire__crate__api__music__tag_song_impl(port, ptr, rust_vec_len, data_len),
+        57 => wire__crate__api__music__update_lyric_offset_impl(port, ptr, rust_vec_len, data_len),
+        58 => wire__crate__api__playback__update_playback_hitsound_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        59 => wire__crate__api__music__update_song_metadata_impl(port, ptr, rust_vec_len, data_len),
+        60 => wire__crate__api__music__update_tag_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }

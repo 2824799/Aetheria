@@ -1,6 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:crypto/crypto.dart';
 
 import 'package:aetheria/core/providers/library_provider.dart';
 import 'package:aetheria/core/providers/sync_provider.dart';
@@ -10,8 +13,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class _FakeSyncManifestApi extends Fake implements RustLibApi {
+  int revision = 0;
+
   @override
-  Future<void> crateApiMusicCheckpointLibraryDatabase() async {}
+  Future<Uint8List> crateApiMusicSnapshotLibraryDatabase() async =>
+      Uint8List.fromList([++revision]);
 }
 
 void main() {
@@ -185,6 +191,14 @@ void main() {
           jsonDecode(await utf8.decoder.bind(manifestResp).join())
               as Map<String, dynamic>;
       expect(manifest['tagOrder'], library.exportTagOrderPayload());
+      final dbReq = await client.getUrl(
+        Uri.parse('http://127.0.0.1:${tagSync.localPort}/sync/database'),
+      );
+      dbReq.headers.set('X-Aetheria-Sync-Token', token);
+      final response = await dbReq.close();
+      expect(response.statusCode, HttpStatus.ok);
+      final digest = await md5.bind(response).first;
+      expect(digest.toString(), manifest['database']['md5']);
     });
 
     test('manifest includes covers/ and phigros/ alongside files/', () async {

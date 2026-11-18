@@ -44,6 +44,8 @@ const CREATE_TABLES: &str = "
         md5 TEXT,
         bit_depth INTEGER,
         loudness REAL,
+        integrated_lufs REAL,
+        balance_db REAL,
         metadata_scanned INTEGER DEFAULT 0,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (song_id) REFERENCES songs(id) ON DELETE CASCADE
@@ -130,6 +132,7 @@ const CREATE_TABLES: &str = "
         hold_count INTEGER NOT NULL,
         flick_count INTEGER NOT NULL,
         audio_rel_path TEXT,
+        balance_db REAL,
         cover_rel_path TEXT,
         chart_rel_path TEXT NOT NULL,
         PRIMARY KEY (song_id, difficulty),
@@ -139,10 +142,13 @@ const CREATE_TABLES: &str = "
 
 /// Columns added after the first release: `(table, column, definition)`.
 /// Databases created by older builds (or pulled from an older peer) gain them here.
-const COLUMN_MIGRATIONS: [(&str, &str, &str); 5] = [
+const COLUMN_MIGRATIONS: [(&str, &str, &str); 8] = [
     ("audio_files", "md5", "TEXT"),
     ("audio_files", "bit_depth", "INTEGER"),
     ("audio_files", "loudness", "REAL"),
+    ("audio_files", "integrated_lufs", "REAL"),
+    ("audio_files", "balance_db", "REAL"),
+    ("phigros_charts", "balance_db", "REAL"),
     ("audio_files", "metadata_scanned", "INTEGER DEFAULT 0"),
     ("playlists", "kind", "TEXT NOT NULL DEFAULT 'normal'"),
 ];

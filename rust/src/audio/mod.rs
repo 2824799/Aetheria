@@ -2,6 +2,7 @@
 
 pub mod dsp;
 pub mod hitsound;
+pub(crate) mod loudness;
 pub mod player;
 pub mod profiler;
 pub mod rubberband;

@@ -10,12 +10,16 @@ pub fn start_playback(
     volume: f32,
     pitch: f64,
     algo: String,
-    normalization_gain: f32,
+    version_id: String,
+    balance_strength: f32,
     chart_path: Option<String>,
     hitsound_enabled: bool,
     hitsound_volume: f32,
     hitsound_offset_ms: i32,
 ) -> Result<(), String> {
+    let normalization_gain =
+        crate::library::songs::playback_gain(&version_id, path.as_ref(), balance_strength)
+            .unwrap_or(1.0);
     player::start_playback(
         path,
         volume,

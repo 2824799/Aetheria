@@ -21,6 +21,10 @@ Future<String> getLibraryPath() =>
 Future<void> checkpointLibraryDatabase() =>
     RustLib.instance.api.crateApiMusicCheckpointLibraryDatabase();
 
+/// A single SQLite read snapshot, including committed WAL pages, for one sync peer.
+Future<Uint8List> snapshotLibraryDatabase() =>
+    RustLib.instance.api.crateApiMusicSnapshotLibraryDatabase();
+
 Future<void> resetLibrary() => RustLib.instance.api.crateApiMusicResetLibrary();
 
 Future<List<Song>> getSongs() => RustLib.instance.api.crateApiMusicGetSongs();

@@ -42,14 +42,14 @@ class SettingsPlaybackTab extends StatelessWidget {
         const AetherSectionHeader(title: '主动音量均衡'),
         AetherSwitchTile(
           title: '启用音量均衡',
-          subtitle: '根据歌单音量水平，按比例自动压低大声音歌曲的音量，不提升声音小的歌曲。',
+          subtitle: '按全曲感知响度降低偏响歌曲的音量。同一首歌在不同歌单中使用相同的增益。',
           value: audioProvider.volumeBalanceEnabled,
           onChanged: audioProvider.setVolumeBalanceEnabled,
         ),
         if (audioProvider.volumeBalanceEnabled) ...[
           const SizedBox(height: AetherSpace.xs),
           Text(
-            '提示：极速导入时仅采样前几秒估算音量。如需追求最佳均衡效果，请前往 “音乐库管理” 菜单中点击 “刷新并重新扫描歌曲数据” 按钮以计算全歌精确分贝值。',
+            '导入时扫描全曲。满强度以 −16 LUFS 为参考，持续偏响的歌曲最多再降低 3 dB。强度滑块按比例调整总衰减。',
             style: AetherType.captionStyle(cfg.accent),
           ),
           SettingsSliderRow(

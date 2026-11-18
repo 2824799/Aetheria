@@ -66,6 +66,7 @@ class _MainLayoutState extends State<MainLayout>
         libraryProvider.songs,
         libraryProvider.libraryPath,
       );
+      if (mounted) libraryProvider.backfillLoudness();
     });
   }
 

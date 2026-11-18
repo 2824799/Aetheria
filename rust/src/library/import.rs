@@ -1,7 +1,7 @@
 //! Copies audio files into the managed library and registers them.
 
 use super::{paths, probe, songs, LibraryError, Result, AUDIO_EXTENSIONS};
-use crate::audio::dsp;
+use crate::audio::loudness;
 use crate::database::connection;
 use crate::models::{AudioVersion, PreviewInfo, Song};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
@@ -67,8 +67,7 @@ fn import(source: &Path, target: Target<'_>) -> Result<(Connection, AudioVersion
         }
     }
     // Measured only once the file is known to be importable: it decodes audio.
-    let loudness =
-        dsp::calculate_loudness(&source.to_string_lossy(), dsp::LoudnessScan::Quick).ok();
+    let profile = loudness::scan(source).ok();
 
     let file_name = if extension.is_empty() {
         Uuid::new_v4().to_string()
@@ -114,9 +113,9 @@ fn import(source: &Path, target: Target<'_>) -> Result<(Connection, AudioVersion
         let version_id = Uuid::new_v4().to_string();
         tx.execute(
             "INSERT INTO audio_files (id, song_id, filepath, original_name, format, bitrate,
-                 sample_rate, duration, file_size, is_enabled, is_primary, md5, bit_depth, loudness)
+                 sample_rate, duration, file_size, is_enabled, is_primary, md5, bit_depth, integrated_lufs, balance_db, metadata_scanned)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1,
-                 NOT EXISTS(SELECT 1 FROM audio_files WHERE song_id = ?2), ?10, ?11, ?12)",
+                 NOT EXISTS(SELECT 1 FROM audio_files WHERE song_id = ?2), ?10, ?11, ?12, ?13, ?14)",
             params![
                 version_id,
                 song_id,
@@ -129,7 +128,9 @@ fn import(source: &Path, target: Target<'_>) -> Result<(Connection, AudioVersion
                 file_size,
                 md5,
                 properties.bit_depth,
-                loudness,
+                profile.and_then(|p| p.integrated),
+                profile.map(|p| p.attenuation_db),
+                profile.is_some(),
             ],
         )?;
         tx.commit()?;

@@ -70,7 +70,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.12.0';
 
   @override
-  int get rustContentHash => -2017494938;
+  int get rustContentHash => -633852056;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -259,12 +259,15 @@ abstract class RustLibApi extends BaseApi {
 
   Future<void> crateApiPlaybackSetVolume({required double volume});
 
+  Future<Uint8List> crateApiMusicSnapshotLibraryDatabase();
+
   Future<void> crateApiPlaybackStartPlayback({
     required String path,
     required double volume,
     required double pitch,
     required String algo,
-    required double normalizationGain,
+    required String versionId,
+    required double balanceStrength,
     String? chartPath,
     required bool hitsoundEnabled,
     required double hitsoundVolume,
@@ -1959,12 +1962,40 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "set_volume", argNames: ["volume"]);
 
   @override
+  Future<Uint8List> crateApiMusicSnapshotLibraryDatabase() {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 53,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_prim_u_8_strict,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiMusicSnapshotLibraryDatabaseConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiMusicSnapshotLibraryDatabaseConstMeta =>
+      const TaskConstMeta(debugName: "snapshot_library_database", argNames: []);
+
+  @override
   Future<void> crateApiPlaybackStartPlayback({
     required String path,
     required double volume,
     required double pitch,
     required String algo,
-    required double normalizationGain,
+    required String versionId,
+    required double balanceStrength,
     String? chartPath,
     required bool hitsoundEnabled,
     required double hitsoundVolume,
@@ -1978,7 +2009,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_f_32(volume, serializer);
           sse_encode_f_64(pitch, serializer);
           sse_encode_String(algo, serializer);
-          sse_encode_f_32(normalizationGain, serializer);
+          sse_encode_String(versionId, serializer);
+          sse_encode_f_32(balanceStrength, serializer);
           sse_encode_opt_String(chartPath, serializer);
           sse_encode_bool(hitsoundEnabled, serializer);
           sse_encode_f_32(hitsoundVolume, serializer);
@@ -1986,7 +2018,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 53,
+            funcId: 54,
             port: port_,
           );
         },
@@ -2000,7 +2032,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           volume,
           pitch,
           algo,
-          normalizationGain,
+          versionId,
+          balanceStrength,
           chartPath,
           hitsoundEnabled,
           hitsoundVolume,
@@ -2019,7 +2052,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           "volume",
           "pitch",
           "algo",
-          "normalizationGain",
+          "versionId",
+          "balanceStrength",
           "chartPath",
           "hitsoundEnabled",
           "hitsoundVolume",
@@ -2036,7 +2070,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 54,
+            funcId: 55,
             port: port_,
           );
         },
@@ -2070,7 +2104,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 55,
+            funcId: 56,
             port: port_,
           );
         },
@@ -2104,7 +2138,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 56,
+            funcId: 57,
             port: port_,
           );
         },
@@ -2143,7 +2177,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 57,
+            funcId: 58,
             port: port_,
           );
         },
@@ -2180,7 +2214,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 58,
+            funcId: 59,
             port: port_,
           );
         },
@@ -2219,7 +2253,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 59,
+            funcId: 60,
             port: port_,
           );
         },

@@ -52,10 +52,21 @@ class IncomingSyncRequest {
 }
 
 class _SyncSession {
-  const _SyncSession({required this.token, required this.expiresAt});
+  _SyncSession({required this.token, required this.expiresAt});
 
   final String token;
-  final DateTime expiresAt;
+  DateTime expiresAt;
+  Future<Uint8List>? database;
+
+  Future<Uint8List> snapshot() async {
+    final pending = database ??= music.snapshotLibraryDatabase();
+    try {
+      return await pending;
+    } catch (_) {
+      if (identical(database, pending)) database = null;
+      rethrow;
+    }
+  }
 }
 
 class _RemoteFileInfo {
@@ -268,7 +279,6 @@ class SyncProvider extends ChangeNotifier {
     notifyListeners();
 
     Directory? tempDir;
-    Directory? backupDir;
     try {
       final token = await _requestRemoteApproval(device);
       progress = null;
@@ -368,20 +378,23 @@ class SyncProvider extends ChangeNotifier {
 
       updateProgress('正在暂停播放并准备覆盖本地库...');
       await audioProvider.stopForLibrarySync();
-      await music.checkpointLibraryDatabase();
-      backupDir = await _createBackupDir(libraryProvider.libraryPath);
-      await _applyMirrorSync(
-        libraryProvider.libraryPath,
-        tempDb,
-        tempDir,
-        backupDir,
-        plan,
-      );
-      completed++;
+      final stagingDir = tempDir;
+      await libraryProvider.withMetadataScanPaused(() async {
+        await music.checkpointLibraryDatabase();
+        final backupDir = await _createBackupDir(libraryProvider.libraryPath);
+        await _applyMirrorSync(
+          libraryProvider.libraryPath,
+          tempDb,
+          stagingDir,
+          backupDir,
+          plan,
+        );
+        completed++;
 
-      updateProgress('正在重新加载音乐库...');
-      await music.initializeLibraryPath(path: libraryProvider.libraryPath);
-      await libraryProvider.loadLibrary();
+        updateProgress('正在重新加载音乐库...');
+        await music.initializeLibraryPath(path: libraryProvider.libraryPath);
+        await libraryProvider.loadLibrary();
+      });
       if (remoteTagOrder != null) {
         await libraryProvider.applySyncedTagOrder(remoteTagOrder);
       }
@@ -824,7 +837,8 @@ class SyncProvider extends ChangeNotifier {
   }
 
   Future<void> _handleManifestRequest(HttpRequest request) async {
-    if (!_isAuthorized(request)) {
+    final session = _authorizedSession(request);
+    if (session == null) {
       await _reject(request, HttpStatus.unauthorized, 'unauthorized');
       return;
     }
@@ -835,11 +849,7 @@ class SyncProvider extends ChangeNotifier {
       return;
     }
 
-    await music.checkpointLibraryDatabase();
-
-    final dbFile = File(
-      _joinPath(libraryProvider.libraryPath, ['database.db']),
-    );
+    final snapshot = await session.snapshot();
     final localFilesMap = await _listManagedSyncFilesWithSize(
       libraryProvider.libraryPath,
     );
@@ -897,8 +907,8 @@ class SyncProvider extends ChangeNotifier {
         'deviceId': _deviceId,
         'deviceName': _deviceName,
         'database': {
-          'size': await dbFile.exists() ? await dbFile.length() : 0,
-          'md5': await dbFile.exists() ? await _fileMd5(dbFile) : '',
+          'size': snapshot.length,
+          'md5': md5.convert(snapshot).toString(),
         },
         'files': files,
         'tagOrder': libraryProvider.exportTagOrderPayload(),
@@ -908,7 +918,8 @@ class SyncProvider extends ChangeNotifier {
   }
 
   Future<void> _handleDatabaseRequest(HttpRequest request) async {
-    if (!_isAuthorized(request)) {
+    final session = _authorizedSession(request);
+    if (session == null) {
       await _reject(request, HttpStatus.unauthorized, 'unauthorized');
       return;
     }
@@ -917,22 +928,15 @@ class SyncProvider extends ChangeNotifier {
       await _reject(request, HttpStatus.badRequest, 'library not ready');
       return;
     }
-    await music.checkpointLibraryDatabase();
-    final dbFile = File(
-      _joinPath(libraryProvider.libraryPath, ['database.db']),
-    );
-    if (!await dbFile.exists()) {
-      await _reject(request, HttpStatus.notFound, 'database not found');
-      return;
-    }
+    final snapshot = await session.snapshot();
     request.response.headers.contentType = ContentType.binary;
-    request.response.contentLength = await dbFile.length();
-    await request.response.addStream(dbFile.openRead());
+    request.response.contentLength = snapshot.length;
+    request.response.add(snapshot);
     await request.response.close();
   }
 
   Future<void> _handleFileRequest(HttpRequest request) async {
-    if (!_isAuthorized(request)) {
+    if (_authorizedSession(request) == null) {
       await _reject(request, HttpStatus.unauthorized, 'unauthorized');
       return;
     }
@@ -955,21 +959,15 @@ class SyncProvider extends ChangeNotifier {
     await request.response.close();
   }
 
-  bool _isAuthorized(HttpRequest request) {
+  _SyncSession? _authorizedSession(HttpRequest request) {
     final token = request.headers.value('X-Aetheria-Sync-Token');
-    if (token == null) {
-      return false;
-    }
     final session = _sessions[token];
     if (session == null || DateTime.now().isAfter(session.expiresAt)) {
       _sessions.remove(token);
-      return false;
+      return null;
     }
-    _sessions[token] = _SyncSession(
-      token: token,
-      expiresAt: DateTime.now().add(_sessionTtl),
-    );
-    return true;
+    session.expiresAt = DateTime.now().add(_sessionTtl);
+    return session;
   }
 
   void _handleUdpEvent(RawSocketEvent event) {
@@ -1009,6 +1007,7 @@ class SyncProvider extends ChangeNotifier {
 
   void _removeStaleDevices() {
     final now = DateTime.now();
+    _sessions.removeWhere((_, session) => now.isAfter(session.expiresAt));
     final staleIds = _devices.entries
         .where((entry) => now.difference(entry.value.lastSeen) > _deviceTtl)
         .map((entry) => entry.key)
@@ -1352,6 +1351,7 @@ class SyncProvider extends ChangeNotifier {
       }
     }
     _pendingRequestCompleters.clear();
+    _sessions.clear();
     _announceTimer?.cancel();
     _cleanupTimer?.cancel();
     _fileHashCachePersistTimer?.cancel();

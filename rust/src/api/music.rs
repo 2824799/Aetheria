@@ -31,6 +31,11 @@ pub fn checkpoint_library_database() -> Result<(), String> {
     Ok(library::checkpoint()?)
 }
 
+/// A single SQLite read snapshot, including committed WAL pages, for one sync peer.
+pub fn snapshot_library_database() -> Result<Vec<u8>, String> {
+    Ok(library::snapshot()?)
+}
+
 pub fn reset_library() -> Result<(), String> {
     Ok(maintenance::reset()?)
 }

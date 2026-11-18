@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -270,7 +271,10 @@ class LibraryProvider extends ChangeNotifier {
   String? error;
   SongClipboard? clipboard;
 
-  bool isRefreshingDatabase = false;
+  bool _disposed = false;
+  Completer<void>? _scanDone;
+  bool get isRefreshingDatabase => _scanDone != null;
+  int _pendingReplacements = 0;
   int refreshProgressCurrent = 0;
   int refreshProgressTotal = 0;
   String refreshProgressLabel = '';
@@ -310,7 +314,14 @@ class LibraryProvider extends ChangeNotifier {
   List<Tag> orderedTagsFor(Song song) => _tagOrderConfig.sortTags(song.tags);
 
   @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
+
+  @override
   void notifyListeners() {
+    if (_disposed) return;
     _displaySongsCache = null;
     _orderedTagsCache = null;
     super.notifyListeners();
@@ -431,7 +442,9 @@ class LibraryProvider extends ChangeNotifier {
   }
 
   Future<void> initializeLibrary(String path) {
-    return _mutate(() => music.initializeLibraryPath(path: path));
+    return withMetadataScanPaused(
+      () => _mutate(() => music.initializeLibraryPath(path: path)),
+    );
   }
 
   /// Runs a library mutation, then reloads so every listener sees the result.
@@ -519,17 +532,35 @@ class LibraryProvider extends ChangeNotifier {
   // Metadata refresh
   // ---------------------------------------------------------------------------
 
+  void backfillLoudness() {
+    if (songs.any((song) => song.versions.any((v) => !v.metadataScanned))) {
+      unawaited(refreshDatabase(onlyUnscanned: true));
+    }
+  }
+
+  /// Drain the file currently being measured before switching or replacing the database.
+  Future<void> withMetadataScanPaused(Future<void> Function() replace) async {
+    _pendingReplacements++;
+    try {
+      await _scanDone?.future;
+      await replace();
+    } finally {
+      _pendingReplacements--;
+      if (_pendingReplacements == 0) backfillLoudness();
+    }
+  }
+
   Future<void> refreshDatabase({bool onlyUnscanned = false}) async {
-    if (isRefreshingDatabase) {
+    if (_disposed || isRefreshingDatabase || _pendingReplacements > 0) {
       return;
     }
-    isRefreshingDatabase = true;
+    final done = _scanDone = Completer<void>();
     refreshProgressCurrent = 0;
     refreshProgressTotal = 0;
-    refreshProgressLabel = onlyUnscanned ? '正在查找新增歌曲...' : '正在准备刷新任务...';
+    refreshProgressLabel = onlyUnscanned ? '正在查找待扫描音源...' : '正在准备刷新任务...';
     notifyListeners();
     try {
-      final snapshotSongs = songs.isNotEmpty
+      final snapshotSongs = !onlyUnscanned && songs.isNotEmpty
           ? List<Song>.of(songs)
           : await music.getSongs();
       final targetSongs = onlyUnscanned
@@ -544,7 +575,7 @@ class LibraryProvider extends ChangeNotifier {
       refreshProgressTotal = targetSongs.length;
       if (targetSongs.isEmpty) {
         refreshProgressLabel = onlyUnscanned
-            ? '没有找到新增或未完整扫描的歌曲。'
+            ? '所有音源均已完成扫描。'
             : '音乐库为空，无需刷新。';
       }
       notifyListeners();
@@ -558,6 +589,7 @@ class LibraryProvider extends ChangeNotifier {
         notifyListeners();
 
         for (final version in song.versions) {
+          if (_disposed || _pendingReplacements > 0) return;
           if (onlyUnscanned && version.metadataScanned) {
             continue;
           }
@@ -570,6 +602,7 @@ class LibraryProvider extends ChangeNotifier {
         }
       }
 
+      if (_disposed || _pendingReplacements > 0) return;
       await loadLibrary();
       if (firstFailure != null) {
         error = firstFailure;
@@ -577,7 +610,8 @@ class LibraryProvider extends ChangeNotifier {
     } catch (e) {
       error = e.toString();
     } finally {
-      isRefreshingDatabase = false;
+      _scanDone = null;
+      done.complete();
       refreshProgressCurrent = 0;
       refreshProgressTotal = 0;
       refreshProgressLabel = '';
