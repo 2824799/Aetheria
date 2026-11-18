@@ -1,6 +1,6 @@
 //! Reads technical properties, tags, embedded art and lyrics from audio files.
 
-use super::{LibraryError, Result};
+use super::{lyrics, LibraryError, Result};
 use lofty::file::{AudioFile, TaggedFile, TaggedFileExt};
 use lofty::picture::{MimeType, Picture, PictureType};
 use lofty::probe::Probe;
@@ -61,8 +61,68 @@ pub fn tags(file: &TaggedFile) -> AudioTags {
 
 pub fn embedded_lyrics(path: &Path) -> Option<String> {
     let file = Probe::open(path).ok()?.read().ok()?;
-    let lyrics = ordered_tags(&file).find_map(|tag| non_blank(tag.get_string(&ItemKey::Lyrics)));
-    lyrics
+    embedded_lyrics_from(&file)
+}
+
+/// Extracts clean embedded lyrics from an already-parsed audio file, preferring
+/// timestamped LRC content over plain text when multiple lyric tags are present.
+pub fn embedded_lyrics_from(file: &TaggedFile) -> Option<String> {
+    let mut first_plain: Option<String> = None;
+    for tag in ordered_tags(file) {
+        for item in tag.items() {
+            if !is_lyrics_item_key(item.key()) {
+                continue;
+            }
+            let Some(raw) = item.value().text() else {
+                continue;
+            };
+            let clean = lyrics::sanitize_content(raw);
+            if clean.is_empty() {
+                continue;
+            }
+            if contains_lrc_timestamp(&clean) {
+                return Some(clean);
+            }
+            if first_plain.is_none() {
+                first_plain = Some(clean);
+            }
+        }
+    }
+    first_plain
+}
+
+fn is_lyrics_item_key(key: &ItemKey) -> bool {
+    match key {
+        ItemKey::Lyrics => true,
+        ItemKey::Unknown(name) => {
+            let candidate = name.rsplit(':').next().unwrap_or(name).trim();
+            matches!(
+                candidate.to_ascii_uppercase().as_str(),
+                "LYRICS"
+                    | "LYRIC"
+                    | "UNSYNCEDLYRICS"
+                    | "UNSYNCED LYRICS"
+                    | "SYNCEDLYRICS"
+                    | "SYNCED LYRICS"
+            )
+        }
+        _ => false,
+    }
+}
+
+fn contains_lrc_timestamp(text: &str) -> bool {
+    text.lines().any(|line| {
+        let Some(rest) = line.trim_start().strip_prefix('[') else {
+            return false;
+        };
+        let Some((min, tail)) = rest.split_once(':') else {
+            return false;
+        };
+        (1..=3).contains(&min.len())
+            && min.bytes().all(|b| b.is_ascii_digit())
+            && tail.len() >= 2
+            && tail.as_bytes()[..2].iter().all(u8::is_ascii_digit)
+    })
 }
 
 /// The front cover (or, failing that, any picture) and its file extension.

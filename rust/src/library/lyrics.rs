@@ -51,12 +51,14 @@ fn lyric_from_row(row: &Row<'_>) -> rusqlite::Result<SavedLyric> {
     })
 }
 
-/// Normalizes line endings and drops blank lines and provider junk.
+/// Normalizes line endings, trims BOM/null padding, and drops blank lines and provider junk.
 pub fn sanitize_content(content: &str) -> String {
     content
         .lines()
         .flat_map(|line| line.split('\r'))
-        .map(str::trim)
+        .map(|line| {
+            line.trim_matches(|ch: char| ch.is_whitespace() || ch == '\u{feff}' || ch == '\0')
+        })
         .filter(|line| !line.is_empty())
         .filter(|line| {
             let lower = line.to_ascii_lowercase();
@@ -150,6 +152,15 @@ pub fn song_ids_with_lyrics() -> Result<Vec<String>> {
 
 /// Saves `lyric` as the lyric of its scope, replacing the previous one.
 pub fn save(lyric: NewLyric) -> Result<SavedLyric> {
+    let mut conn = connection::open()?;
+    let tx = conn.transaction()?;
+    let saved = save_with(&tx, lyric)?;
+    tx.commit()?;
+    Ok(saved)
+}
+
+/// Saves `lyric` on an open connection or transaction.
+pub(super) fn save_with(conn: &Connection, lyric: NewLyric) -> Result<SavedLyric> {
     let content = sanitize_content(&lyric.content);
     if content.is_empty() {
         return Err(LibraryError::new("歌词内容不能为空。"));
@@ -160,20 +171,18 @@ pub fn save(lyric: NewLyric) -> Result<SavedLyric> {
             .filter(|value| !value.is_empty())
     };
 
-    let mut conn = connection::open()?;
-    let tx = conn.transaction()?;
-    if !songs::exists(&tx, &lyric.song_id)? {
+    if !songs::exists(conn, &lyric.song_id)? {
         return Err(songs::song_not_found());
     }
     if let Some(version_id) = lyric.audio_version_id.as_deref() {
-        ensure_version_belongs_to_song(&tx, &lyric.song_id, version_id)?;
+        ensure_version_belongs_to_song(conn, &lyric.song_id, version_id)?;
     }
-    tx.execute(
+    conn.execute(
         "DELETE FROM lyrics WHERE song_id = ?1 AND audio_version_id IS ?2",
         params![lyric.song_id, lyric.audio_version_id],
     )?;
     let id = Uuid::new_v4().to_string();
-    tx.execute(
+    conn.execute(
         &format!(
             "INSERT INTO lyrics ({LYRIC_COLUMNS})
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 1, CURRENT_TIMESTAMP)"
@@ -192,9 +201,7 @@ pub fn save(lyric: NewLyric) -> Result<SavedLyric> {
             lyric.offset_ms,
         ],
     )?;
-    let saved = load(&tx, &id)?;
-    tx.commit()?;
-    Ok(saved)
+    load(conn, &id)
 }
 
 pub fn update_offset(lyric_id: &str, offset_ms: i32) -> Result<SavedLyric> {

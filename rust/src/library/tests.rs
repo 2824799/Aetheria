@@ -590,3 +590,144 @@ fn sync_snapshot_contains_committed_wal_and_stays_stable_during_backfill() {
         .unwrap();
     assert!(db < 42.0);
 }
+
+fn write_id3_lyrics_tag(
+    path: &Path,
+    title: Option<&str>,
+    artist: Option<&str>,
+    lyrics_items: &[(&str, &str)],
+) {
+    use lofty::config::WriteOptions;
+    use lofty::id3::v2::{ExtendedTextFrame, Frame, Id3v2Tag, UnsynchronizedTextFrame};
+    use lofty::tag::{Accessor, TagExt};
+    use lofty::TextEncoding;
+
+    let mut tag = Id3v2Tag::default();
+    if let Some(title) = title {
+        tag.set_title(title.to_string());
+    }
+    if let Some(artist) = artist {
+        tag.set_artist(artist.to_string());
+    }
+    for (idx, (key, value)) in lyrics_items.iter().enumerate() {
+        let frame = if *key == "LYRICS" {
+            Frame::UnsynchronizedText(UnsynchronizedTextFrame::new(
+                TextEncoding::UTF8,
+                *b"XXX",
+                format!("desc-{idx}"),
+                (*value).to_string(),
+            ))
+        } else {
+            Frame::UserText(ExtendedTextFrame::new(
+                TextEncoding::UTF8,
+                (*key).to_string(),
+                (*value).to_string(),
+            ))
+        };
+        tag.insert(frame);
+    }
+    tag.save_to_path(path, WriteOptions::default()).unwrap();
+}
+
+#[test]
+fn importing_audio_with_embedded_lyrics_saves_sanitized_version_lyrics() {
+    let _library = TestLibrary::new();
+    let first = wav(3);
+    write_id3_lyrics_tag(
+        Path::new(first.path()),
+        Some("我们的爱"),
+        Some("F.I.R.飞儿乐团"),
+        &[(
+            "LYRICS",
+            "\u{feff}[00:01.00]回忆里想起模糊的小时候\r\n[awlrc:lrc:junk]\n\n[00:05.00]云朵漂浮在蓝蓝的天空\0",
+        )],
+    );
+
+    let song = import::import_song(first.path()).unwrap();
+    let v1 = &song.versions[0];
+    let saved = lyrics::selected(&song.id, Some(&v1.id)).unwrap().unwrap();
+    assert_eq!(saved.source, "local_embedded");
+    assert_eq!(saved.source_id.as_deref(), Some(v1.id.as_str()));
+    assert_eq!(saved.audio_version_id.as_deref(), Some(v1.id.as_str()));
+    assert_eq!(saved.title, "我们的爱");
+    assert_eq!(saved.artist.as_deref(), Some("F.I.R.飞儿乐团"));
+    assert_eq!(
+        saved.content,
+        "[00:01.00]回忆里想起模糊的小时候\n[00:05.00]云朵漂浮在蓝蓝的天空"
+    );
+    assert_eq!(lyrics::song_ids_with_lyrics().unwrap(), [song.id.clone()]);
+
+    // Attaching a second version with its own UNSYNCEDLYRICS keeps both scopes independent,
+    // and prefers timed LRC over plain lyrics when both frames exist.
+    let second = wav(5);
+    write_id3_lyrics_tag(
+        Path::new(second.path()),
+        Some("我们的爱"),
+        Some("F.I.R.飞儿乐团"),
+        &[
+            ("LYRICS", "Plain text fallback"),
+            ("UNSYNCEDLYRICS", "[00:10.00]黄霄雲版本"),
+        ],
+    );
+    let v2 = import::import_version(&song.id, second.path()).unwrap();
+    let saved_v2 = lyrics::selected(&song.id, Some(&v2.id)).unwrap().unwrap();
+    assert_eq!(saved_v2.source, "local_embedded");
+    assert_eq!(saved_v2.content, "[00:10.00]黄霄雲版本");
+    assert_eq!(
+        lyrics::selected(&song.id, Some(&v1.id))
+            .unwrap()
+            .unwrap()
+            .content,
+        saved.content
+    );
+
+    // Junk-only lyrics tags must be ignored without rejecting the audio import,
+    // and confirmed metadata overrides tag names for saved lyric rows.
+    let third = wav(7);
+    write_id3_lyrics_tag(
+        Path::new(third.path()),
+        Some("Raw Title"),
+        Some("Raw Artist"),
+        &[("LYRICS", "[awlrc:only_junk]\n[kana:123]")],
+    );
+    let v3 = import::import_version(&song.id, third.path()).unwrap();
+    assert!(lyrics::selected(&song.id, Some(&v3.id)).unwrap().is_none());
+
+    let fourth = wav(9);
+    write_id3_lyrics_tag(
+        Path::new(fourth.path()),
+        Some("Tag Title"),
+        Some("Tag Artist"),
+        &[("UNSYNCEDLYRICS", "[00:02.50]Confirmed")],
+    );
+    import::import_song_with_metadata(fourth.path(), "手动标题", "未知歌手").unwrap();
+    let all = songs::all().unwrap();
+    let custom = all.iter().find(|s| s.title == "手动标题").unwrap();
+    let custom_lyric = lyrics::selected(&custom.id, Some(&custom.versions[0].id))
+        .unwrap()
+        .unwrap();
+    assert_eq!(custom_lyric.title, "手动标题");
+    assert_eq!(custom_lyric.artist, None);
+    assert_eq!(custom_lyric.content, "[00:02.50]Confirmed");
+
+    // Failed registration must roll back audio, files, and embedded lyrics atomically.
+    let songs_before = songs::all().unwrap().len();
+    let files_before = managed_files().len();
+    let fifth = wav(11);
+    write_id3_lyrics_tag(
+        Path::new(fifth.path()),
+        Some("Rollback Song"),
+        Some("Rollback Artist"),
+        &[("LYRICS", "[00:01.00]should rollback")],
+    );
+    connection::open()
+        .unwrap()
+        .execute_batch(
+            "CREATE TRIGGER reject_embedded_lyric BEFORE INSERT ON lyrics
+             BEGIN SELECT RAISE(ABORT, 'test lyric insert failure'); END;",
+        )
+        .unwrap();
+    assert!(import::import_song(fifth.path()).is_err());
+    assert_eq!(songs::all().unwrap().len(), songs_before);
+    assert_eq!(managed_files().len(), files_before);
+}

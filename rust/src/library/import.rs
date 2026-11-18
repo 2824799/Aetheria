@@ -1,6 +1,6 @@
 //! Copies audio files into the managed library and registers them.
 
-use super::{paths, probe, songs, LibraryError, Result, AUDIO_EXTENSIONS};
+use super::{lyrics, paths, probe, songs, LibraryError, Result, AUDIO_EXTENSIONS};
 use crate::audio::loudness;
 use crate::database::connection;
 use crate::models::{AudioVersion, PreviewInfo, Song};
@@ -57,6 +57,7 @@ fn import(source: &Path, target: Target<'_>) -> Result<(Connection, AudioVersion
     let tagged = probe::open(source)?;
     let properties = probe::properties(source, &tagged);
     let tags = probe::tags(&tagged);
+    let embedded_lyrics = probe::embedded_lyrics_from(&tagged);
     let md5 = probe::file_md5(source)?;
 
     let mut conn = connection::open()?;
@@ -133,6 +134,28 @@ fn import(source: &Path, target: Target<'_>) -> Result<(Connection, AudioVersion
                 profile.is_some(),
             ],
         )?;
+        if let Some(content) = embedded_lyrics.as_deref() {
+            let (song_title, song_artist): (String, Option<String>) = tx.query_row(
+                "SELECT title, artist FROM songs WHERE id = ?1",
+                params![&song_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
+            lyrics::save_with(
+                &tx,
+                lyrics::NewLyric {
+                    song_id,
+                    audio_version_id: Some(version_id.clone()),
+                    source: "local_embedded".to_string(),
+                    source_id: Some(version_id.clone()),
+                    title: song_title,
+                    artist: song_artist,
+                    content: content.to_string(),
+                    translation: None,
+                    romanized: None,
+                    offset_ms: 0,
+                },
+            )?;
+        }
         tx.commit()?;
         Ok(version_id)
     };
