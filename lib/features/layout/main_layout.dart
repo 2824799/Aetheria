@@ -1,7 +1,8 @@
+import 'dart:async' show unawaited;
+import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'dart:io' show Platform;
 import 'package:aetheria/core/providers/library_provider.dart';
 import 'package:aetheria/core/providers/audio_player_provider.dart';
 import 'package:aetheria/core/providers/ui_theme_provider.dart';
@@ -83,6 +84,7 @@ class _MainLayoutState extends State<MainLayout>
         state == AppLifecycleState.hidden ||
         state == AppLifecycleState.detached) {
       _songTableController.flushScrollPersistence();
+      unawaited(context.read<AudioPlayerProvider>().flushPersistedPosition());
       if (state != AppLifecycleState.detached) {
         _dismissKeyboard();
         _imeDismissedInBackground = true;

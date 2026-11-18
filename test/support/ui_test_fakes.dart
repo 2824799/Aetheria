@@ -95,6 +95,8 @@ class TestAudio extends ChangeNotifier implements AudioPlayerProvider {
 
   @override
   Future<void> restorePlaybackState(List<Song> songs, String path) async {}
+  @override
+  Future<void> flushPersistedPosition() async {}
   int nextCalls = 0;
   int playCalls = 0;
   final seeks = <Duration>[];

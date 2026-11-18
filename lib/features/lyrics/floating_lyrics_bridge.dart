@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:provider/provider.dart';
 import 'package:aetheria/core/providers/audio_player_provider.dart';
@@ -25,13 +26,14 @@ class _FloatingLyricsBridgeState extends State<FloatingLyricsBridge> {
   final PlayingLyricTracker _lyrics = PlayingLyricTracker();
   final PlaybackPositionEstimator _clock = PlaybackPositionEstimator();
   bool _ticking = false;
+  bool _pendingImmediateTick = false;
   bool _visible = false;
   bool _requestedOverlayPermission = false;
   String _lastStyleSignature = '';
-  int _lastSentAtMs = 0;
   int _lastOverlayCheckAtMs = 0;
   bool _overlayAllowed = true;
   int _lastLyricRevision = 0;
+  _SentFloatingLyricPayload? _lastSentPayload;
 
   @override
   void initState() {
@@ -46,21 +48,38 @@ class _FloatingLyricsBridgeState extends State<FloatingLyricsBridge> {
     final audio = context.read<AudioPlayerProvider>();
     if (identical(settings, _settings) && identical(audio, _audio)) return;
     _settings?.removeListener(_requestTick);
+    _audio?.positionListenable.removeListener(_handlePositionChanged);
     _audio?.removeListener(_requestTick);
     _settings = settings..addListener(_requestTick);
     _audio = audio..addListener(_requestTick);
+    _audio?.positionListenable.addListener(_handlePositionChanged);
+    _requestTick();
+  }
+
+  void _handlePositionChanged() {
+    if (_audio?.isPlaying ?? false) {
+      return;
+    }
     _requestTick();
   }
 
   void _requestTick() {
+    if (!mounted) return;
     _timer?.cancel();
+    _timer = null;
+    if (_ticking) {
+      _pendingImmediateTick = true;
+      return;
+    }
     unawaited(_tick());
   }
 
   @override
   void dispose() {
     _timer?.cancel();
+    _timer = null;
     _settings?.removeListener(_requestTick);
+    _audio?.positionListenable.removeListener(_handlePositionChanged);
     _audio?.removeListener(_requestTick);
     unawaited(NativeAudioHelper.hideFloatingLyrics());
     super.dispose();
@@ -98,12 +117,22 @@ class _FloatingLyricsBridgeState extends State<FloatingLyricsBridge> {
       await _sendFrame();
     } finally {
       _ticking = false;
-      final settings = _settings;
-      if (mounted && settings != null && settings.enabled) {
-        final interval = _audio!.isPlaying
-            ? (1000 / settings.refreshFps.clamp(10, 60)).ceil()
-            : 500;
-        _timer = Timer(Duration(milliseconds: interval), _requestTick);
+      if (mounted) {
+        if (_pendingImmediateTick) {
+          _pendingImmediateTick = false;
+          unawaited(_tick());
+        } else {
+          final settings = _settings;
+          final shouldScheduleTimer =
+              settings != null &&
+              settings.enabled &&
+              (_audio?.isPlaying ?? false) &&
+              (_lyrics.lyric.timeline?.hasTimedLines ?? false);
+          if (shouldScheduleTimer) {
+            final interval = (1000 / settings.refreshFps.clamp(10, 60)).ceil();
+            _timer = Timer(Duration(milliseconds: interval), _requestTick);
+          }
+        }
       }
     }
   }
@@ -122,6 +151,7 @@ class _FloatingLyricsBridgeState extends State<FloatingLyricsBridge> {
     }
 
     if (!settings.enabled) {
+      _lastSentPayload = null;
       if (_visible) {
         await NativeAudioHelper.hideFloatingLyrics();
         _visible = false;
@@ -141,6 +171,7 @@ class _FloatingLyricsBridgeState extends State<FloatingLyricsBridge> {
       }
     }
     if (Platform.isAndroid && !_overlayAllowed) {
+      _lastSentPayload = null;
       return;
     }
 
@@ -158,26 +189,15 @@ class _FloatingLyricsBridgeState extends State<FloatingLyricsBridge> {
     if (!_visible) {
       await NativeAudioHelper.showFloatingLyrics();
       _visible = true;
+      _lastSentPayload = null;
     }
-
-    final frameIntervalMs = (1000 / settings.refreshFps.clamp(10, 60)).round();
-    final playbackChanged = audio.isPlaying != _clock.wasPlaying;
-    if (!playbackChanged &&
-        audio.isPlaying &&
-        now - _lastSentAtMs < frameIntervalMs) {
-      return;
-    }
-    if (!playbackChanged && !audio.isPlaying && now - _lastSentAtMs < 500) {
-      return;
-    }
-    _lastSentAtMs = now;
 
     final lyric = _lyrics.lyric;
     final positionMs = _clock.positionMs(audio, now) + lyric.offsetMs;
     final frame =
         lyric.timeline?.frameAt(positionMs) ?? const LyricFrame.empty();
-    final songTitle = audio.playingSong?.title.trim();
-    final artist = audio.playingSong?.artist?.trim();
+    final songTitle = audio.playingSong?.title.trim() ?? '';
+    final artist = audio.playingSong?.artist?.trim() ?? '';
     final previews = settings.showNextLine
         ? (lyric.timeline?.previewLinesAfter(
                 frame.activeIndex,
@@ -189,21 +209,46 @@ class _FloatingLyricsBridgeState extends State<FloatingLyricsBridge> {
     final activeText = frame.line.trim().isEmpty
         ? (previews.isNotEmpty ? '···' : '')
         : frame.line;
+    final translation = settings.showTranslation ? frame.translation : '';
+    final nextLine = previews.isNotEmpty ? previews.first.text : '';
+    final nextTranslation =
+        previews.isNotEmpty ? previews.first.translation : '';
+    final contextLines = previews.skip(1).map((line) => line.text).toList();
+    final contextTranslations = previews
+        .skip(1)
+        .map((line) => line.translation)
+        .toList();
+    final progress = frame.progress.clamp(0.0, 1.0);
+    final payload = _SentFloatingLyricPayload(
+      line: activeText,
+      translation: translation,
+      nextLine: nextLine,
+      nextTranslation: nextTranslation,
+      contextLines: contextLines,
+      contextTranslations: contextTranslations,
+      progressPermille: (progress * 1000).round(),
+      activeIndex: frame.activeIndex,
+      isPlaying: audio.isPlaying,
+      songTitle: songTitle,
+      artist: artist,
+    );
+    if (payload == _lastSentPayload) {
+      return;
+    }
+    _lastSentPayload = payload;
+
     await NativeAudioHelper.updateFloatingLyrics(<String, dynamic>{
       'line': activeText,
-      'translation': settings.showTranslation ? frame.translation : '',
-      'nextLine': previews.isNotEmpty ? previews.first.text : '',
-      'nextTranslation': previews.isNotEmpty ? previews.first.translation : '',
-      'contextLines': previews.skip(1).map((line) => line.text).toList(),
-      'contextTranslations': previews
-          .skip(1)
-          .map((line) => line.translation)
-          .toList(),
-      'progress': frame.progress,
+      'translation': translation,
+      'nextLine': nextLine,
+      'nextTranslation': nextTranslation,
+      'contextLines': contextLines,
+      'contextTranslations': contextTranslations,
+      'progress': progress,
       'activeIndex': frame.activeIndex,
       'isPlaying': audio.isPlaying,
-      'songTitle': songTitle ?? '',
-      'artist': artist ?? '',
+      'songTitle': songTitle,
+      'artist': artist,
     });
   }
 
@@ -216,4 +261,63 @@ class _FloatingLyricsBridgeState extends State<FloatingLyricsBridge> {
     }
     return null;
   }
+}
+
+class _SentFloatingLyricPayload {
+  const _SentFloatingLyricPayload({
+    required this.line,
+    required this.translation,
+    required this.nextLine,
+    required this.nextTranslation,
+    required this.contextLines,
+    required this.contextTranslations,
+    required this.progressPermille,
+    required this.activeIndex,
+    required this.isPlaying,
+    required this.songTitle,
+    required this.artist,
+  });
+
+  final String line;
+  final String translation;
+  final String nextLine;
+  final String nextTranslation;
+  final List<String> contextLines;
+  final List<String> contextTranslations;
+  final int progressPermille;
+  final int activeIndex;
+  final bool isPlaying;
+  final String songTitle;
+  final String artist;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is _SentFloatingLyricPayload &&
+          line == other.line &&
+          translation == other.translation &&
+          nextLine == other.nextLine &&
+          nextTranslation == other.nextTranslation &&
+          progressPermille == other.progressPermille &&
+          activeIndex == other.activeIndex &&
+          isPlaying == other.isPlaying &&
+          songTitle == other.songTitle &&
+          artist == other.artist &&
+          listEquals(contextLines, other.contextLines) &&
+          listEquals(contextTranslations, other.contextTranslations);
+
+  @override
+  int get hashCode => Object.hash(
+    line,
+    translation,
+    nextLine,
+    nextTranslation,
+    progressPermille,
+    activeIndex,
+    isPlaying,
+    songTitle,
+    artist,
+    Object.hashAll(contextLines),
+    Object.hashAll(contextTranslations),
+  );
 }

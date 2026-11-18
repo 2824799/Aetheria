@@ -44,6 +44,7 @@ class AudioPlayerProvider extends ChangeNotifier {
 
 
   static const Duration _positionPollInterval = Duration(milliseconds: 100);
+  static const int _positionPersistIntervalSeconds = 5;
 
   /// Consecutive unchanged position polls near the end that count as EOF.
   static const int _stallTicksAtEnd = 12;
@@ -97,7 +98,8 @@ class AudioPlayerProvider extends ChangeNotifier {
   Timer? _outputInfoTimer;
   Timer? _audioRouteChangeDebounce;
   int _lastPositionMs = -1;
-  int _lastPersistedSecond = -1;
+  int _lastNotifiedSecond = -1;
+  int _lastPersistedPositionSecond = -1;
   int _stallTicks = 0;
   bool _isHandlingPlaybackEnd = false;
   bool _pollingPosition = false;
@@ -543,7 +545,10 @@ class AudioPlayerProvider extends ChangeNotifier {
 
   /// Desktop: follows the system default device when the user switches it.
   Future<void> _handleDefaultOutputDeviceChange() async {
-    if (Platform.isAndroid || Platform.isIOS || _isCheckingOutputDeviceChange) {
+    if (Platform.isAndroid ||
+        Platform.isIOS ||
+        Platform.isLinux ||
+        _isCheckingOutputDeviceChange) {
       return;
     }
 
@@ -735,7 +740,8 @@ class AudioPlayerProvider extends ChangeNotifier {
   void _startPositionTimer() {
     _positionTimer?.cancel();
     _lastPositionMs = -1;
-    _lastPersistedSecond = -1;
+    _lastNotifiedSecond = -1;
+    _lastPersistedPositionSecond = currentPosition.inSeconds;
     _stallTicks = 0;
     _isHandlingPlaybackEnd = false;
     _positionTimer = Timer.periodic(_positionPollInterval, _pollPosition);
@@ -789,10 +795,15 @@ class AudioPlayerProvider extends ChangeNotifier {
         await _handlePlaybackEnded();
         return;
       }
-      if (currentPosition.inSeconds != _lastPersistedSecond) {
-        _lastPersistedSecond = currentPosition.inSeconds;
-        unawaited(_persistPlaybackPosition());
+      final currentSecond = currentPosition.inSeconds;
+      if (currentSecond != _lastNotifiedSecond) {
+        _lastNotifiedSecond = currentSecond;
         _updateNotification();
+      }
+      if ((currentSecond - _lastPersistedPositionSecond).abs() >=
+          _positionPersistIntervalSeconds) {
+        _lastPersistedPositionSecond = currentSecond;
+        unawaited(_persistPlaybackPosition());
       }
     } catch (error) {
       debugPrint('Failed to poll playback position: $error');
@@ -831,12 +842,21 @@ class AudioPlayerProvider extends ChangeNotifier {
     await prefs.remove(_playbackQueueIdsKey);
   }
 
+  Future<void> flushPersistedPosition() async {
+    if (playingSong == null || playingVersion == null) {
+      return;
+    }
+    await _persistPlaybackPosition();
+  }
+
   Future<void> _persistPlaybackPosition() async {
     try {
+      final positionMs = currentPosition.inMilliseconds;
+      _lastPersistedPositionSecond = positionMs ~/ 1000;
       final prefs = await SharedPreferences.getInstance();
       await prefs.setInt(
         _playbackPositionMsKey,
-        currentPosition.inMilliseconds,
+        positionMs,
       );
     } catch (_) {
       // Losing one position sample is harmless.
@@ -847,6 +867,7 @@ class AudioPlayerProvider extends ChangeNotifier {
     final song = playingSong;
     final version = playingVersion;
     final positionMs = currentPosition.inMilliseconds;
+    _lastPersistedPositionSecond = positionMs ~/ 1000;
     final queueIds = currentQueue
         .map((entry) => entry.id)
         .toList(growable: false);

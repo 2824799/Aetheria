@@ -1,3 +1,4 @@
+import 'dart:async' show unawaited;
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -84,6 +85,7 @@ class _MobileLayoutState extends State<MobileLayout>
       _imeDismissedInBackground = false;
     } else {
       _scrollPersistence.flushPendingPersist();
+      unawaited(context.read<AudioPlayerProvider>().flushPersistedPosition());
       if (state != AppLifecycleState.detached && !_imeDismissedInBackground) {
         _imeDismissedInBackground = true;
         _dismissKeyboard();

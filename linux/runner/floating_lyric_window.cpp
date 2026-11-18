@@ -165,15 +165,30 @@ void FloatingLyricWindow::UpdateStyle(FlValue* payload) {
 }
 
 void FloatingLyricWindow::UpdateLyrics(FlValue* payload) {
-  frame_.line = GetString(payload, "line", frame_.line);
-  frame_.translation = GetString(payload, "translation", frame_.translation);
-  frame_.next_line = GetString(payload, "nextLine", frame_.next_line);
-  frame_.next_translation = GetString(payload, "nextTranslation", "");
-  frame_.context_lines = GetStringList(payload, "contextLines");
-  frame_.context_translations = GetStringList(payload, "contextTranslations");
-  frame_.progress =
+  Frame next = frame_;
+  next.line = GetString(payload, "line", frame_.line);
+  next.translation = GetString(payload, "translation", frame_.translation);
+  next.next_line = GetString(payload, "nextLine", frame_.next_line);
+  next.next_translation = GetString(payload, "nextTranslation", "");
+  next.context_lines = GetStringList(payload, "contextLines");
+  next.context_translations = GetStringList(payload, "contextTranslations");
+  next.progress =
       std::clamp(GetDouble(payload, "progress", frame_.progress), 0.0, 1.0);
-  frame_.is_playing = GetBool(payload, "isPlaying", frame_.is_playing);
+  next.is_playing = GetBool(payload, "isPlaying", frame_.is_playing);
+
+  const bool changed =
+      next.line != frame_.line ||
+      next.translation != frame_.translation ||
+      next.next_line != frame_.next_line ||
+      next.next_translation != frame_.next_translation ||
+      next.context_lines != frame_.context_lines ||
+      next.context_translations != frame_.context_translations ||
+      std::abs(next.progress - frame_.progress) > 1e-4 ||
+      next.is_playing != frame_.is_playing;
+  if (!changed) {
+    return;
+  }
+  frame_ = std::move(next);
   QueueDraw();
 }
 

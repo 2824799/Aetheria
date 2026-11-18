@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
-    Arc, Mutex,
+    Arc, Condvar, Mutex,
 };
 use std::thread;
 use std::time::{Duration, Instant};
@@ -36,6 +36,7 @@ struct BufferState {
 // every buffered output frame.
 pub struct AudioBuffer {
     data: Mutex<BufferState>,
+    space_available: Condvar,
     capacity: usize,
     len_samples: AtomicUsize,
 }
@@ -555,9 +556,43 @@ impl AudioBuffer {
                 samples: VecDeque::with_capacity(capacity),
                 segments: VecDeque::new(),
             }),
+            space_available: Condvar::new(),
             capacity,
             len_samples: AtomicUsize::new(0),
         }
+    }
+
+    pub fn notify_waiters(&self) {
+        self.space_available.notify_all();
+    }
+
+    fn push_locked_chunk(
+        &self,
+        queue: &mut BufferState,
+        chunk: &[f64],
+        channels: usize,
+        source_start_frame: f64,
+        source_frames: f64,
+    ) -> bool {
+        if queue.samples.len() + chunk.len() > self.capacity {
+            return false;
+        }
+        queue.samples.extend(chunk.iter().cloned());
+        let out_frames = chunk.len() / channels;
+        if out_frames > 0 {
+            let rate = if source_frames > 0.0 {
+                source_frames / out_frames as f64
+            } else {
+                1.0
+            };
+            queue.segments.push_back(AudioTimelineSegment {
+                remaining_out_frames: out_frames,
+                source_frame: source_start_frame,
+                source_frames_per_out_frame: rate,
+            });
+        }
+        self.len_samples.fetch_add(chunk.len(), Ordering::Relaxed);
+        true
     }
 
     /// Push samples, blocking (backpressure) until there is room. Aborts early (discarding
@@ -588,15 +623,27 @@ impl AudioBuffer {
             } else {
                 0.0
             };
+            let mut queue = self.data.lock().unwrap_or_else(|e| e.into_inner());
             loop {
                 if stop_flag.load(Ordering::SeqCst) {
                     return;
                 }
-                if self.try_push_timed(chunk, ch, cursor_src_frame, chunk_src_frames) {
+                if self.push_locked_chunk(
+                    &mut queue,
+                    chunk,
+                    ch,
+                    cursor_src_frame,
+                    chunk_src_frames,
+                ) {
                     break;
                 }
-                thread::sleep(Duration::from_millis(2));
+                let (next_queue, _) = self
+                    .space_available
+                    .wait_timeout(queue, Duration::from_millis(100))
+                    .unwrap_or_else(|e| e.into_inner());
+                queue = next_queue;
             }
+            drop(queue);
             cursor_src_frame += chunk_src_frames;
         }
     }
@@ -614,26 +661,13 @@ impl AudioBuffer {
     ) -> bool {
         let _scope = profiler::scope("audio::player::AudioBuffer::try_push");
         let mut queue = self.data.lock().unwrap_or_else(|e| e.into_inner());
-        if queue.samples.len() + samples.len() > self.capacity {
-            return false;
-        }
-        queue.samples.extend(samples.iter().cloned());
-        let ch = channels.max(1);
-        let out_frames = samples.len() / ch;
-        if out_frames > 0 {
-            let rate = if source_frames > 0.0 {
-                source_frames / out_frames as f64
-            } else {
-                1.0
-            };
-            queue.segments.push_back(AudioTimelineSegment {
-                remaining_out_frames: out_frames,
-                source_frame: source_start_frame,
-                source_frames_per_out_frame: rate,
-            });
-        }
-        self.len_samples.fetch_add(samples.len(), Ordering::Relaxed);
-        true
+        self.push_locked_chunk(
+            &mut queue,
+            samples,
+            channels.max(1),
+            source_start_frame,
+            source_frames,
+        )
     }
 
     pub fn capacity(&self) -> usize {
@@ -692,6 +726,10 @@ impl AudioBuffer {
                 }
             }
         }
+        drop(queue);
+        if len > 0 {
+            self.space_available.notify_all();
+        }
         out[len..].fill(T::SILENCE);
         (len, timeline_update)
     }
@@ -702,6 +740,8 @@ impl AudioBuffer {
         queue.samples.clear();
         queue.segments.clear();
         self.len_samples.store(0, Ordering::Relaxed);
+        drop(queue);
+        self.space_available.notify_all();
     }
 
     pub fn len(&self) -> usize {
@@ -725,6 +765,41 @@ fn effective_playback_rate(pitch: f64, algo: &str, channels: u32) -> f64 {
         }
     }
     1.0
+}
+
+#[derive(Clone)]
+struct ActivePlaybackSource {
+    path: String,
+    normalization_gain: f32,
+}
+
+#[derive(Clone)]
+struct PlaybackOpenConfig {
+    volume: Arc<Mutex<f32>>,
+    pitch: Arc<Mutex<f64>>,
+    algo: Arc<Mutex<String>>,
+    loudness_normalization_gain: Arc<Mutex<f32>>,
+    output_buffer_ms: u32,
+    output_latency_mode: String,
+    quality_settings: Arc<Mutex<AudioQualitySettings>>,
+    hitsound: Arc<HitSoundShared>,
+}
+
+struct PreparedPlayback {
+    stream: SendStream,
+    output_info: OutputDeviceInfo,
+    buffer: Arc<AudioBuffer>,
+    thread_handle: thread::JoinHandle<()>,
+    stop_flag: Arc<AtomicBool>,
+    seek_request: Arc<Mutex<Option<f64>>>,
+    source_frame_bits: Arc<AtomicU64>,
+    playback_rate_bits: Arc<AtomicU64>,
+    stream_finished: Arc<AtomicBool>,
+    sample_rate: u32,
+    channels: u32,
+    underrun_count: Arc<AtomicU64>,
+    clipped_sample_count: Arc<AtomicU64>,
+    peak_bits: Arc<AtomicU64>,
 }
 
 struct PlayerState {
@@ -751,6 +826,13 @@ struct PlayerState {
     peak_bits: Arc<AtomicU64>,
     queue_headroom_history: VecDeque<(Instant, u32)>,
     hitsound: Arc<HitSoundShared>,
+    stream_generation: u64,
+    next_stream_generation: u64,
+    active_source: Option<ActivePlaybackSource>,
+    is_paused: bool,
+    needs_reopen: bool,
+    last_recovery_at: Option<Instant>,
+    consecutive_recoveries: u32,
 }
 
 lazy_static::lazy_static! {
@@ -778,11 +860,80 @@ lazy_static::lazy_static! {
         peak_bits: Arc::new(AtomicU64::new(0.0f64.to_bits())),
         queue_headroom_history: VecDeque::new(),
         hitsound: Arc::new(HitSoundShared::default()),
+        stream_generation: 0,
+        next_stream_generation: 1,
+        active_source: None,
+        is_paused: false,
+        needs_reopen: false,
+        last_recovery_at: None,
+        consecutive_recoveries: 0,
     });
 }
 
-fn err_fn(err: cpal::StreamError) {
-    eprintln!("Audio output stream error: {}", err);
+fn current_source_secs_locked(state: &PlayerState) -> f64 {
+    let frames = f64::from_bits(state.source_frame_bits.load(Ordering::Relaxed));
+    if state.sample_rate == 0 || !frames.is_finite() {
+        0.0
+    } else {
+        (frames / state.sample_rate as f64).max(0.0)
+    }
+}
+
+fn snapshot_open_config(state: &PlayerState) -> PlaybackOpenConfig {
+    PlaybackOpenConfig {
+        volume: state.volume.clone(),
+        pitch: state.pitch.clone(),
+        algo: state.algo.clone(),
+        loudness_normalization_gain: state.loudness_normalization_gain.clone(),
+        output_buffer_ms: state.output_buffer_ms,
+        output_latency_mode: state.output_latency_mode.clone(),
+        quality_settings: state.quality_settings.clone(),
+        hitsound: state.hitsound.clone(),
+    }
+}
+
+fn detach_active_pipeline(
+    state: &mut PlayerState,
+) -> (
+    Option<thread::JoinHandle<()>>,
+    Option<SendStream>,
+    Option<Arc<AudioBuffer>>,
+) {
+    state.stop_flag.store(true, Ordering::SeqCst);
+    if let Some(buffer) = &state.buffer {
+        buffer.notify_waiters();
+    }
+    let handle = state.thread_handle.take();
+    let stream = state.stream.take();
+    let buffer = state.buffer.take();
+    (handle, stream, buffer)
+}
+
+fn join_and_drop_pipeline(
+    handle: Option<thread::JoinHandle<()>>,
+    stream: Option<SendStream>,
+    buffer: Option<Arc<AudioBuffer>>,
+) {
+    if let Some(buffer) = &buffer {
+        buffer.notify_waiters();
+    }
+    if let Some(handle) = handle {
+        let _ = handle.join();
+    }
+    drop(stream);
+    drop(buffer);
+}
+
+fn make_stream_error_callback(generation: u64) -> impl FnMut(cpal::StreamError) + Send + 'static {
+    let reported = Arc::new(AtomicBool::new(false));
+    move |err: cpal::StreamError| {
+        if !reported.swap(true, Ordering::AcqRel) {
+            eprintln!("Audio output stream error: {}", err);
+            let _ = thread::Builder::new()
+                .name("aetheria-audio-recover".to_string())
+                .spawn(move || handle_stream_error(generation));
+        }
+    }
 }
 
 fn apply_post_dsp_protection(
@@ -995,6 +1146,7 @@ fn output_candidates(
 
 /// Request source-rate output with adequate precision where supported. These are
 /// application stream attributes, not proof of the physical DAC/mixer configuration.
+#[allow(clippy::too_many_arguments)]
 fn build_output(
     source: dsp::SourceFormat,
     source_frame_bits: Arc<AtomicU64>,
@@ -1004,6 +1156,7 @@ fn build_output(
     quality_settings: Arc<Mutex<AudioQualitySettings>>,
     output_buffer_ms: u32,
     output_latency_mode: String,
+    stream_generation: u64,
 ) -> Result<(SendStream, OutputDeviceInfo, Arc<AudioBuffer>), String> {
     let _scope = profiler::scope("audio::player::build_output");
     let host = cpal::default_host();
@@ -1071,7 +1224,7 @@ fn build_output(
                                 pr.store(rate.to_bits(), Ordering::Relaxed);
                             }
                         },
-                        err_fn,
+                        make_stream_error_callback(stream_generation),
                         None,
                     )
                     .map_err(|e| e.to_string())
@@ -1146,64 +1299,30 @@ pub fn default_output_device_name() -> Result<String, String> {
     device.name().map_err(|e| e.to_string())
 }
 
-/// Start streaming playback of `path` with the given DSP parameters.
-pub fn start_playback(
-    path: String,
-    vol: f32,
-    pitch_val: f64,
-    pitch_algo: String,
-    normalization_gain: f32,
-    chart_path: Option<String>,
-    hitsound_enabled: bool,
-    hitsound_volume: f32,
-    hitsound_offset_ms: i32,
-) -> Result<(), String> {
-    let _scope = profiler::scope("audio::player::start_playback");
-    let source = dsp::probe_source_format(&path)?;
-    let mut state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
-
-    // Stop any existing playback.
-    state.stop_flag.store(true, Ordering::SeqCst);
-    if let Some(handle) = state.thread_handle.take() {
-        let _ = handle.join();
-    }
-    // Drop the old stream first so the hardware callback stops touching the old buffer.
-    state.stream = None;
-    state.buffer = None;
-    state.stream_finished.store(false, Ordering::SeqCst);
-    state.queue_headroom_history.clear();
-    state.hitsound.update(
-        chart_path,
-        HitSoundConfig {
-            enabled: hitsound_enabled,
-            volume: f64::from(hitsound_volume).clamp(0.0, 1.5),
-            offset_ms: hitsound_offset_ms.clamp(-500, 500),
-        },
-    );
-
+fn prepare_pipeline_and_stream(
+    generation: u64,
+    path: &str,
+    start_secs: f64,
+    cfg: &PlaybackOpenConfig,
+) -> Result<PreparedPlayback, String> {
+    let source = dsp::probe_source_format(path)?;
+    let start_secs = start_secs.max(0.0);
     let stop_flag = Arc::new(AtomicBool::new(false));
     let seek_request = Arc::new(Mutex::new(None));
     let source_frame_bits = Arc::new(AtomicU64::new(0.0f64.to_bits()));
     let playback_rate_bits = Arc::new(AtomicU64::new(1.0f64.to_bits()));
     let stream_finished = Arc::new(AtomicBool::new(false));
-    let volume = Arc::new(Mutex::new(vol));
-    let pitch = Arc::new(Mutex::new(pitch_val));
-    let algo = Arc::new(Mutex::new(pitch_algo));
-    let norm_gain = Arc::new(Mutex::new(normalization_gain));
-    let output_buffer_ms = state.output_buffer_ms;
-    let output_latency_mode = state.output_latency_mode.clone();
-    let quality_settings = state.quality_settings.clone();
     let underrun_count = Arc::new(AtomicU64::new(0));
     let clipped_sample_count = Arc::new(AtomicU64::new(0));
     let peak_bits = Arc::new(AtomicU64::new(0.0f64.to_bits()));
     let processing_params = ProcessingParams {
-        pitch: pitch.clone(),
-        algo: algo.clone(),
-        loudness_normalization_gain: norm_gain.clone(),
-        quality_settings: quality_settings.clone(),
+        pitch: cfg.pitch.clone(),
+        algo: cfg.algo.clone(),
+        loudness_normalization_gain: cfg.loudness_normalization_gain.clone(),
+        quality_settings: cfg.quality_settings.clone(),
         clipped_sample_count: clipped_sample_count.clone(),
         peak_bits: peak_bits.clone(),
-        hitsound: state.hitsound.clone(),
+        hitsound: cfg.hitsound.clone(),
     };
 
     let (stream, output_info, buffer) = build_output(
@@ -1211,20 +1330,28 @@ pub fn start_playback(
         source_frame_bits.clone(),
         playback_rate_bits.clone(),
         underrun_count.clone(),
-        volume.clone(),
-        quality_settings.clone(),
-        output_buffer_ms,
-        output_latency_mode,
+        cfg.volume.clone(),
+        cfg.quality_settings.clone(),
+        cfg.output_buffer_ms,
+        cfg.output_latency_mode.clone(),
+        generation,
     )?;
     let sample_rate = output_info.sample_rate;
     let channels = output_info.channels;
+    source_frame_bits.store(
+        (start_secs * sample_rate as f64).to_bits(),
+        Ordering::SeqCst,
+    );
     let initial_rate = effective_playback_rate(
-        *pitch.lock().unwrap_or_else(|e| e.into_inner()),
-        &algo.lock().unwrap_or_else(|e| e.into_inner()),
+        *cfg.pitch.lock().unwrap_or_else(|e| e.into_inner()),
+        &cfg.algo.lock().unwrap_or_else(|e| e.into_inner()),
         channels,
     );
     playback_rate_bits.store(initial_rate.to_bits(), Ordering::Relaxed);
-    let mut pipeline = DecodePipeline::new(&path, sample_rate, channels, processing_params)?;
+    let mut pipeline = DecodePipeline::new(path, sample_rate, channels, processing_params)?;
+    if start_secs > 0.0 {
+        pipeline.seek(start_secs)?;
+    }
     // Keep the same processor state from prefill through playback, including its
     // delayed samples. Starting a pitch stream with an empty queue causes avoidable underruns.
     let mut rubberband_shifter: Option<RubberBandPitchShifter> = None;
@@ -1235,44 +1362,32 @@ pub fn start_playback(
         &mut vocal_only_shifter,
         &buffer,
         &stop_flag,
-        output_buffer_ms.min(160),
+        cfg.output_buffer_ms.min(160),
     )?;
     stream.0.play().map_err(|e| e.to_string())?;
 
-    state.stream = Some(stream);
-    state.buffer = Some(buffer.clone());
-    state.sample_rate = sample_rate;
-    state.channels = channels;
-    state.stop_flag = stop_flag.clone();
-    state.seek_request = seek_request.clone();
-    state.source_frame_bits = source_frame_bits.clone();
-    state.playback_rate_bits = playback_rate_bits.clone();
-    state.stream_finished = stream_finished.clone();
-    state.volume = volume.clone();
-    state.pitch = pitch.clone();
-    state.algo = algo.clone();
-    state.loudness_normalization_gain = norm_gain.clone();
-    state.output_info = Arc::new(Mutex::new(output_info));
-    state.underrun_count = underrun_count.clone();
-    state.clipped_sample_count = clipped_sample_count.clone();
-    state.peak_bits = peak_bits.clone();
-
-    let thread_pitch = pitch.clone();
-    let thread_algo = algo.clone();
-    let handle = thread::Builder::new()
+    let thread_stop = stop_flag.clone();
+    let thread_seek = seek_request.clone();
+    let thread_buffer = buffer.clone();
+    let thread_sf = source_frame_bits.clone();
+    let thread_pr = playback_rate_bits.clone();
+    let thread_finished = stream_finished.clone();
+    let thread_pitch = cfg.pitch.clone();
+    let thread_algo = cfg.algo.clone();
+    let thread_handle = thread::Builder::new()
         .name("aetheria-audio-decode".to_string())
         .spawn(move || {
             loop {
-                if stop_flag.load(Ordering::SeqCst) {
+                if thread_stop.load(Ordering::SeqCst) {
                     break;
                 }
                 let _loop_scope = profiler::scope("audio::player::decode_thread_loop");
 
                 // Handle seek requests.
                 {
-                    let mut req = seek_request.lock().unwrap_or_else(|e| e.into_inner());
+                    let mut req = thread_seek.lock().unwrap_or_else(|e| e.into_inner());
                     if let Some(sec) = req.take() {
-                        buffer.clear();
+                        thread_buffer.clear();
                         if let Err(e) = pipeline.seek(sec) {
                             eprintln!("Seek error: {}", e);
                         }
@@ -1283,8 +1398,8 @@ pub fn start_playback(
                             shifter.reset();
                         }
                         // A seek starts a fresh five-second headroom window.
-                        stream_finished.store(false, Ordering::SeqCst);
-                        source_frame_bits.store(
+                        thread_finished.store(false, Ordering::SeqCst);
+                        thread_sf.store(
                             (sec.max(0.0) * sample_rate as f64).to_bits(),
                             Ordering::SeqCst,
                         );
@@ -1293,13 +1408,13 @@ pub fn start_playback(
                             &thread_algo.lock().unwrap_or_else(|e| e.into_inner()),
                             channels,
                         );
-                        playback_rate_bits.store(rate.to_bits(), Ordering::Relaxed);
+                        thread_pr.store(rate.to_bits(), Ordering::Relaxed);
                         if let Err(e) = prefill_audio_buffer(
                             &mut pipeline,
                             &mut rubberband_shifter,
                             &mut vocal_only_shifter,
-                            &buffer,
-                            &stop_flag,
+                            &thread_buffer,
+                            &thread_stop,
                             80,
                         ) {
                             eprintln!("Prefill error after seek: {}", e);
@@ -1312,15 +1427,15 @@ pub fn start_playback(
                         Ok(Some(block)) => block,
                         Ok(None) => {
                             // End of stream: let the hardware drain whatever is still buffered.
-                            while buffer.len() > 0 && !stop_flag.load(Ordering::SeqCst) {
+                            while thread_buffer.len() > 0 && !thread_stop.load(Ordering::SeqCst) {
                                 thread::sleep(Duration::from_millis(20));
                             }
-                            stream_finished.store(true, Ordering::SeqCst);
+                            thread_finished.store(true, Ordering::SeqCst);
                             break;
                         }
                         Err(e) => {
                             eprintln!("Decode error: {}", e);
-                            stream_finished.store(true, Ordering::SeqCst);
+                            thread_finished.store(true, Ordering::SeqCst);
                             break;
                         }
                     };
@@ -1330,25 +1445,227 @@ pub fn start_playback(
                 }
                 {
                     let _push_scope = profiler::scope("audio::player::AudioBuffer::push_wait");
-                    buffer.push_timed(
+                    thread_buffer.push_timed(
                         &block.samples,
                         channels as usize,
                         block.source_start_frame,
                         block.source_frames,
-                        &stop_flag,
+                        &thread_stop,
                     );
                 }
             }
         })
         .map_err(|e| e.to_string())?;
 
-    state.thread_handle = Some(handle);
+    Ok(PreparedPlayback {
+        stream,
+        output_info,
+        buffer,
+        thread_handle,
+        stop_flag,
+        seek_request,
+        source_frame_bits,
+        playback_rate_bits,
+        stream_finished,
+        sample_rate,
+        channels,
+        underrun_count,
+        clipped_sample_count,
+        peak_bits,
+    })
+}
+
+fn install_prepared_playback(generation: u64, prepared: PreparedPlayback) -> Result<(), String> {
+    let mut state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
+    if state.stream_generation != generation {
+        drop(state);
+        prepared.stop_flag.store(true, Ordering::SeqCst);
+        join_and_drop_pipeline(
+            Some(prepared.thread_handle),
+            Some(prepared.stream),
+            Some(prepared.buffer),
+        );
+        return Ok(());
+    }
+    if state.is_paused {
+        let _ = prepared.stream.0.pause();
+    }
+    state.stream = Some(prepared.stream);
+    state.buffer = Some(prepared.buffer);
+    state.sample_rate = prepared.sample_rate;
+    state.channels = prepared.channels;
+    state.stop_flag = prepared.stop_flag;
+    state.seek_request = prepared.seek_request;
+    state.source_frame_bits = prepared.source_frame_bits;
+    state.playback_rate_bits = prepared.playback_rate_bits;
+    state.stream_finished = prepared.stream_finished;
+    state.output_info = Arc::new(Mutex::new(prepared.output_info));
+    state.underrun_count = prepared.underrun_count;
+    state.clipped_sample_count = prepared.clipped_sample_count;
+    state.peak_bits = prepared.peak_bits;
+    state.thread_handle = Some(prepared.thread_handle);
+    state.needs_reopen = false;
     Ok(())
+}
+
+fn sleep_until_canceled(generation: u64, total: Duration) -> bool {
+    let start = Instant::now();
+    while start.elapsed() < total {
+        {
+            let state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
+            if state.stream_generation != generation || state.is_paused {
+                return false;
+            }
+        }
+        let remaining = total.saturating_sub(start.elapsed());
+        thread::sleep(remaining.min(Duration::from_millis(25)));
+    }
+    true
+}
+
+fn handle_stream_error(failed_generation: u64) {
+    let (old_handle, old_stream, old_buffer, recovery_generation) = {
+        let mut state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
+        if state.stream_generation != failed_generation {
+            return;
+        }
+        let finished = state.stream_finished.load(Ordering::Relaxed);
+        let was_paused = state.is_paused;
+        let has_source = state.active_source.is_some();
+        let (handle, stream, buffer) = detach_active_pipeline(&mut state);
+        if finished || !has_source {
+            state.needs_reopen = false;
+            (handle, stream, buffer, None)
+        } else if was_paused {
+            state.needs_reopen = true;
+            (handle, stream, buffer, None)
+        } else {
+            let now = Instant::now();
+            let within_burst = state
+                .last_recovery_at
+                .is_some_and(|prev| now.duration_since(prev) < Duration::from_secs(5));
+            let next_count = if within_burst {
+                state.consecutive_recoveries.saturating_add(1)
+            } else {
+                1
+            };
+            state.last_recovery_at = Some(now);
+            state.consecutive_recoveries = next_count;
+            state.needs_reopen = true;
+            if next_count > 3 {
+                eprintln!(
+                    "Audio output stream stopped after repeated device errors; waiting for manual resume"
+                );
+                state.is_paused = true;
+                (handle, stream, buffer, None)
+            } else {
+                let target_gen = state.next_stream_generation;
+                state.next_stream_generation = state.next_stream_generation.wrapping_add(1);
+                state.stream_generation = target_gen;
+                (handle, stream, buffer, Some(target_gen))
+            }
+        }
+    };
+
+    // Always release GLOBAL_PLAYER before joining the decode thread and dropping
+    // the dead cpal::Stream so `cpal_alsa_out` terminates immediately without lock contention.
+    join_and_drop_pipeline(old_handle, old_stream, old_buffer);
+
+    let Some(target_gen) = recovery_generation else {
+        return;
+    };
+
+    for delay in [
+        Duration::from_millis(200),
+        Duration::from_millis(300),
+        Duration::from_millis(700),
+    ] {
+        if !sleep_until_canceled(target_gen, delay) {
+            return;
+        }
+        let (source, resume_secs, cfg) = {
+            let state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
+            if state.stream_generation != target_gen || state.is_paused || !state.needs_reopen {
+                return;
+            }
+            let Some(source) = state.active_source.clone() else {
+                return;
+            };
+            (source, current_source_secs_locked(&state), snapshot_open_config(&state))
+        };
+        if let Ok(prepared) =
+            prepare_pipeline_and_stream(target_gen, &source.path, resume_secs, &cfg)
+        {
+            let _ = install_prepared_playback(target_gen, prepared);
+            return;
+        }
+    }
+
+    let mut state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
+    if state.stream_generation == target_gen {
+        state.is_paused = true;
+    }
+}
+
+/// Start streaming playback of `path` with the given DSP parameters.
+#[allow(clippy::too_many_arguments)]
+pub fn start_playback(
+    path: String,
+    vol: f32,
+    pitch_val: f64,
+    pitch_algo: String,
+    normalization_gain: f32,
+    chart_path: Option<String>,
+    hitsound_enabled: bool,
+    hitsound_volume: f32,
+    hitsound_offset_ms: i32,
+) -> Result<(), String> {
+    let _scope = profiler::scope("audio::player::start_playback");
+    let _ = dsp::probe_source_format(&path)?;
+    let (generation, cfg, old_handle, old_stream, old_buffer) = {
+        let mut state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
+        let generation = state.next_stream_generation;
+        state.next_stream_generation = state.next_stream_generation.wrapping_add(1);
+        state.stream_generation = generation;
+        state.is_paused = false;
+        state.needs_reopen = false;
+        state.last_recovery_at = None;
+        state.consecutive_recoveries = 0;
+        state.active_source = Some(ActivePlaybackSource {
+            path: path.clone(),
+            normalization_gain,
+        });
+        state.stream_finished.store(false, Ordering::SeqCst);
+        state.queue_headroom_history.clear();
+        state.source_frame_bits.store(0.0f64.to_bits(), Ordering::SeqCst);
+        *state.volume.lock().unwrap_or_else(|e| e.into_inner()) = vol;
+        *state.pitch.lock().unwrap_or_else(|e| e.into_inner()) = pitch_val;
+        *state.algo.lock().unwrap_or_else(|e| e.into_inner()) = pitch_algo;
+        *state
+            .loudness_normalization_gain
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = normalization_gain;
+        state.hitsound.update(
+            chart_path,
+            HitSoundConfig {
+                enabled: hitsound_enabled,
+                volume: f64::from(hitsound_volume).clamp(0.0, 1.5),
+                offset_ms: hitsound_offset_ms.clamp(-500, 500),
+            },
+        );
+        let (handle, stream, buffer) = detach_active_pipeline(&mut state);
+        (generation, snapshot_open_config(&state), handle, stream, buffer)
+    };
+    join_and_drop_pipeline(old_handle, old_stream, old_buffer);
+
+    let prepared = prepare_pipeline_and_stream(generation, &path, 0.0, &cfg)?;
+    install_prepared_playback(generation, prepared)
 }
 
 pub fn pause_playback() -> Result<(), String> {
     let _scope = profiler::scope("audio::player::pause_playback");
-    let state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
+    let mut state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
+    state.is_paused = true;
     if let Some(s) = &state.stream {
         s.0.pause().map_err(|e| e.to_string())?;
     }
@@ -1357,11 +1674,34 @@ pub fn pause_playback() -> Result<(), String> {
 
 pub fn resume_playback() -> Result<(), String> {
     let _scope = profiler::scope("audio::player::resume_playback");
-    let state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(s) = &state.stream {
-        s.0.play().map_err(|e| e.to_string())?;
-    }
-    Ok(())
+    let reopen_args = {
+        let mut state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
+        state.is_paused = false;
+        state.consecutive_recoveries = 0;
+        if let Some(s) = &state.stream {
+            s.0.play().map_err(|e| e.to_string())?;
+            return Ok(());
+        }
+        if !state.needs_reopen {
+            return Ok(());
+        }
+        let Some(source) = state.active_source.clone() else {
+            return Ok(());
+        };
+        let generation = state.next_stream_generation;
+        state.next_stream_generation = state.next_stream_generation.wrapping_add(1);
+        state.stream_generation = generation;
+        *state
+            .loudness_normalization_gain
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = source.normalization_gain;
+        let resume_secs = current_source_secs_locked(&state);
+        (generation, source.path, resume_secs, snapshot_open_config(&state))
+    };
+
+    let (generation, path, resume_secs, cfg) = reopen_args;
+    let prepared = prepare_pipeline_and_stream(generation, &path, resume_secs, &cfg)?;
+    install_prepared_playback(generation, prepared)
 }
 
 pub fn seek_playback(secs: f64) -> Result<(), String> {
@@ -1392,15 +1732,21 @@ pub fn seek_playback(secs: f64) -> Result<(), String> {
 
 pub fn stop_playback() -> Result<(), String> {
     let _scope = profiler::scope("audio::player::stop_playback");
-    let mut state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
-    state.stop_flag.store(true, Ordering::SeqCst);
-    if let Some(handle) = state.thread_handle.take() {
-        let _ = handle.join();
-    }
-    state.stream = None;
-    state.buffer = None;
-    state.stream_finished.store(false, Ordering::SeqCst);
-    state.queue_headroom_history.clear();
+    let (old_handle, old_stream, old_buffer) = {
+        let mut state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
+        state.stream_generation = state.next_stream_generation;
+        state.next_stream_generation = state.next_stream_generation.wrapping_add(1);
+        state.is_paused = false;
+        state.needs_reopen = false;
+        state.active_source = None;
+        state.last_recovery_at = None;
+        state.consecutive_recoveries = 0;
+        let (handle, stream, buffer) = detach_active_pipeline(&mut state);
+        state.stream_finished.store(false, Ordering::SeqCst);
+        state.queue_headroom_history.clear();
+        (handle, stream, buffer)
+    };
+    join_and_drop_pipeline(old_handle, old_stream, old_buffer);
     Ok(())
 }
 
@@ -1776,6 +2122,7 @@ mod fidelity_tests {
             Arc::new(Mutex::new(AudioQualitySettings::default())),
             240,
             "shared-default".into(),
+            0,
         )
         .unwrap();
         eprintln!("System stream opened: {info:?}");
@@ -2029,5 +2376,102 @@ mod fidelity_tests {
             .fold(0.0f64, |acc, s| acc.max(s.abs()));
         assert!(early_peak < 1e-6);
         assert!(accelerated_hit_peak > 0.25);
+    }
+
+    #[test]
+    fn audio_buffer_push_timed_wakes_immediately_on_pop() {
+        let buffer = Arc::new(AudioBuffer::new(4));
+        assert!(buffer.try_push(&[0.1, -0.1, 0.2, -0.2]));
+        let stop_flag = Arc::new(AtomicBool::new(false));
+        let done = Arc::new(AtomicBool::new(false));
+
+        let producer_buffer = buffer.clone();
+        let producer_stop = stop_flag.clone();
+        let producer_done = done.clone();
+        let handle = thread::spawn(move || {
+            producer_buffer.push_timed(&[0.3, -0.3], 2, 0.0, 0.0, &producer_stop);
+            producer_done.store(true, Ordering::SeqCst);
+        });
+
+        thread::sleep(Duration::from_millis(15));
+        assert!(!done.load(Ordering::SeqCst));
+
+        let pop_start = Instant::now();
+        let mut out = [0.0f32; 2];
+        let mut dither = TpdfDither::new(1);
+        assert_eq!(buffer.pop(&mut out, 2, 1.0, &mut dither, false), 2);
+        handle.join().unwrap();
+        assert!(done.load(Ordering::SeqCst));
+        assert!(
+            pop_start.elapsed() < Duration::from_millis(50),
+            "expected Condvar wakeup before 100ms timeout, took {:?}",
+            pop_start.elapsed()
+        );
+    }
+
+    #[test]
+    fn stream_error_handling_detaches_paused_and_caps_recovery_burst() {
+        let stop_flag = Arc::new(AtomicBool::new(false));
+        let buffer = Arc::new(AudioBuffer::new(8));
+        {
+            let mut state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
+            state.stream_generation = 420;
+            state.next_stream_generation = 421;
+            state.is_paused = true;
+            state.needs_reopen = false;
+            state.active_source = Some(ActivePlaybackSource {
+                path: "/nonexistent/test.flac".to_string(),
+                normalization_gain: 1.0,
+            });
+            state.stream_finished.store(false, Ordering::SeqCst);
+            state.stop_flag = stop_flag.clone();
+            state.buffer = Some(buffer.clone());
+            state.stream = None;
+            state.thread_handle = None;
+            state.last_recovery_at = None;
+            state.consecutive_recoveries = 0;
+        }
+
+        // Stale generation error must be ignored.
+        handle_stream_error(419);
+        {
+            let state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
+            assert!(!stop_flag.load(Ordering::SeqCst));
+            assert!(state.buffer.is_some());
+            assert!(!state.needs_reopen);
+        }
+
+        // Active generation while paused detaches immediately and waits for resume().
+        handle_stream_error(420);
+        {
+            let state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
+            assert!(stop_flag.load(Ordering::SeqCst));
+            assert!(state.buffer.is_none());
+            assert!(state.is_paused);
+            assert!(state.needs_reopen);
+        }
+
+        // Repeated burst error while unpaused trips circuit breaker cleanly.
+        {
+            let mut state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
+            state.stream_generation = 425;
+            state.next_stream_generation = 426;
+            state.is_paused = false;
+            state.needs_reopen = false;
+            state.last_recovery_at = Some(Instant::now());
+            state.consecutive_recoveries = 3;
+            state.stop_flag = Arc::new(AtomicBool::new(false));
+            state.buffer = Some(buffer);
+        }
+        handle_stream_error(425);
+        {
+            let state = GLOBAL_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
+            assert!(state.is_paused);
+            assert!(state.needs_reopen);
+            assert!(state.buffer.is_none());
+            assert_eq!(state.consecutive_recoveries, 4);
+        }
+
+        let _ = stop_playback();
     }
 }

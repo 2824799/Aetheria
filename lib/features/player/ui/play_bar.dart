@@ -5,6 +5,7 @@ import 'package:aetheria/core/providers/ui_theme_provider.dart';
 import 'package:aetheria/core/widgets/aether_icon_button.dart';
 import 'package:aetheria/core/widgets/aether_pressable.dart';
 import 'package:aetheria/core/widgets/aether_slider.dart';
+import 'package:aetheria/features/player/ui/playback_progress.dart';
 import 'package:aetheria/features/player/ui/song_cover_art.dart';
 
 class PlayBar extends StatelessWidget {
@@ -244,12 +245,18 @@ class PlayBar extends StatelessWidget {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.end,
                       children: [
-                        ValueListenableBuilder<Duration>(
-                          valueListenable: audioProvider.positionListenable,
-                          builder: (context, position, _) => Text(
-                            '${_formatDuration(position)} / ${_formatDuration(audioProvider.totalDuration)}',
-                            style: AetherType.bodySmStyle(cfg.textTertiary).copyWith(
-                              fontFeatures: const [FontFeature.tabularFigures()],
+                        RepaintBoundary(
+                          child: ThrottledPositionBuilder(
+                            audio: audioProvider,
+                            onlyWholeSeconds: true,
+                            builder: (context, position) => Text(
+                              '${_formatDuration(position)} / ${_formatDuration(audioProvider.totalDuration)}',
+                              style: AetherType.bodySmStyle(cfg.textTertiary)
+                                  .copyWith(
+                                    fontFeatures: const [
+                                      FontFeature.tabularFigures(),
+                                    ],
+                                  ),
                             ),
                           ),
                         ),
@@ -285,19 +292,22 @@ class PlayBar extends StatelessWidget {
               top: 0,
               left: 0,
               right: 0,
-              child: ValueListenableBuilder<Duration>(
-                valueListenable: audioProvider.positionListenable,
-                builder: (context, position, _) => AetherSeekBar(
-                  progress: audioProvider.totalDuration.inMilliseconds > 0
-                      ? position.inMilliseconds /
-                            audioProvider.totalDuration.inMilliseconds
-                      : 0,
-                  height: 4,
-                  onSeek: (pct) => audioProvider.seek(
-                    Duration(
-                      milliseconds:
-                          (audioProvider.totalDuration.inMilliseconds * pct)
-                              .round(),
+              child: RepaintBoundary(
+                child: ThrottledPositionBuilder(
+                  audio: audioProvider,
+                  minIntervalMs: 250,
+                  builder: (context, position) => AetherSeekBar(
+                    progress: audioProvider.totalDuration.inMilliseconds > 0
+                        ? position.inMilliseconds /
+                              audioProvider.totalDuration.inMilliseconds
+                        : 0,
+                    height: 4,
+                    onSeek: (pct) => audioProvider.seek(
+                      Duration(
+                        milliseconds:
+                            (audioProvider.totalDuration.inMilliseconds * pct)
+                                .round(),
+                      ),
                     ),
                   ),
                 ),

@@ -4,6 +4,7 @@ import 'package:aetheria/core/providers/ui_theme_provider.dart';
 import 'package:aetheria/features/library/ui/settings/settings_floating_lyrics_tab.dart';
 import 'package:aetheria/features/library/ui/settings/settings_shared_widgets.dart';
 import 'package:aetheria/features/lyrics/floating_lyrics_bridge.dart';
+import 'package:aetheria/src/rust/models/song.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -117,4 +118,136 @@ void main() {
     provider.dispose();
     theme.dispose();
   });
+
+  testWidgets(
+    'paused FloatingLyricsBridge skips polling timers and updates on paused seek',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      final settings = FloatingLyricsProvider();
+      await settings.load();
+      await settings.setEnabled(true);
+      final audio = TestAudio()
+        ..isPlaying = false
+        ..playingSong = const Song(
+          id: 'paused-seek',
+          title: 'Paused Seek',
+          lyrics: '[00:01.00]First line\n[00:05.00]Second line',
+          rating: 0,
+          createdAt: '',
+          versions: [],
+          tags: [],
+        );
+      audio.positionListenable.value = const Duration(milliseconds: 1200);
+
+      final frames = <Map<dynamic, dynamic>>[];
+      const channel = MethodChannel('com.aetheria.app/notification');
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            if (call.method == 'updateFloatingLyrics') {
+              frames.add(call.arguments as Map);
+            }
+            return null;
+          });
+      addTearDown(() {
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, null);
+      });
+
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<FloatingLyricsProvider>.value(
+              value: settings,
+            ),
+            ChangeNotifierProvider<AudioPlayerProvider>.value(value: audio),
+          ],
+          child: const FloatingLyricsBridge(child: SizedBox.shrink()),
+        ),
+      );
+      await tester.pump();
+      expect(frames, hasLength(1));
+      expect(frames.single['line'], 'First line');
+
+      for (var i = 0; i < 10; i++) {
+        await tester.pump(const Duration(milliseconds: 200));
+      }
+      expect(frames, hasLength(1));
+
+      audio.positionListenable.value = const Duration(seconds: 6);
+      await tester.pump();
+      expect(frames, hasLength(2));
+      expect(frames.last['line'], 'Second line');
+
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 250));
+      }
+      expect(frames, hasLength(2));
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      settings.dispose();
+      audio.dispose();
+    },
+  );
+
+  testWidgets(
+    'playing track without timed lyrics avoids periodic floating lyric timer',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      final settings = FloatingLyricsProvider();
+      await settings.load();
+      await settings.setEnabled(true);
+      await settings.setRefreshFps(60);
+      final audio = TestAudio()
+        ..isPlaying = true
+        ..playingSong = const Song(
+          id: 'plain-track',
+          title: 'Plain Track',
+          lyrics: 'Untimed line 1\nUntimed line 2',
+          rating: 0,
+          createdAt: '',
+          versions: [],
+          tags: [],
+        );
+
+      final frames = <Map<dynamic, dynamic>>[];
+      const channel = MethodChannel('com.aetheria.app/notification');
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            if (call.method == 'updateFloatingLyrics') {
+              frames.add(call.arguments as Map);
+            }
+            return null;
+          });
+      addTearDown(() {
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, null);
+      });
+
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<FloatingLyricsProvider>.value(
+              value: settings,
+            ),
+            ChangeNotifierProvider<AudioPlayerProvider>.value(value: audio),
+          ],
+          child: const FloatingLyricsBridge(child: SizedBox.shrink()),
+        ),
+      );
+      await tester.pump();
+      expect(frames, hasLength(1));
+      expect(frames.single['line'], 'Untimed line 1');
+
+      for (var i = 0; i < 15; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      expect(frames, hasLength(1));
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      settings.dispose();
+      audio.dispose();
+    },
+  );
 }

@@ -20,6 +20,7 @@ class _PlaybackApi extends Fake implements RustLibApi {
   );
   double? lastPitch;
   String? lastAlgo;
+  int defaultDeviceProbeCalls = 0;
 
   void reset() {
     started = Completer<void>();
@@ -33,6 +34,7 @@ class _PlaybackApi extends Fake implements RustLibApi {
     );
     lastPitch = null;
     lastAlgo = null;
+    defaultDeviceProbeCalls = 0;
   }
 
   @override
@@ -80,7 +82,10 @@ class _PlaybackApi extends Fake implements RustLibApi {
   }
 
   @override
-  Future<String> crateApiPlaybackGetDefaultOutputDeviceName() async => '';
+  Future<String> crateApiPlaybackGetDefaultOutputDeviceName() async {
+    defaultDeviceProbeCalls++;
+    return '';
+  }
 
   @override
   Future<PlaybackProgress> crateApiPlaybackGetPlaybackProgress() async =>
@@ -237,6 +242,57 @@ void main() {
 
       expect(audio.currentPosition, const Duration(seconds: 18));
       expect(audio.playbackRate, closeTo(1.7818, 0.001));
+    },
+  );
+
+  test(
+    'position persistence throttles steady playback and flushes on lifecycle flush',
+    () async {
+      final song = _song('a');
+      api.openGate.complete();
+      await audio.playSong(song, [song], library.path);
+
+      if (Platform.isLinux) {
+        expect(api.defaultDeviceProbeCalls, 0);
+      }
+
+      final prefs = await SharedPreferences.getInstance();
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(prefs.getInt('aetheria-playback-position-ms'), 0);
+
+      for (final sec in [1.2, 2.3, 4.1]) {
+        api.nextProgress = PlaybackProgress(
+          positionSecs: sec,
+          playbackRate: 1.0,
+          finished: false,
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 120));
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(audio.currentPosition, const Duration(milliseconds: 4100));
+      expect(prefs.getInt('aetheria-playback-position-ms'), 0);
+
+      api.nextProgress = const PlaybackProgress(
+        positionSecs: 5.4,
+        playbackRate: 1.0,
+        finished: false,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 130));
+      expect(prefs.getInt('aetheria-playback-position-ms'), 5400);
+
+      api.nextProgress = const PlaybackProgress(
+        positionSecs: 7.2,
+        playbackRate: 1.0,
+        finished: false,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 130));
+      expect(prefs.getInt('aetheria-playback-position-ms'), 5400);
+
+      await audio.flushPersistedPosition();
+      expect(prefs.getInt('aetheria-playback-position-ms'), 7200);
+      if (Platform.isLinux) {
+        expect(api.defaultDeviceProbeCalls, 0);
+      }
     },
   );
 }
