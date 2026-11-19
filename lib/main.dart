@@ -1,4 +1,8 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:aetheria/src/rust/api/music.dart' as music;
@@ -13,8 +17,30 @@ import 'package:aetheria/features/layout/main_layout.dart';
 import 'package:aetheria/features/lyrics/floating_lyrics_bridge.dart';
 import 'package:aetheria/features/lyrics/super_lyric_bridge.dart';
 
+const int _kLinuxSkiaResourceCacheMaxBytes = 32 * 1024 * 1024;
+const int _kLinuxImageCacheMaxBytes = 32 * 1024 * 1024;
+const int _kLinuxImageCacheMaxEntries = 200;
+
+void _configureLinuxRenderCaches() {
+  if (kIsWeb || defaultTargetPlatform != TargetPlatform.linux) {
+    return;
+  }
+  final imageCache = PaintingBinding.instance.imageCache;
+  imageCache.maximumSizeBytes = _kLinuxImageCacheMaxBytes;
+  imageCache.maximumSize = _kLinuxImageCacheMaxEntries;
+  unawaited(
+    SystemChannels.skia
+        .invokeMethod<bool>(
+          'Skia.setResourceCacheMaxBytes',
+          _kLinuxSkiaResourceCacheMaxBytes,
+        )
+        .catchError((_) => null),
+  );
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  _configureLinuxRenderCaches();
 
   String? initError;
 

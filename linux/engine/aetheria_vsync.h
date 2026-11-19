@@ -4,6 +4,10 @@
 #include <cstdint>
 #include <cstdio>
 #include <vector>
+#include "flutter/shell/platform/linux/public/flutter_linux/fl_engine.h"
+
+void aetheria_engine_frame(FlEngine* engine);
+void aetheria_engine_direct(FlEngine* engine, bool enabled);
 
 // Owned by FlEngine; Wayland callbacks and timers run on the platform thread.
 class AetheriaVsync {

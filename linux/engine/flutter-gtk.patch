@@ -1,16 +1,47 @@
+--- a/engine/src/flutter/shell/platform/linux/BUILD.gn
++++ b/engine/src/flutter/shell/platform/linux/BUILD.gn
+@@ -112,6 +112,10 @@
+   public_configs = [ ":disable_warnings" ]
+ 
+   sources = [
++    "aetheria_vsync.cc",
++    "fractional-scale-v1-protocol.c",
++    "presentation-time-protocol.c",
++    "viewporter-protocol.c",
+     "fl_accessibility_channel.cc",
+     "fl_accessibility_handler.cc",
+     "fl_accessible_node.cc",
+--- a/engine/src/flutter/shell/platform/linux/fl_compositor_opengl.cc
++++ b/engine/src/flutter/shell/platform/linux/fl_compositor_opengl.cc
+@@ -71,10 +71,12 @@
+                             int height) {
+   size_t texture_width = fl_framebuffer_get_width(framebuffer);
+   size_t texture_height = fl_framebuffer_get_height(framebuffer);
+-  fl_compositor_opengl_shader_set_offset(self->shader, (2 * x / width) - 1.0,
+-                                         (2 * y / height) - 1.0);
+-  fl_compositor_opengl_shader_set_scale(self->shader, texture_width / width,
+-                                        texture_height / height);
++  fl_compositor_opengl_shader_set_offset(
++      self->shader, (2.0 * (x + texture_width / 2.0) / width) - 1.0,
++      (2.0 * (y + texture_height / 2.0) / height) - 1.0);
++  fl_compositor_opengl_shader_set_scale(
++      self->shader, static_cast<double>(texture_width) / width,
++      static_cast<double>(texture_height) / height);
+ 
+   GLuint texture_id = fl_framebuffer_get_texture_id(framebuffer);
+   glBindTexture(GL_TEXTURE_2D, texture_id);
 --- a/engine/src/flutter/shell/platform/linux/fl_engine.cc
 +++ b/engine/src/flutter/shell/platform/linux/fl_engine.cc
-@@ -16,6 +16,9 @@
+@@ -16,6 +16,8 @@
  #include "flutter/shell/platform/linux/fl_binary_messenger_private.h"
  #include "flutter/shell/platform/linux/fl_display_monitor.h"
  #include "flutter/shell/platform/linux/fl_engine_private.h"
 +#include "aetheria_vsync.h"
-+#include "aetheria_wayland.h"
 +#include <gdk/gdkwayland.h>
  #include "flutter/shell/platform/linux/fl_framebuffer.h"
  #include "flutter/shell/platform/linux/fl_keyboard_handler.h"
  #include "flutter/shell/platform/linux/fl_opengl_manager.h"
-@@ -37,6 +40,7 @@
+@@ -37,6 +39,7 @@
  
  struct _FlEngine {
    GObject parent_instance;
@@ -18,224 +49,1736 @@
  
    // Thread the GLib main loop is running on.
    GThread* thread;
-@@ -178,6 +182,7 @@
+@@ -178,6 +181,9 @@
    g_autoptr(GMutexLocker) locker = g_mutex_locker_new(&self->renderables_mutex);
    GWeakRef* ref = g_new(GWeakRef, 1);
    g_weak_ref_init(ref, G_OBJECT(renderable));
-+  if (view_id == 0 && self->vsync && GTK_IS_WIDGET(renderable)) self->vsync->SetWidget(GTK_WIDGET(renderable));
++  if (view_id == 0 && self->vsync && GTK_IS_WIDGET(renderable)) {
++    self->vsync->SetWidget(GTK_WIDGET(renderable));
++  }
    g_hash_table_insert(self->renderables_by_view_id, GINT_TO_POINTER(view_id),
                        ref);
  }
-@@ -589,6 +594,7 @@
+@@ -591,6 +597,9 @@
  
  static void fl_engine_dispose(GObject* object) {
    FlEngine* self = FL_ENGINE(object);
-+  if (self->vsync) self->vsync->Stop();
++  if (self->vsync) {
++    self->vsync->Stop();
++  }
  
    if (self->engine != nullptr) {
      if (self->embedder_api.Shutdown(self->engine) != kSuccess) {
-@@ -596,6 +602,9 @@
-     }
+@@ -599,6 +608,9 @@
      self->engine = nullptr;
    }
-+
+ 
 +  delete self->vsync;
 +  self->vsync = nullptr;
- 
++
    if (self->aot_data != nullptr) {
      if (self->embedder_api.CollectAOTData(self->aot_data) != kSuccess) {
-@@ -663,6 +672,15 @@
-   self->embedder_api.struct_size = sizeof(FlutterEngineProcTable);
-   if (FlutterEngineGetProcAddresses(&self->embedder_api) != kSuccess) {
+       g_warning("Failed to send collect AOT data");
+@@ -667,6 +679,18 @@
      g_warning("Failed get get engine function pointers");
-+  }
-+
+   }
+ 
 +  if (GDK_IS_WAYLAND_DISPLAY(gdk_display_get_default()) &&
 +      g_strcmp0(g_getenv("AETHERIA_DIRECT_WAYLAND"), "0") != 0) {
 +    self->vsync = new AetheriaVsync(
-+      [](void* data, intptr_t baton, uint64_t start, uint64_t target) {
-+        auto* engine = FL_ENGINE(data);
-+        if (engine->engine) engine->embedder_api.OnVsync(engine->engine, baton, start, target);
-+      }, self->embedder_api.GetCurrentTime, self);
-   }
- 
++        [](void* data, intptr_t baton, uint64_t start, uint64_t target) {
++          auto* engine = FL_ENGINE(data);
++          if (engine->engine) {
++            engine->embedder_api.OnVsync(engine->engine, baton, start, target);
++          }
++        },
++        self->embedder_api.GetCurrentTime, self);
++  }
++
    self->opengl_manager = fl_opengl_manager_new();
-@@ -842,6 +860,10 @@
+ 
+   self->display_monitor =
+@@ -864,6 +888,11 @@
        fl_dart_project_get_dart_entrypoint_arguments(self->project);
  
    FlutterProjectArgs args = {};
-+  if (self->vsync) {
-+    args.vsync_callback = [](void* data, intptr_t baton) { FL_ENGINE(data)->vsync->Request(baton); };
++  if (self->vsync != nullptr && self->renderer_type == kOpenGL) {
++    args.vsync_callback = [](void* data, intptr_t baton) {
++      FL_ENGINE(data)->vsync->Request(baton);
++    };
 +  }
-+
    args.struct_size = sizeof(FlutterProjectArgs);
    args.assets_path = fl_dart_project_get_assets_path(self->project);
    args.icu_data_path = fl_dart_project_get_icu_data_path(self->project);
-@@ -1576,3 +1598,8 @@
+@@ -1639,3 +1668,15 @@
    g_return_val_if_fail(FL_IS_ENGINE(self), nullptr);
    return self->mouse_cursor_handler;
  }
 +
-+void aetheria_engine_frame(FlEngine* engine) { if (engine->vsync) engine->vsync->Frame(); }
-+void aetheria_engine_direct(FlEngine* engine, bool enabled) { if (engine->vsync) engine->vsync->SetDirect(enabled); }
++void aetheria_engine_frame(FlEngine* engine) {
++  if (engine && engine->vsync) {
++    engine->vsync->Frame();
++  }
++}
 +
-+void aetheria_engine_schedule(FlEngine* engine) { if (engine->engine) engine->embedder_api.ScheduleFrame(engine->engine); }
---- a/engine/src/flutter/shell/platform/linux/fl_compositor_opengl.cc
-+++ b/engine/src/flutter/shell/platform/linux/fl_compositor_opengl.cc
-@@ -348,3 +348,7 @@
++void aetheria_engine_direct(FlEngine* engine, bool enabled) {
++  if (engine && engine->vsync) {
++    engine->vsync->SetDirect(enabled);
++  }
++}
+--- a/engine/src/flutter/shell/platform/linux/fl_scrolling_manager.cc
++++ b/engine/src/flutter/shell/platform/linux/fl_scrolling_manager.cc
+@@ -70,7 +70,7 @@
  
+ void fl_scrolling_manager_handle_scroll_event(FlScrollingManager* self,
+                                               GdkEventScroll* scroll_event,
+-                                              gint scale_factor) {
++                                              gdouble scale_factor) {
+   g_return_if_fail(FL_IS_SCROLLING_MANAGER(self));
+ 
+   g_autoptr(FlEngine) engine = FL_ENGINE(g_weak_ref_get(&self->engine));
+--- a/engine/src/flutter/shell/platform/linux/fl_scrolling_manager.h
++++ b/engine/src/flutter/shell/platform/linux/fl_scrolling_manager.h
+@@ -53,7 +53,7 @@
+  */
+ void fl_scrolling_manager_handle_scroll_event(FlScrollingManager* manager,
+                                               GdkEventScroll* event,
+-                                              gint scale_factor);
++                                              gdouble scale_factor);
+ 
+ /**
+  * fl_scrolling_manager_handle_rotation_begin:
+--- a/engine/src/flutter/shell/platform/linux/fl_subsurface.cc
++++ b/engine/src/flutter/shell/platform/linux/fl_subsurface.cc
+@@ -6,19 +6,48 @@
+ 
+ #include <wayland-client.h>
+ 
++#include "fractional-scale-v1-client-protocol.h"
++#include "viewporter-client-protocol.h"
++
+ struct _FlSubsurface {
+   GObject parent_instance;
+ 
+   // Surface backing the subsurface and the subsurface itself.
+   struct wl_surface* surface;
+   struct wl_subsurface* subsurface;
++  struct wp_viewport* viewport;
++  struct wp_fractional_scale_v1* fractional_scale;
++  uint32_t preferred_scale_120;
++  gboolean desync;
+ };
+ 
++enum { SIGNAL_SCALE_CHANGED, LAST_SIGNAL };
++
++static guint fl_subsurface_signals[LAST_SIGNAL];
++
+ G_DEFINE_TYPE(FlSubsurface, fl_subsurface, G_TYPE_OBJECT)
+ 
++static void preferred_scale_cb(
++    void* data,
++    struct wp_fractional_scale_v1* fractional_scale,
++    uint32_t scale) {
++  FlSubsurface* self = FL_SUBSURFACE(data);
++  if (scale == 0 || scale == self->preferred_scale_120) {
++    return;
++  }
++  self->preferred_scale_120 = scale;
++  g_signal_emit(self, fl_subsurface_signals[SIGNAL_SCALE_CHANGED], 0);
++}
++
++static const struct wp_fractional_scale_v1_listener kFractionalScaleListener = {
++    .preferred_scale = preferred_scale_cb,
++};
++
+ static void fl_subsurface_dispose(GObject* object) {
+   FlSubsurface* self = FL_SUBSURFACE(object);
+ 
++  g_clear_pointer(&self->fractional_scale, wp_fractional_scale_v1_destroy);
++  g_clear_pointer(&self->viewport, wp_viewport_destroy);
+   g_clear_pointer(&self->subsurface, wl_subsurface_destroy);
+   g_clear_pointer(&self->surface, wl_surface_destroy);
+ 
+@@ -27,6 +56,10 @@
+ 
+ static void fl_subsurface_class_init(FlSubsurfaceClass* klass) {
+   G_OBJECT_CLASS(klass)->dispose = fl_subsurface_dispose;
++
++  fl_subsurface_signals[SIGNAL_SCALE_CHANGED] =
++      g_signal_new("scale-changed", fl_subsurface_get_type(), G_SIGNAL_RUN_LAST,
++                   0, nullptr, nullptr, nullptr, G_TYPE_NONE, 0);
+ }
+ 
+ static void fl_subsurface_init(FlSubsurface* self) {}
+@@ -34,13 +67,29 @@
+ FlSubsurface* fl_subsurface_new(struct wl_compositor* compositor,
+                                 struct wl_subcompositor* subcompositor,
+                                 struct wl_surface* parent_surface) {
++  return fl_subsurface_new_full(compositor, subcompositor, nullptr, nullptr,
++                                parent_surface, FALSE);
++}
++
++FlSubsurface* fl_subsurface_new_full(
++    struct wl_compositor* compositor,
++    struct wl_subcompositor* subcompositor,
++    struct wp_viewporter* viewporter,
++    struct wp_fractional_scale_manager_v1* fractional_scale_manager,
++    struct wl_surface* parent_surface,
++    gboolean desync) {
+   FlSubsurface* self =
+       FL_SUBSURFACE(g_object_new(fl_subsurface_get_type(), nullptr));
+ 
++  self->desync = desync;
+   self->surface = wl_compositor_create_surface(compositor);
+   self->subsurface = wl_subcompositor_get_subsurface(
+       subcompositor, self->surface, parent_surface);
+-  wl_subsurface_set_sync(self->subsurface);
++  if (desync) {
++    wl_subsurface_set_desync(self->subsurface);
++  } else {
++    wl_subsurface_set_sync(self->subsurface);
++  }
+ 
+   // Give the subsurface an empty input region so pointer, touch and keyboard
+   // events pass through to the parent (GTK) surface, which handles all input
+@@ -49,6 +98,14 @@
+   wl_surface_set_input_region(self->surface, input_region);
+   wl_region_destroy(input_region);
+ 
++  if (viewporter != nullptr && fractional_scale_manager != nullptr) {
++    self->viewport = wp_viewporter_get_viewport(viewporter, self->surface);
++    self->fractional_scale = wp_fractional_scale_manager_v1_get_fractional_scale(
++        fractional_scale_manager, self->surface);
++    wp_fractional_scale_v1_add_listener(self->fractional_scale,
++                                        &kFractionalScaleListener, self);
++  }
++
    return self;
  }
+ 
+@@ -61,3 +118,40 @@
+   g_return_if_fail(FL_IS_SUBSURFACE(self));
+   wl_subsurface_set_position(self->subsurface, x, y);
+ }
 +
-+GLuint aetheria_compositor_framebuffer(FlCompositorOpenGL* self) {
-+  return self->framebuffer ? fl_framebuffer_get_id(self->framebuffer) : 0;
++gdouble fl_subsurface_get_fractional_scale(FlSubsurface* self) {
++  g_return_val_if_fail(FL_IS_SUBSURFACE(self), 0.0);
++  if (self->viewport == nullptr || self->preferred_scale_120 == 0) {
++    return 0.0;
++  }
++  return static_cast<gdouble>(self->preferred_scale_120) / 120.0;
 +}
---- a/engine/src/flutter/shell/platform/linux/fl_view_renderer.cc
-+++ b/engine/src/flutter/shell/platform/linux/fl_view_renderer.cc
-@@ -5,15 +5,19 @@
- #include "flutter/shell/platform/linux/fl_view_renderer.h"
- 
- #include <gdk/gdkwayland.h>
-+#include "aetheria_wayland.h"
 +
++gboolean fl_subsurface_is_desync(FlSubsurface* self) {
++  g_return_val_if_fail(FL_IS_SUBSURFACE(self), FALSE);
++  return self->desync;
++}
++
++void fl_subsurface_set_viewport_destination(FlSubsurface* self,
++                                            gint width,
++                                            gint height) {
++  g_return_if_fail(FL_IS_SUBSURFACE(self));
++  if (self->viewport == nullptr || self->surface == nullptr || width <= 0 ||
++      height <= 0) {
++    return;
++  }
++  wl_surface_set_buffer_scale(self->surface, 1);
++  wp_viewport_set_destination(self->viewport, width, height);
++}
++
++void fl_subsurface_clear_viewport_destination(FlSubsurface* self,
++                                              gint buffer_scale) {
++  g_return_if_fail(FL_IS_SUBSURFACE(self));
++  if (self->surface == nullptr) {
++    return;
++  }
++  if (self->viewport != nullptr) {
++    wp_viewport_set_destination(self->viewport, -1, -1);
++  }
++  wl_surface_set_buffer_scale(self->surface, MAX(1, buffer_scale));
++}
+--- a/engine/src/flutter/shell/platform/linux/fl_subsurface.h
++++ b/engine/src/flutter/shell/platform/linux/fl_subsurface.h
+@@ -10,6 +10,8 @@
+ struct wl_compositor;
+ struct wl_subcompositor;
+ struct wl_surface;
++struct wp_fractional_scale_manager_v1;
++struct wp_viewporter;
  
- #include "flutter/shell/platform/linux/fl_compositor.h"
- #include "flutter/shell/platform/linux/fl_compositor_opengl.h"
- #include "flutter/shell/platform/linux/fl_compositor_software.h"
- #include "flutter/shell/platform/linux/fl_engine_private.h"
- #include "flutter/shell/platform/linux/fl_opengl_manager.h"
-+GLuint aetheria_compositor_framebuffer(FlCompositorOpenGL* self);
+ G_BEGIN_DECLS
  
- struct _FlViewRenderer {
-   GtkDrawingArea parent_instance;
-+  AetheriaWayland* direct;
+@@ -37,26 +39,29 @@
+                                 struct wl_subcompositor* subcompositor,
+                                 struct wl_surface* parent_surface);
  
-   // Engine this widget is rendering.
-   FlEngine* engine;
-@@ -76,12 +80,31 @@
-     return G_SOURCE_REMOVE;
+-/**
+- * fl_subsurface_get_surface:
+- * @subsurface: an #FlSubsurface.
+- *
+- * Gets the Wayland surface backing this subsurface.
+- *
+- * Returns: a `struct wl_surface`.
+- */
++FlSubsurface* fl_subsurface_new_full(
++    struct wl_compositor* compositor,
++    struct wl_subcompositor* subcompositor,
++    struct wp_viewporter* viewporter,
++    struct wp_fractional_scale_manager_v1* fractional_scale_manager,
++    struct wl_surface* parent_surface,
++    gboolean desync);
++
+ struct wl_surface* fl_subsurface_get_surface(FlSubsurface* subsurface);
+ 
+-/**
+- * fl_subsurface_set_position:
+- * @subsurface: an #FlSubsurface.
+- * @x: x coordinate in the parent surface.
+- * @y: y coordinate in the parent surface.
+- *
+- * Moves the subsurface to the given position relative to the parent surface.
+- */
+ void fl_subsurface_set_position(FlSubsurface* subsurface, gint x, gint y);
+ 
++gdouble fl_subsurface_get_fractional_scale(FlSubsurface* subsurface);
++
++gboolean fl_subsurface_is_desync(FlSubsurface* subsurface);
++
++void fl_subsurface_set_viewport_destination(FlSubsurface* subsurface,
++                                            gint width,
++                                            gint height);
++
++void fl_subsurface_clear_viewport_destination(FlSubsurface* subsurface,
++                                              gint buffer_scale);
++
+ G_END_DECLS
+ 
+ #endif  // FLUTTER_SHELL_PLATFORM_LINUX_FL_SUBSURFACE_H_
+--- a/engine/src/flutter/shell/platform/linux/fl_subsurface_egl.cc
++++ b/engine/src/flutter/shell/platform/linux/fl_subsurface_egl.cc
+@@ -9,7 +9,14 @@
+ #include <wayland-client.h>
+ #include <wayland-egl.h>
+ 
++#include <cmath>
++#include <cstdio>
++#include <map>
++#include <vector>
++
++#include "aetheria_vsync.h"
+ #include "flutter/shell/platform/linux/fl_compositor_opengl_shader.h"
++#include "presentation-time-client-protocol.h"
+ 
+ struct _FlSubsurfaceEGL {
+   GObject parent_instance;
+@@ -22,6 +29,19 @@
+   // surface outlives the EGL surface created from it.
+   FlSubsurface* subsurface;
+ 
++  // Non-owning hooks for direct Wayland pacing, flushing, and tracing.
++  FlEngine* engine;
++  struct wl_display* wl_display;
++  struct wp_presentation* presentation;
++  gboolean direct_mode;
++  gboolean disposed;
++  GMutex wayland_mutex;
++  struct wl_callback* frame_callback;
++  std::map<struct wp_presentation_feedback*, uint64_t>* feedbacks;
++  uint64_t frame_serial;
++  FILE* trace;
++  unsigned diagnostic_frames;
++
+   // Native Wayland window backing the EGL surface.
+   struct wl_egl_window* egl_window;
+ 
+@@ -37,7 +57,7 @@
+   gboolean can_blit;
+ 
+   // Framebuffer used to read the engine's frame texture. Created lazily on the
+-  // first present and reused for subsequent frames. Only used when [can_blit].
++  // first present and reused for subsequent frames.
+   GLuint read_framebuffer;
+ 
+   // Shader used to draw the engine frame when glBlitFramebuffer is unavailable.
+@@ -45,24 +65,107 @@
+   FlCompositorOpenGLShader* shader;
+ 
+   // The buffer scale set on the subsurface. Buffer sizes have to be an integer
+-  // multiple of this.
++  // multiple of this (1 when wp_viewport is active).
+   gint scale;
++  gdouble fractional_scale;
++  gboolean use_viewport;
++  gint logical_width;
++  gint logical_height;
++  size_t expected_width;
++  size_t expected_height;
+ 
+-  // The size egl_window has been resized to. The buffer for the next frame is
+-  // acquired when the current one is swapped, so this is the size that buffer
+-  // will be, not the size of the buffer being drawn into now.
++  // The size egl_window has been resized to.
+   size_t window_width;
+   size_t window_height;
+ 
+-  // The size of the buffer the next frame is drawn into. eglQuerySurface()
+-  // reports the size of the buffer that was last swapped rather than this one,
+-  // so the size is tracked here instead.
++  // The size of the buffer the next frame is drawn into.
+   size_t buffer_width;
+   size_t buffer_height;
+ };
+ 
+ G_DEFINE_TYPE(FlSubsurfaceEGL, fl_subsurface_egl, G_TYPE_OBJECT)
+ 
++static void frame_done_cb(void* data,
++                          struct wl_callback* callback,
++                          uint32_t time) {
++  FlSubsurfaceEGL* self = FL_SUBSURFACE_EGL(data);
++  FlEngine* engine = nullptr;
++  g_mutex_lock(&self->wayland_mutex);
++  wl_callback_destroy(callback);
++  if (self->frame_callback == callback) {
++    self->frame_callback = nullptr;
++  }
++  if (!self->disposed) {
++    engine = self->engine;
++  }
++  g_mutex_unlock(&self->wayland_mutex);
++  if (engine != nullptr) {
++    aetheria_engine_frame(engine);
++  }
++}
++
++static const struct wl_callback_listener kFrameListener = {
++    .done = frame_done_cb,
++};
++
++static void presentation_sync_output_cb(
++    void* data,
++    struct wp_presentation_feedback* feedback,
++    struct wl_output* output) {}
++
++static void presentation_presented_cb(
++    void* data,
++    struct wp_presentation_feedback* feedback,
++    uint32_t tv_sec_hi,
++    uint32_t tv_sec_lo,
++    uint32_t tv_nsec,
++    uint32_t refresh,
++    uint32_t seq_hi,
++    uint32_t seq_lo,
++    uint32_t flags) {
++  FlSubsurfaceEGL* self = FL_SUBSURFACE_EGL(data);
++  g_mutex_lock(&self->wayland_mutex);
++  const uint64_t time_ns =
++      ((static_cast<uint64_t>(tv_sec_hi) << 32) | tv_sec_lo) * 1000000000ULL +
++      tv_nsec;
++  if (self->trace != nullptr) {
++    fprintf(self->trace, "presented,%llu,%u,%u\n",
++            static_cast<unsigned long long>(time_ns), refresh, flags);
++  }
++  if (self->feedbacks != nullptr) {
++    auto it = self->feedbacks->find(feedback);
++    if (self->trace != nullptr && it != self->feedbacks->end()) {
++      fprintf(self->trace, "presented_frame,%llu,%llu,%u,%u\n",
++              static_cast<unsigned long long>(it->second),
++              static_cast<unsigned long long>(time_ns), refresh, flags);
++    }
++    self->feedbacks->erase(feedback);
++  }
++  wp_presentation_feedback_destroy(feedback);
++  g_mutex_unlock(&self->wayland_mutex);
++}
++
++static void presentation_discarded_cb(
++    void* data,
++    struct wp_presentation_feedback* feedback) {
++  FlSubsurfaceEGL* self = FL_SUBSURFACE_EGL(data);
++  g_mutex_lock(&self->wayland_mutex);
++  if (self->trace != nullptr) {
++    fprintf(self->trace, "discarded,0,0,0\n");
++  }
++  if (self->feedbacks != nullptr) {
++    self->feedbacks->erase(feedback);
++  }
++  wp_presentation_feedback_destroy(feedback);
++  g_mutex_unlock(&self->wayland_mutex);
++}
++
++static const struct wp_presentation_feedback_listener kFeedbackListener = {
++    .sync_output = presentation_sync_output_cb,
++    .presented = presentation_presented_cb,
++    .discarded = presentation_discarded_cb,
++};
++
+ // Rounds a size in device pixels up to a whole number of logical pixels.
+ // Wayland requires buffer sizes to be an integer multiple of the buffer scale,
+ // and a view that hasn't been allocated yet can produce a frame that isn't,
+@@ -174,6 +277,28 @@
+ static void fl_subsurface_egl_dispose(GObject* object) {
+   FlSubsurfaceEGL* self = FL_SUBSURFACE_EGL(object);
+ 
++  g_mutex_lock(&self->wayland_mutex);
++  self->disposed = TRUE;
++  if (self->frame_callback != nullptr) {
++    wl_callback_destroy(self->frame_callback);
++    self->frame_callback = nullptr;
++  }
++  if (self->feedbacks != nullptr) {
++    for (const auto& entry : *self->feedbacks) {
++      wp_presentation_feedback_destroy(entry.first);
++    }
++    delete self->feedbacks;
++    self->feedbacks = nullptr;
++  }
++  if (self->trace != nullptr) {
++    fclose(self->trace);
++    self->trace = nullptr;
++  }
++  self->engine = nullptr;
++  self->wl_display = nullptr;
++  self->presentation = nullptr;
++  g_mutex_unlock(&self->wayland_mutex);
++
+   // The EGL display is owned by the engine (same Wayland display), so only the
+   // surface and context created here are destroyed; the display must not be
+   // terminated.
+@@ -209,13 +334,25 @@
+   G_OBJECT_CLASS(fl_subsurface_egl_parent_class)->dispose(object);
+ }
+ 
++static void fl_subsurface_egl_finalize(GObject* object) {
++  FlSubsurfaceEGL* self = FL_SUBSURFACE_EGL(object);
++  g_mutex_clear(&self->wayland_mutex);
++  G_OBJECT_CLASS(fl_subsurface_egl_parent_class)->finalize(object);
++}
++
+ static void fl_subsurface_egl_class_init(FlSubsurfaceEGLClass* klass) {
+-  G_OBJECT_CLASS(klass)->dispose = fl_subsurface_egl_dispose;
++  GObjectClass* object_class = G_OBJECT_CLASS(klass);
++  object_class->dispose = fl_subsurface_egl_dispose;
++  object_class->finalize = fl_subsurface_egl_finalize;
+ }
+ 
+ static void fl_subsurface_egl_init(FlSubsurfaceEGL* self) {
+   self->egl_context = EGL_NO_CONTEXT;
+   self->egl_surface = EGL_NO_SURFACE;
++  self->scale = 1;
++  self->fractional_scale = 1.0;
++  g_mutex_init(&self->wayland_mutex);
++  self->feedbacks = new std::map<struct wp_presentation_feedback*, uint64_t>();
+ }
+ 
+ FlSubsurfaceEGL* fl_subsurface_egl_new(FlOpenGLManager* opengl_manager,
+@@ -239,14 +376,100 @@
+   g_return_if_fail(FL_IS_SUBSURFACE_EGL(self));
+ 
+   if (self->egl_window != nullptr) {
+-    width = round_to_scale(width, self->scale);
+-    height = round_to_scale(height, self->scale);
++    if (!self->use_viewport) {
++      width = round_to_scale(width, self->scale);
++      height = round_to_scale(height, self->scale);
++    } else {
++      width = MAX(width, static_cast<size_t>(1));
++      height = MAX(height, static_cast<size_t>(1));
++    }
+     wl_egl_window_resize(self->egl_window, width, height, 0, 0);
+     self->window_width = width;
+     self->window_height = height;
+   }
+ }
+ 
++void fl_subsurface_egl_set_engine_hooks(FlSubsurfaceEGL* self,
++                                        FlEngine* engine,
++                                        struct wl_display* wl_display,
++                                        struct wp_presentation* presentation,
++                                        gboolean direct_mode) {
++  g_return_if_fail(FL_IS_SUBSURFACE_EGL(self));
++  g_mutex_lock(&self->wayland_mutex);
++  self->engine = engine;
++  self->wl_display = wl_display;
++  self->presentation = presentation;
++  self->direct_mode = direct_mode;
++  if (direct_mode && self->trace == nullptr) {
++    if (const char* path = g_getenv("AETHERIA_PRESENTATION_TRACE")) {
++      self->trace = fopen(path, "a");
++      if (self->trace != nullptr) {
++        setvbuf(self->trace, nullptr, _IOLBF, 0);
++      }
++    }
++  }
++  g_mutex_unlock(&self->wayland_mutex);
++}
++
++void fl_subsurface_egl_set_scale_info(FlSubsurfaceEGL* self,
++                                      size_t width,
++                                      size_t height,
++                                      gint logical_width,
++                                      gint logical_height,
++                                      gdouble fractional_scale,
++                                      gboolean use_viewport,
++                                      gint buffer_scale) {
++  g_return_if_fail(FL_IS_SUBSURFACE_EGL(self));
++  self->use_viewport = use_viewport;
++  self->fractional_scale = fractional_scale > 0.0 ? fractional_scale : 1.0;
++  self->logical_width = logical_width;
++  self->logical_height = logical_height;
++  self->scale = use_viewport ? 1 : MAX(1, buffer_scale);
++  fl_subsurface_egl_resize(self, width, height);
++  self->expected_width = self->window_width;
++  self->expected_height = self->window_height;
++}
++
++static void capture_frame_if_requested(FlSubsurfaceEGL* self,
++                                       GLuint texture_id,
++                                       GLint frame_width,
++                                       GLint frame_height,
++                                       GLint dst_y0) {
++  const char* diagnostic_path = g_getenv("AETHERIA_FRAME_CAPTURE");
++  if (diagnostic_path == nullptr || texture_id == 0 ||
++      self->diagnostic_frames >= 8) {
++    return;
++  }
++  const unsigned frame_index = ++self->diagnostic_frames;
++  if (self->read_framebuffer == 0) {
++    glGenFramebuffers(1, &self->read_framebuffer);
++  }
++  for (int source = 0; source < 2; ++source) {
++    if (frame_width <= 0 || frame_height <= 0) {
++      continue;
++    }
++    if (source) {
++      glBindFramebuffer(GL_READ_FRAMEBUFFER, self->read_framebuffer);
++      glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
++                             GL_TEXTURE_2D, texture_id, 0);
++    } else {
++      glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
++    }
++    std::vector<guchar> pixels(static_cast<size_t>(frame_width) *
++                               static_cast<size_t>(frame_height) * 4);
++    glReadPixels(0, source ? 0 : dst_y0, frame_width, frame_height, GL_RGBA,
++                 GL_UNSIGNED_BYTE, pixels.data());
++    auto* pixbuf = gdk_pixbuf_new_from_data(
++        pixels.data(), GDK_COLORSPACE_RGB, TRUE, 8, frame_width, frame_height,
++        frame_width * 4, nullptr, nullptr);
++    g_autofree gchar* path =
++        g_strdup_printf("%s-%u-%s.png", diagnostic_path, frame_index,
++                        source ? "source" : "window");
++    gdk_pixbuf_save(pixbuf, path, "png", nullptr, nullptr);
++    g_object_unref(pixbuf);
++  }
++}
++
+ void fl_subsurface_egl_present(FlSubsurfaceEGL* self,
+                                GLuint texture_id,
+                                size_t width,
+@@ -254,6 +477,8 @@
+                                FlGLFence* fence) {
+   g_return_if_fail(FL_IS_SUBSURFACE_EGL(self));
+ 
++  const gint64 entered_us = g_get_monotonic_time();
++
+   // Present the composited frame to the subsurface window surface using the
+   // subsurface's own EGL context.
+   EGLDisplay egl_display = get_display(self);
+@@ -261,15 +486,17 @@
+                  self->egl_context);
+ 
+   // Make this context wait for the frame to have finished rendering in the
+-  // engine's context before it reads the texture below. This context is the one
+-  // that reads the frame, so the waiting can be left to OpenGL and this thread
+-  // doesn't have to block.
++  // engine's context before it reads the texture below.
+   if (fence != nullptr) {
+     fl_gl_fence_wait(fence);
    }
  
--  gtk_widget_queue_draw(render_widget);
-+  if (!self->direct) gtk_widget_queue_draw(render_widget);
+-  size_t target_width = round_to_scale(width, self->scale);
+-  size_t target_height = round_to_scale(height, self->scale);
++  size_t target_width = self->use_viewport
++                            ? MAX(width, static_cast<size_t>(1))
++                            : round_to_scale(width, self->scale);
++  size_t target_height = self->use_viewport
++                             ? MAX(height, static_cast<size_t>(1))
++                             : round_to_scale(height, self->scale);
+ 
+   if (self->egl_window != nullptr && (self->window_width != target_width ||
+                                       self->window_height != target_height)) {
+@@ -278,36 +505,36 @@
+     self->window_height = target_height;
+   }
+ 
++  EGLint queried_width = 0;
++  EGLint queried_height = 0;
++  eglQuerySurface(egl_display, self->egl_surface, EGL_WIDTH, &queried_width);
++  eglQuerySurface(egl_display, self->egl_surface, EGL_HEIGHT, &queried_height);
++  if (queried_width > 0 && queried_height > 0) {
++    self->buffer_width = static_cast<size_t>(queried_width);
++    self->buffer_height = static_cast<size_t>(queried_height);
++  }
++
+   if (self->egl_window != nullptr && (self->buffer_width != target_width ||
+                                       self->buffer_height != target_height)) {
+-    // The buffer a frame is drawn into is acquired when the previous frame is
+-    // swapped, so resizing the window doesn't reach the buffer this frame
+-    // would be drawn into. Swap that buffer away unused so this frame is drawn
+-    // into one of the size it was rendered at. A window sized to its content
+-    // only produces one frame at each size, so leaving this until the next
+-    // frame would leave it showing a buffer that was never painted.
+     eglSwapBuffers(egl_display, self->egl_surface);
+     self->buffer_width = self->window_width;
+     self->buffer_height = self->window_height;
+   }
+ 
+-  // The frame and the buffer are both window sized, so their dimensions fit in
+-  // a GLint and the arithmetic below can stay signed.
+   GLint frame_width = static_cast<GLint>(width);
+   GLint frame_height = static_cast<GLint>(height);
+-
+-  // OpenGL puts the origin at the bottom left of the buffer but Wayland puts it
+-  // at the top left, so the frame has to be written at the top of the buffer
+-  // when the buffer is taller, which happens when the frame size was rounded up
+-  // to a whole logical pixel above.
+   GLint dst_y0 = MAX(static_cast<GLint>(self->buffer_height) - frame_height, 0);
+ 
+-  // The subsurface context shares resources with the engine, so the engine's
+-  // frame texture can be read directly without using EGLImage.
+-  if (self->can_blit) {
+-    // Attach the frame texture to a persistent framebuffer and blit it to the
+-    // window surface. The framebuffer is created lazily on the first present
+-    // and reused for subsequent frames.
++  glDisable(GL_SCISSOR_TEST);
++  glDisable(GL_BLEND);
++
++  if (texture_id == 0) {
++    glBindFramebuffer(GL_FRAMEBUFFER, 0);
++    glViewport(0, 0, static_cast<GLsizei>(self->buffer_width),
++               static_cast<GLsizei>(self->buffer_height));
++    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
++    glClear(GL_COLOR_BUFFER_BIT);
++  } else if (self->can_blit) {
+     if (self->read_framebuffer == 0) {
+       glGenFramebuffers(1, &self->read_framebuffer);
+     }
+@@ -318,21 +545,95 @@
+     glBlitFramebuffer(0, 0, frame_width, frame_height, 0, dst_y0, frame_width,
+                       dst_y0 + frame_height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+   } else {
+-    // glBlitFramebuffer is unavailable; draw the frame texture as a fullscreen
+-    // quad with the shader instead.
+     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+     glViewport(0, dst_y0, frame_width, frame_height);
+     fl_compositor_opengl_shader_use(self->shader);
+     fl_compositor_opengl_shader_set_offset(self->shader, 0, 0);
+     fl_compositor_opengl_shader_set_scale(self->shader, 1, 1);
++    glActiveTexture(GL_TEXTURE0);
+     glBindTexture(GL_TEXTURE_2D, texture_id);
+     glDrawArrays(GL_TRIANGLES, 0, 6);
+   }
++
++  capture_frame_if_requested(self, texture_id, frame_width, frame_height,
++                             dst_y0);
++
++  if (self->use_viewport && self->fractional_scale > 0.0) {
++    const gboolean matches_target = target_width == self->expected_width &&
++                                    target_height == self->expected_height &&
++                                    self->logical_width > 0 &&
++                                    self->logical_height > 0;
++    const gint dst_w =
++        matches_target
++            ? self->logical_width
++            : static_cast<gint>(
++                  MAX(1L, std::lround(target_width / self->fractional_scale)));
++    const gint dst_h =
++        matches_target
++            ? self->logical_height
++            : static_cast<gint>(
++                  MAX(1L, std::lround(target_height / self->fractional_scale)));
++    fl_subsurface_set_viewport_destination(self->subsurface, dst_w, dst_h);
++  } else {
++    fl_subsurface_clear_viewport_destination(self->subsurface, self->scale);
++  }
++
++  struct wl_surface* surface = fl_subsurface_get_surface(self->subsurface);
++  uint64_t serial = 0;
++  g_mutex_lock(&self->wayland_mutex);
++  if (self->direct_mode && !self->disposed && surface != nullptr) {
++    if (self->frame_callback == nullptr) {
++      self->frame_callback = wl_surface_frame(surface);
++      wl_callback_add_listener(self->frame_callback, &kFrameListener, self);
++    }
++    serial = ++self->frame_serial;
++    if (self->presentation != nullptr && self->trace != nullptr &&
++        self->feedbacks != nullptr) {
++      struct wp_presentation_feedback* feedback =
++          wp_presentation_feedback(self->presentation, surface);
++      (*self->feedbacks)[feedback] = serial;
++      wp_presentation_feedback_add_listener(feedback, &kFeedbackListener, self);
++    }
++  }
++  g_mutex_unlock(&self->wayland_mutex);
++
++  const gint64 swap_start_us = g_get_monotonic_time();
+   eglSwapBuffers(egl_display, self->egl_surface);
++  const gint64 swap_end_us = g_get_monotonic_time();
+   self->buffer_width = self->window_width;
+   self->buffer_height = self->window_height;
+ 
++  // Ensure the engine's context waits for our texture read to finish before
++  // reusing the backing store on the next frame (GPU-side wait, no CPU stall).
++  g_autoptr(FlGLFence) read_done_fence = nullptr;
++  if (texture_id != 0) {
++    if (fl_opengl_manager_can_fence(self->opengl_manager)) {
++      read_done_fence = fl_gl_fence_new(self->opengl_manager);
++    } else {
++      glFinish();
++    }
++  }
++
++  if (self->wl_display != nullptr) {
++    wl_display_flush(self->wl_display);
++  }
++
+   // Restore the engine's rendering context so the raster thread can continue
+   // rendering after this present.
+   fl_opengl_manager_make_current(self->opengl_manager);
++  if (read_done_fence != nullptr) {
++    fl_gl_fence_wait(read_done_fence);
++  }
++
++  g_mutex_lock(&self->wayland_mutex);
++  if (self->trace != nullptr && serial != 0) {
++    fprintf(self->trace, "submit,%llu,%lld,%lld,%lld,%lld,%lld\n",
++            static_cast<unsigned long long>(serial),
++            static_cast<long long>(entered_us),
++            static_cast<long long>(entered_us),
++            static_cast<long long>(swap_start_us),
++            static_cast<long long>(swap_end_us),
++            static_cast<long long>(g_get_monotonic_time()));
++  }
++  g_mutex_unlock(&self->wayland_mutex);
+ }
+--- a/engine/src/flutter/shell/platform/linux/fl_subsurface_egl.h
++++ b/engine/src/flutter/shell/platform/linux/fl_subsurface_egl.h
+@@ -11,6 +11,10 @@
+ #include "flutter/shell/platform/linux/fl_gl_fence.h"
+ #include "flutter/shell/platform/linux/fl_opengl_manager.h"
+ #include "flutter/shell/platform/linux/fl_subsurface.h"
++#include "flutter/shell/platform/linux/public/flutter_linux/fl_engine.h"
++
++struct wl_display;
++struct wp_presentation;
+ 
+ G_BEGIN_DECLS
+ 
+@@ -64,6 +68,21 @@
+                               size_t width,
+                               size_t height);
+ 
++void fl_subsurface_egl_set_engine_hooks(FlSubsurfaceEGL* egl,
++                                        FlEngine* engine,
++                                        struct wl_display* wl_display,
++                                        struct wp_presentation* presentation,
++                                        gboolean direct_mode);
++
++void fl_subsurface_egl_set_scale_info(FlSubsurfaceEGL* egl,
++                                      size_t width,
++                                      size_t height,
++                                      gint logical_width,
++                                      gint logical_height,
++                                      gdouble fractional_scale,
++                                      gboolean use_viewport,
++                                      gint buffer_scale);
++
+ /**
+  * fl_subsurface_egl_present:
+  * @egl: an #FlSubsurfaceEGL.
+--- a/engine/src/flutter/shell/platform/linux/fl_touch_manager.cc
++++ b/engine/src/flutter/shell/platform/linux/fl_touch_manager.cc
+@@ -160,7 +160,7 @@
+ 
+ void fl_touch_manager_handle_touch_event(FlTouchManager* self,
+                                          GdkEventTouch* touch_event,
+-                                         gint scale_factor) {
++                                         gdouble scale_factor) {
+   g_return_if_fail(FL_IS_TOUCH_MANAGER(self));
+ 
+   g_autoptr(FlEngine) engine = FL_ENGINE(g_weak_ref_get(&self->engine));
+--- a/engine/src/flutter/shell/platform/linux/fl_touch_manager.h
++++ b/engine/src/flutter/shell/platform/linux/fl_touch_manager.h
+@@ -37,7 +37,7 @@
+  */
+ void fl_touch_manager_handle_touch_event(FlTouchManager* manager,
+                                          GdkEventTouch* event,
+-                                         gint scale_factor);
++                                         gdouble scale_factor);
+ 
+ /**
+  * fl_touch_manager_cancel_input:
+--- a/engine/src/flutter/shell/platform/linux/fl_view.cc
++++ b/engine/src/flutter/shell/platform/linux/fl_view.cc
+@@ -8,6 +8,7 @@
+ #include <gdk/gdkwayland.h>
+ #include <gtk/gtk-a11y.h>
+ 
++#include <cmath>
+ #include <cstring>
+ 
+ #include "flutter/common/constants.h"
+@@ -177,6 +178,13 @@
+   cursor_changed_cb(self);
+ }
+ 
++static gdouble get_scale_factor(FlView* self) {
++  if (self->renderer != nullptr) {
++    return fl_view_renderer_get_scale_factor(self->renderer);
++  }
++  return static_cast<gdouble>(gtk_widget_get_scale_factor(GTK_WIDGET(self)));
++}
++
+ // Updates the engine with the current window metrics.
+ static void handle_geometry_changed(FlView* self) {
+   // No updates required when size controlled by Flutter.
+@@ -186,7 +194,7 @@
+ 
+   GtkAllocation allocation;
+   gtk_widget_get_allocation(GTK_WIDGET(self), &allocation);
+-  gint scale_factor = gtk_widget_get_scale_factor(GTK_WIDGET(self));
++  gdouble scale_factor = get_scale_factor(self);
+ 
+   // Note we can't detect if a window is moved between monitors - this
+   // information is provided by Wayland but GTK only notifies us if the scale
+@@ -209,13 +217,13 @@
+     display_id = fl_display_monitor_get_display_id(
+         fl_engine_get_display_monitor(self->engine), monitor);
+   }
+-  size_t width = allocation.width, height = allocation.height;
+-  size_t min_width = width, min_height = height;
+-  size_t max_width = width, max_height = height;
++  size_t phys_width = static_cast<size_t>(
++      MAX(1L, std::lround(allocation.width * scale_factor)));
++  size_t phys_height = static_cast<size_t>(
++      MAX(1L, std::lround(allocation.height * scale_factor)));
+   fl_engine_send_window_metrics_event(
+-      self->engine, display_id, self->view_id, min_width * scale_factor,
+-      min_height * scale_factor, max_width * scale_factor,
+-      max_height * scale_factor, scale_factor);
++      self->engine, display_id, self->view_id, phys_width, phys_height,
++      phys_width, phys_height, scale_factor);
+ }
+ 
+ static void view_added_cb(GObject* object,
+@@ -298,7 +306,7 @@
+ }
+ 
+ static void set_scrolling_position(FlView* self, gdouble x, gdouble y) {
+-  gint scale_factor = gtk_widget_get_scale_factor(GTK_WIDGET(self));
++  gdouble scale_factor = get_scale_factor(self);
+   fl_scrolling_manager_set_last_mouse_position(
+       self->scrolling_manager, x * scale_factor, y * scale_factor);
+ }
+@@ -324,7 +332,7 @@
+   set_scrolling_position(self, x, y);
+   sync_modifier_if_needed(self, event);
+ 
+-  gint scale_factor = gtk_widget_get_scale_factor(GTK_WIDGET(self));
++  gdouble scale_factor = get_scale_factor(self);
+   gdouble rotation = 0.0;
+   gdouble pressure = 0.0;
+   get_pointer_device_state(event, &rotation, &pressure);
+@@ -348,7 +356,7 @@
+   set_scrolling_position(self, x, y);
+   sync_modifier_if_needed(self, event);
+ 
+-  gint scale_factor = gtk_widget_get_scale_factor(GTK_WIDGET(self));
++  gdouble scale_factor = get_scale_factor(self);
+   gdouble rotation = 0.0;
+   gdouble pressure = 0.0;
+   get_pointer_device_state(event, &rotation, &pressure);
+@@ -402,16 +410,14 @@
+   // TODO(robert-ancell): Update to use GtkEventControllerScroll when we can
+   // depend on GTK 3.24.
+ 
+-  fl_scrolling_manager_handle_scroll_event(
+-      self->scrolling_manager, event,
+-      gtk_widget_get_scale_factor(GTK_WIDGET(self)));
++  fl_scrolling_manager_handle_scroll_event(self->scrolling_manager, event,
++                                           get_scale_factor(self));
+   return TRUE;
+ }
+ 
+ static gboolean touch_event_cb(FlView* self, GdkEventTouch* event) {
+-  fl_touch_manager_handle_touch_event(
+-      self->touch_manager, event,
+-      gtk_widget_get_scale_factor(GTK_WIDGET(self)));
++  fl_touch_manager_handle_touch_event(self->touch_manager, event,
++                                      get_scale_factor(self));
+   return TRUE;
+ }
+ 
+@@ -430,7 +436,7 @@
+ 
+   gdouble x = 0.0, y = 0.0;
+   gdk_event_get_coords(event, &x, &y);
+-  gint scale_factor = gtk_widget_get_scale_factor(GTK_WIDGET(self));
++  gdouble scale_factor = get_scale_factor(self);
+   gdouble rotation = 0.0;
+   gdouble pressure = 0.0;
+   get_pointer_device_state(event, &rotation, &pressure);
+@@ -448,7 +454,7 @@
+   gdk_event_get_coords(event, &x, &y);
+   GdkModifierType state = static_cast<GdkModifierType>(0);
+   gdk_event_get_state(event, &state);
+-  gint scale_factor = gtk_widget_get_scale_factor(GTK_WIDGET(self));
++  gdouble scale_factor = get_scale_factor(self);
+   gdouble rotation = 0.0;
+   gdouble pressure = 0.0;
+   get_pointer_device_state(event, &rotation, &pressure);
+@@ -468,7 +474,7 @@
+   GdkEvent* event = reinterpret_cast<GdkEvent*>(crossing_event);
+   gdouble x = 0.0, y = 0.0;
+   gdk_event_get_coords(event, &x, &y);
+-  gint scale_factor = gtk_widget_get_scale_factor(GTK_WIDGET(self));
++  gdouble scale_factor = get_scale_factor(self);
+   gdouble rotation = 0.0;
+   gdouble pressure = 0.0;
+   get_pointer_device_state(event, &rotation, &pressure);
+@@ -718,6 +724,8 @@
+                            self);
+   g_signal_connect_swapped(self->renderer, "size-allocate",
+                            G_CALLBACK(size_allocate_cb), self);
++  g_signal_connect_swapped(self->renderer, "scale-changed",
++                           G_CALLBACK(size_allocate_cb), self);
+   g_signal_connect_swapped(self->renderer, "first-frame",
+                            G_CALLBACK(first_frame_cb), self);
+ }
+--- a/engine/src/flutter/shell/platform/linux/fl_view_renderer.cc
++++ b/engine/src/flutter/shell/platform/linux/fl_view_renderer.cc
+@@ -4,6 +4,8 @@
+ 
+ #include "flutter/shell/platform/linux/fl_view_renderer.h"
+ 
++#include <cmath>
++
+ typedef struct {
+   // Background color drawn behind the Flutter frame.
+   GdkRGBA* background_color;
+@@ -12,7 +14,7 @@
+   gboolean have_first_frame;
+ } FlViewRendererPrivate;
+ 
+-enum { SIGNAL_FIRST_FRAME, LAST_SIGNAL };
++enum { SIGNAL_FIRST_FRAME, SIGNAL_SCALE_CHANGED, LAST_SIGNAL };
+ 
+ static guint fl_view_renderer_signals[LAST_SIGNAL];
+ 
+@@ -28,6 +30,10 @@
+   g_assert_not_reached();
+ }
+ 
++static gdouble fl_view_renderer_get_scale_factor_default(FlViewRenderer* self) {
++  return static_cast<gdouble>(gtk_widget_get_scale_factor(GTK_WIDGET(self)));
++}
++
+ static void fl_view_renderer_dispose(GObject* object) {
+   FlViewRendererPrivate* priv = static_cast<FlViewRendererPrivate*>(
+       fl_view_renderer_get_instance_private(FL_VIEW_RENDERER(object)));
+@@ -41,10 +47,14 @@
+   G_OBJECT_CLASS(klass)->dispose = fl_view_renderer_dispose;
+ 
+   klass->present_layers = fl_view_renderer_present_layers_default;
++  klass->get_scale_factor = fl_view_renderer_get_scale_factor_default;
+ 
+   fl_view_renderer_signals[SIGNAL_FIRST_FRAME] =
+       g_signal_new("first-frame", fl_view_renderer_get_type(),
+                    G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
++  fl_view_renderer_signals[SIGNAL_SCALE_CHANGED] =
++      g_signal_new("scale-changed", fl_view_renderer_get_type(),
++                   G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
+ }
+ 
+ static void fl_view_renderer_init(FlViewRenderer* self) {
+@@ -116,16 +126,20 @@
+   GtkWidget* widget = GTK_WIDGET(self);
+   GtkAllocation allocation;
+   gtk_widget_get_allocation(widget, &allocation);
+-  gint scale_factor = gtk_widget_get_scale_factor(widget);
+-  size_t width = allocation.width * scale_factor;
+-  size_t height = allocation.height * scale_factor;
++  gdouble scale_factor = fl_view_renderer_get_scale_factor(self);
++  size_t width =
++      static_cast<size_t>(MAX(1L, std::lround(allocation.width * scale_factor)));
++  size_t height = static_cast<size_t>(
++      MAX(1L, std::lround(allocation.height * scale_factor)));
+   gboolean frame_size_matches = width == frame_width && height == frame_height;
+   if (frame_size_matches) {
+     return FALSE;
+   }
+ 
+-  gtk_widget_set_size_request(widget, frame_width / scale_factor,
+-                              frame_height / scale_factor);
++  gtk_widget_set_size_request(
++      widget,
++      static_cast<gint>(MAX(1L, std::lround(frame_width / scale_factor))),
++      static_cast<gint>(MAX(1L, std::lround(frame_height / scale_factor))));
+   GtkWidget* toplevel = gtk_widget_get_toplevel(widget);
+   if (GTK_IS_WINDOW(toplevel)) {
+     // Resize to smallest size, so that the window will shrink to fit the new
+@@ -134,3 +148,14 @@
+   }
+   return TRUE;
+ }
++
++gdouble fl_view_renderer_get_scale_factor(FlViewRenderer* self) {
++  g_return_val_if_fail(FL_IS_VIEW_RENDERER(self), 1.0);
++  FlViewRendererClass* klass = FL_VIEW_RENDERER_GET_CLASS(self);
++  return klass->get_scale_factor(self);
++}
++
++void fl_view_renderer_notify_scale_changed(FlViewRenderer* self) {
++  g_return_if_fail(FL_IS_VIEW_RENDERER(self));
++  g_signal_emit(self, fl_view_renderer_signals[SIGNAL_SCALE_CHANGED], 0);
++}
+--- a/engine/src/flutter/shell/platform/linux/fl_view_renderer.h
++++ b/engine/src/flutter/shell/platform/linux/fl_view_renderer.h
+@@ -39,6 +39,8 @@
+   void (*present_layers)(FlViewRenderer* renderer,
+                          const FlutterLayer** layers,
+                          size_t layers_count);
++
++  gdouble (*get_scale_factor)(FlViewRenderer* renderer);
+ };
+ 
+ /**
+@@ -100,6 +102,10 @@
+                                           size_t frame_width,
+                                           size_t frame_height);
+ 
++gdouble fl_view_renderer_get_scale_factor(FlViewRenderer* renderer);
++
++void fl_view_renderer_notify_scale_changed(FlViewRenderer* renderer);
++
+ G_END_DECLS
+ 
+ #endif  // FLUTTER_SHELL_PLATFORM_LINUX_FL_VIEW_RENDERER_H_
+--- a/engine/src/flutter/shell/platform/linux/fl_view_renderer_subsurface.cc
++++ b/engine/src/flutter/shell/platform/linux/fl_view_renderer_subsurface.cc
+@@ -7,6 +7,9 @@
+ #include <epoxy/gl.h>
+ #include <gdk/gdkwayland.h>
+ 
++#include <cmath>
++
++#include "aetheria_vsync.h"
+ #include "flutter/shell/platform/linux/fl_compositor_opengl.h"
+ #include "flutter/shell/platform/linux/fl_engine_private.h"
+ #include "flutter/shell/platform/linux/fl_framebuffer.h"
+@@ -45,32 +48,91 @@
+   // Combines layers into a frame.
+   FlCompositorOpenGL* compositor;
+ 
+-  // Framebuffer the current frame is composited into.
++  // Framebuffer the current frame is composited into (only used when
++  // compositing multiple layers or offscreen MSAA renderbuffers).
+   FlFramebuffer* framebuffer;
+ 
++  // Dimensions of the last presented frame (tracked independently so single-
++  // layer frames do not need to allocate an intermediate framebuffer).
++  size_t frame_width;
++  size_t frame_height;
++
+   // Task runner used to wait for frames while resizing.
+   FlTaskRunner* task_runner;
+ 
+   // Ensure Flutter and GTK can access the frame stored in the compositor.
+   GMutex frame_mutex;
++
++  // Whether direct desync Wayland submission and frame-callback pacing are active.
++  gboolean direct_mode;
++
++  // Toplevel map signal handler connected for hide/show recreation.
++  gulong parent_map_handler_id;
++  GtkWidget* parent_toplevel;
+ };
+ 
+ G_DEFINE_TYPE(FlViewRendererSubsurface,
+               fl_view_renderer_subsurface,
+               fl_view_renderer_get_type())
+ 
++static gboolean is_direct_wayland_enabled(FlViewRendererSubsurface* self) {
++  return !self->sized_to_content &&
++         g_strcmp0(g_getenv("AETHERIA_DIRECT_WAYLAND"), "0") != 0;
++}
++
++static gdouble fl_view_renderer_subsurface_get_scale_factor(
++    FlViewRenderer* renderer) {
++  FlViewRendererSubsurface* self = FL_VIEW_RENDERER_SUBSURFACE(renderer);
++  if (self->subsurface != nullptr) {
++    gdouble fractional = fl_subsurface_get_fractional_scale(self->subsurface);
++    if (fractional > 0.0) {
++      return fractional;
++    }
++  }
++  return static_cast<gdouble>(gtk_widget_get_scale_factor(GTK_WIDGET(self)));
++}
++
++static void sync_egl_scale_locked(FlViewRendererSubsurface* self) {
++  if (self->egl == nullptr) {
++    return;
++  }
++  GtkWidget* widget = GTK_WIDGET(self);
++  GtkAllocation allocation;
++  gtk_widget_get_allocation(widget, &allocation);
++  gint logical_w = MAX(1, allocation.width);
++  gint logical_h = MAX(1, allocation.height);
++  gint int_scale = MAX(1, gtk_widget_get_scale_factor(widget));
++  gdouble fractional = self->subsurface != nullptr
++                           ? fl_subsurface_get_fractional_scale(self->subsurface)
++                           : 0.0;
++  gboolean use_viewport = fractional > 0.0;
++  gdouble scale = use_viewport ? fractional : static_cast<gdouble>(int_scale);
++  size_t phys_w = static_cast<size_t>(MAX(1L, std::lround(logical_w * scale)));
++  size_t phys_h = static_cast<size_t>(MAX(1L, std::lround(logical_h * scale)));
++  fl_subsurface_egl_set_scale_info(self->egl, phys_w, phys_h, logical_w,
++                                   logical_h, scale, use_viewport, int_scale);
++}
++
++static void subsurface_scale_changed_cb(FlSubsurface* subsurface,
++                                        gpointer user_data) {
++  FlViewRendererSubsurface* self = FL_VIEW_RENDERER_SUBSURFACE(user_data);
++  gdouble fractional = fl_subsurface_get_fractional_scale(subsurface);
++  g_mutex_lock(&self->frame_mutex);
++  sync_egl_scale_locked(self);
++  g_mutex_unlock(&self->frame_mutex);
++  g_message(
++      "Aetheria renderer: Wayland fractional scale updated to %.4f (direct=%d)",
++      fractional, self->direct_mode ? 1 : 0);
++  fl_view_renderer_notify_scale_changed(FL_VIEW_RENDERER(self));
++}
++
+ // Get the size of the current frame in pixels. The size is zero if there is no
+ // frame yet. Must be called with the frame mutex held.
+ static void get_frame_size(FlViewRendererSubsurface* self,
+                            size_t* width,
+                            size_t* height) {
+-  if (self->framebuffer != nullptr) {
+-    *width = fl_framebuffer_get_width(self->framebuffer);
+-    *height = fl_framebuffer_get_height(self->framebuffer);
+-  } else {
+-    *width = 0;
+-    *height = 0;
+-  }
++  *width = self->frame_width;
++  *height = self->frame_height;
+ }
+ 
+ // Wait for a frame matching the given size to be presented, or until the
+@@ -144,21 +206,41 @@
+     return;
+   }
+ 
+-  self->subsurface =
+-      fl_wayland_display_create_subsurface(wayland_display, parent_surface);
++  self->direct_mode = is_direct_wayland_enabled(self);
++  self->subsurface = fl_wayland_display_create_subsurface_full(
++      wayland_display, parent_surface, self->direct_mode);
++  g_signal_connect_object(self->subsurface, "scale-changed",
++                          G_CALLBACK(subsurface_scale_changed_cb), self,
++                          static_cast<GConnectFlags>(0));
+   update_subsurface_position(self);
+ 
+   GtkAllocation allocation;
+   gtk_widget_get_allocation(widget, &allocation);
+   self->egl = fl_subsurface_egl_new(
+       fl_engine_get_opengl_manager(self->engine), self->subsurface,
+-      allocation.width, allocation.height, gtk_widget_get_scale_factor(widget));
++      MAX(1, allocation.width), MAX(1, allocation.height),
++      gtk_widget_get_scale_factor(widget));
++  fl_subsurface_egl_set_engine_hooks(
++      self->egl, self->engine,
++      fl_wayland_display_get_wl_display(wayland_display),
++      fl_wayland_display_get_presentation(wayland_display), self->direct_mode);
++  sync_egl_scale_locked(self);
++  if (self->direct_mode) {
++    g_message(
++        "Aetheria renderer: Wayland subsurface EGL (direct=1, "
++        "presentation=%s)",
++        fl_wayland_display_get_presentation(wayland_display) ? "available"
++                                                             : "unavailable");
++  }
++}
++
++static void drop_subsurface_locked(FlViewRendererSubsurface* self) {
++  g_clear_object(&self->egl);
++  g_clear_object(&self->subsurface);
++  self->parent_surface = nullptr;
++  self->parent_surface_id = 0;
+ }
+ 
+-// GTK destroys the window's Wayland surface when it is hidden and makes a new
+-// one if it is shown again. The subsurface belongs to the old surface, so it is
+-// never shown again and using it is a protocol error. Detect this and move to
+-// the new surface.
+ static void update_parent_surface(FlViewRendererSubsurface* self) {
+   // Nothing to do before the widget is realized or after it is unrealized.
+   if (self->compositor == nullptr) {
+@@ -176,24 +258,36 @@
+   // in which case there is nothing to replace it with until the window is
+   // shown again.
+   g_mutex_lock(&self->frame_mutex);
+-  g_clear_object(&self->egl);
+-  g_clear_object(&self->subsurface);
++  drop_subsurface_locked(self);
+   self->parent_surface = parent_surface;
+   self->parent_surface_id = parent_surface_id;
+   if (parent_surface != nullptr) {
+     create_subsurface(self, parent_surface);
+   }
++  const gboolean has_direct = self->egl != nullptr && self->direct_mode;
+   g_mutex_unlock(&self->frame_mutex);
+ 
++  aetheria_engine_direct(self->engine, has_direct);
++
+   if (parent_surface == nullptr) {
+     return;
+   }
+ 
++  if (has_direct) {
++    // Bootstrap an empty surface; subsequent frames follow wl_surface.frame.
++    aetheria_engine_frame(self->engine);
++  }
++
+   // The new subsurface has nothing in it, so ask for the frame to be rendered
+   // again.
+   fl_engine_schedule_frame(self->engine);
+ }
+ 
++static void parent_map_cb(GtkWidget* toplevel,
++                          FlViewRendererSubsurface* self) {
++  update_parent_surface(self);
++}
++
+ // Redraw the view from the GTK thread.
+ static gboolean redraw_cb(gpointer user_data) {
+   g_autoptr(FlViewRendererSubsurface) self =
+@@ -216,7 +310,9 @@
+     }
+   }
+ 
+-  gtk_widget_queue_draw(GTK_WIDGET(self));
++  if (!self->direct_mode) {
++    gtk_widget_queue_draw(GTK_WIDGET(self));
++  }
  
    return G_SOURCE_REMOVE;
  }
+@@ -240,6 +336,13 @@
+   self->compositor =
+       fl_compositor_opengl_new(fl_engine_get_opengl_manager(self->engine));
  
-+// A child maps before GTK has recreated its toplevel Wayland surface.
-+// Wait for the toplevel's completed map as well as the renderer's own map.
-+static void aetheria_parent_map(GtkWidget*, FlViewRenderer* self) {
-+  if (self->direct) self->direct->Map();
-+}
-+
- static void setup_opengl(FlViewRenderer* self) {
-+  if (!self->sized_to_content && GDK_IS_WAYLAND_DISPLAY(gtk_widget_get_display(GTK_WIDGET(self))) &&
-+      g_strcmp0(g_getenv("AETHERIA_DIRECT_WAYLAND"), "0") != 0) {
-+    self->direct = new AetheriaWayland(GTK_WIDGET(self), self->engine);
-+    if (self->direct->Setup()) {
-+      g_signal_connect_object(gtk_widget_get_toplevel(GTK_WIDGET(self)), "map",
-+          G_CALLBACK(aetheria_parent_map), self, G_CONNECT_AFTER);
-+      self->compositor = FL_COMPOSITOR(fl_compositor_opengl_new(
-+          fl_engine_get_task_runner(self->engine), fl_engine_get_opengl_manager(self->engine), TRUE));
-+      return;
-+    }
-+    delete self->direct; self->direct = nullptr;
++  GtkWidget* toplevel = gtk_widget_get_toplevel(widget);
++  if (GTK_IS_WINDOW(toplevel) && self->parent_toplevel != toplevel) {
++    self->parent_toplevel = toplevel;
++    self->parent_map_handler_id = g_signal_connect_object(
++        toplevel, "map", G_CALLBACK(parent_map_cb), self, G_CONNECT_AFTER);
 +  }
 +
-   g_autoptr(GError) error = nullptr;
+   // Create a subsurface on the toplevel's surface. This asks for a frame, as
+   // any rendered before this point were dropped.
+   update_parent_surface(self);
+@@ -249,19 +352,13 @@
+ static void fl_view_renderer_subsurface_unrealize(GtkWidget* widget) {
+   FlViewRendererSubsurface* self = FL_VIEW_RENDERER_SUBSURFACE(widget);
  
-   self->render_context = gdk_window_create_gl_context(
-@@ -146,6 +169,7 @@
-   FlViewRenderer* self = FL_VIEW_RENDERER(widget);
+-  // Hold frame_mutex while releasing these objects so the raster thread cannot
+-  // be using them in present_layers concurrently. The unref may run their
+-  // destructors, so the calling code (here) owns the locking rather than the
+-  // objects themselves.
++  if (self->engine != nullptr) {
++    aetheria_engine_direct(self->engine, FALSE);
++  }
++
+   g_mutex_lock(&self->frame_mutex);
+   g_clear_object(&self->compositor);
+-
+-  // The EGL context and surface are released here; the EGL display is owned by
+-  // the engine and is left untouched by FlSubsurfaceEGL.
+-  g_clear_object(&self->egl);
+-  g_clear_object(&self->subsurface);
+-  self->parent_surface = nullptr;
+-  self->parent_surface_id = 0;
++  drop_subsurface_locked(self);
+   g_mutex_unlock(&self->frame_mutex);
  
-   paint_background(self, cr);
-+  if (self->direct) return TRUE;
- 
-   // The compositor is created when the widget is realized; if it is not yet
-   // available there is nothing to render beyond the background.
-@@ -171,6 +195,7 @@
- static void fl_view_renderer_dispose(GObject* object) {
-   FlViewRenderer* self = FL_VIEW_RENDERER(object);
- 
-+  if (self->direct) self->direct->Destroy();
-   g_clear_object(&self->render_context);
-   g_clear_object(&self->engine);
-   g_clear_pointer(&self->background_color, gdk_rgba_free);
-@@ -181,6 +206,8 @@
- static void fl_view_renderer_finalize(GObject* object) {
-   FlViewRenderer* self = FL_VIEW_RENDERER(object);
- 
-+  delete self->direct;
-+  self->direct = nullptr;
-   // The compositor is released here rather than in dispose() so it outlives a
-   // forced dispose (e.g. gtk_widget_destroy()) and is only freed once the last
-   // reference is dropped. This keeps it alive for the raster thread, which
-@@ -191,11 +218,42 @@
-   G_OBJECT_CLASS(fl_view_renderer_parent_class)->finalize(object);
+   GTK_WIDGET_CLASS(fl_view_renderer_subsurface_parent_class)->unrealize(widget);
+@@ -274,6 +371,20 @@
+   update_parent_surface(FL_VIEW_RENDERER_SUBSURFACE(widget));
  }
  
-+static void aetheria_map(GtkWidget* widget) {
-+  GTK_WIDGET_CLASS(fl_view_renderer_parent_class)->map(widget);
-+  auto* self = FL_VIEW_RENDERER(widget);
-+  if (self->direct) self->direct->Map();
-+}
-+static void aetheria_unmap(GtkWidget* widget) {
-+  auto* self = FL_VIEW_RENDERER(widget);
-+  if (self->direct) {
-+    self->direct->Destroy();
-+    aetheria_engine_direct(self->engine, false);
++// Implements GtkWidget::unmap.
++static void fl_view_renderer_subsurface_unmap(GtkWidget* widget) {
++  FlViewRendererSubsurface* self = FL_VIEW_RENDERER_SUBSURFACE(widget);
++
++  if (self->engine != nullptr) {
++    aetheria_engine_direct(self->engine, FALSE);
 +  }
-+  GTK_WIDGET_CLASS(fl_view_renderer_parent_class)->unmap(widget);
-+}
-+static void aetheria_unrealize(GtkWidget* widget) {
-+  auto* self = FL_VIEW_RENDERER(widget);
-+  if (self->direct) {
-+    self->direct->Destroy();
-+    aetheria_engine_direct(self->engine, false);
-+  }
-+  GTK_WIDGET_CLASS(fl_view_renderer_parent_class)->unrealize(widget);
-+}
-+static void aetheria_size_allocate(GtkWidget* widget, GtkAllocation* allocation) {
-+  GTK_WIDGET_CLASS(fl_view_renderer_parent_class)->size_allocate(widget, allocation);
-+  auto* self = FL_VIEW_RENDERER(widget);
-+  if (self->direct) self->direct->Resize();
++  g_mutex_lock(&self->frame_mutex);
++  drop_subsurface_locked(self);
++  g_mutex_unlock(&self->frame_mutex);
++
++  GTK_WIDGET_CLASS(fl_view_renderer_subsurface_parent_class)->unmap(widget);
 +}
 +
- static void fl_view_renderer_class_init(FlViewRendererClass* klass) {
-   G_OBJECT_CLASS(klass)->dispose = fl_view_renderer_dispose;
-   G_OBJECT_CLASS(klass)->finalize = fl_view_renderer_finalize;
+ // Implements GtkWidget::draw.
+ static gboolean fl_view_renderer_subsurface_draw(GtkWidget* widget,
+                                                  cairo_t* cr) {
+@@ -302,11 +413,7 @@
+   // Hold frame_mutex while resizing, as the raster thread uses the sizes this
+   // updates when it presents a frame.
+   g_mutex_lock(&self->frame_mutex);
+-  if (self->egl != nullptr) {
+-    gint scale_factor = gtk_widget_get_scale_factor(widget);
+-    fl_subsurface_egl_resize(self->egl, allocation->width * scale_factor,
+-                             allocation->height * scale_factor);
+-  }
++  sync_egl_scale_locked(self);
+   g_mutex_unlock(&self->frame_mutex);
+ }
  
-   GtkWidgetClass* widget_class = GTK_WIDGET_CLASS(klass);
-+  widget_class->map = aetheria_map;
-+  widget_class->unmap = aetheria_unmap;
-+  widget_class->unrealize = aetheria_unrealize;
-+  widget_class->size_allocate = aetheria_size_allocate;
-   widget_class->realize = fl_view_renderer_realize;
-   widget_class->draw = fl_view_renderer_draw;
+@@ -322,15 +429,20 @@
+     gpointer user_data) {
+   FlViewRendererSubsurface* self = FL_VIEW_RENDERER_SUBSURFACE(widget);
  
-@@ -242,6 +300,11 @@
+-  // Nothing to synchronize against before the subsurface exists, or when
+-  // Flutter controls the size (the frame drives the window size in that case).
+-  if (self->egl == nullptr || self->sized_to_content) {
++  // Nothing to synchronize against before the subsurface exists, when
++  // Flutter controls the size (the frame drives the window size in that case),
++  // or in direct desync mode where the subsurface presents independently and
++  // blocking the GTK main thread would stall Wayland vsync delivery.
++  if (self->egl == nullptr || self->sized_to_content || self->direct_mode) {
+     return;
    }
  
-   fl_compositor_present_layers(self->compositor, layers, layers_count);
-+  if (self->direct) {
-+    self->direct->Present(layers_count ? aetheria_compositor_framebuffer(FL_COMPOSITOR_OPENGL(self->compositor)) : 0,
-+                          layers_count ? layers[0]->size.width : 0,
-+                          layers_count ? layers[0]->size.height : 0);
+-  gint scale_factor = gtk_widget_get_scale_factor(widget);
+-  size_t width = allocation->width * scale_factor;
+-  size_t height = allocation->height * scale_factor;
++  gdouble scale_factor =
++      fl_view_renderer_get_scale_factor(FL_VIEW_RENDERER(self));
++  size_t width = static_cast<size_t>(
++      MAX(1L, std::lround(allocation->width * scale_factor)));
++  size_t height = static_cast<size_t>(
++      MAX(1L, std::lround(allocation->height * scale_factor)));
+ 
+   g_mutex_lock(&self->frame_mutex);
+   wait_for_frame(self, width, height);
+@@ -358,66 +470,78 @@
+   if (layers_count > 0) {
+     width = layers[0]->size.width;
+     height = layers[0]->size.height;
+-  } else if (self->framebuffer != nullptr) {
+-    // A frame with nothing to rasterize, e.g. everything painted was fully
+-    // transparent, has no layers and so no size. Keep the current size and
+-    // present the frame, which is cleared when the layers are composited
+-    // below, so the previous frame is not left on screen.
+-    width = fl_framebuffer_get_width(self->framebuffer);
+-    height = fl_framebuffer_get_height(self->framebuffer);
++  } else if (self->frame_width > 0 && self->frame_height > 0) {
++    width = self->frame_width;
++    height = self->frame_height;
+   } else {
+-    // Nothing has been rendered yet, so there is nothing to clear. The GTK
+-    // thread is still notified below so the window is shown.
+     width = 0;
+     height = 0;
+   }
+ 
++  GLuint present_texture = 0;
+   if (width > 0 && height > 0) {
+-    // Recreate the framebuffer if the frame size has changed. The subsurface's
+-    // EGL context shares resources with the engine, so the frame texture is
+-    // read directly and doesn't need to be shareable or copied via CPU memory.
+-    if (self->framebuffer == nullptr ||
+-        fl_framebuffer_get_width(self->framebuffer) != width ||
+-        fl_framebuffer_get_height(self->framebuffer) != height) {
+-      GLint general_format =
+-          fl_compositor_opengl_get_frame_format(layers, layers_count);
++    self->frame_width = width;
++    self->frame_height = height;
++
++    if (layers_count == 0) {
+       g_clear_object(&self->framebuffer);
+-      self->framebuffer =
+-          fl_framebuffer_new(general_format, width, height, FALSE);
++      present_texture = 0;
++    } else if (layers_count == 1 &&
++               layers[0]->type == kFlutterLayerContentTypeBackingStore &&
++               layers[0]->backing_store != nullptr &&
++               layers[0]->backing_store->type ==
++                   kFlutterBackingStoreTypeOpenGL &&
++               layers[0]->backing_store->open_gl.type ==
++                   kFlutterOpenGLTargetTypeFramebuffer &&
++               layers[0]->offset.x == 0 && layers[0]->offset.y == 0) {
++      FlFramebuffer* layer_fb = FL_FRAMEBUFFER(
++          layers[0]->backing_store->open_gl.framebuffer.user_data);
++      GLuint layer_texture =
++          layer_fb != nullptr ? fl_framebuffer_get_texture_id(layer_fb) : 0;
++      if (layer_texture != 0 && fl_framebuffer_get_width(layer_fb) == width &&
++          fl_framebuffer_get_height(layer_fb) == height) {
++        g_clear_object(&self->framebuffer);
++        glFlush();
++        present_texture = layer_texture;
++      }
+     }
+ 
+-    // Bind the target framebuffer so the compositor draws into it.
+-    GLint saved_draw_framebuffer_binding;
+-    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &saved_draw_framebuffer_binding);
+-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER,
+-                      fl_framebuffer_get_id(self->framebuffer));
+-
+-    fl_compositor_opengl_composite_layers(self->compositor, layers,
+-                                          layers_count);
+-
+-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, saved_draw_framebuffer_binding);
+-  }
+-
+-  // The frame is presented below using the subsurface's own OpenGL context.
+-  // Sharing a texture between contexts requires the rendering to have completed
+-  // before the other context uses it - making a context current only flushes
+-  // the previous one, which guarantees the commands have been submitted, not
+-  // that they have finished.
++    if (layers_count > 0 && present_texture == 0) {
++      if (self->framebuffer == nullptr ||
++          fl_framebuffer_get_width(self->framebuffer) != width ||
++          fl_framebuffer_get_height(self->framebuffer) != height) {
++        GLint general_format =
++            fl_compositor_opengl_get_frame_format(layers, layers_count);
++        g_clear_object(&self->framebuffer);
++        self->framebuffer =
++            fl_framebuffer_new(general_format, width, height, FALSE);
++      }
++
++      GLint saved_draw_framebuffer_binding;
++      glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,
++                    &saved_draw_framebuffer_binding);
++      glBindFramebuffer(GL_DRAW_FRAMEBUFFER,
++                        fl_framebuffer_get_id(self->framebuffer));
++
++      fl_compositor_opengl_composite_layers(self->compositor, layers,
++                                            layers_count);
++
++      glBindFramebuffer(GL_DRAW_FRAMEBUFFER, saved_draw_framebuffer_binding);
++      present_texture = fl_framebuffer_get_texture_id(self->framebuffer);
++    }
 +  }
++
+   g_autoptr(FlGLFence) fence = nullptr;
+-  if (fl_compositor_opengl_can_fence(self->compositor)) {
+-    fence = fl_gl_fence_new(fl_engine_get_opengl_manager(self->engine));
+-  } else {
+-    // No fences on this driver, wait for the rendering here instead.
+-    glFinish();
++  if (width > 0 && height > 0 && present_texture != 0) {
++    if (fl_compositor_opengl_can_fence(self->compositor)) {
++      fence = fl_gl_fence_new(fl_engine_get_opengl_manager(self->engine));
++    } else {
++      glFinish();
++    }
+   }
  
-   // Perform the redraw in the GTK thread.
-   g_idle_add(redraw_cb, g_object_ref(self));
---- a/engine/src/flutter/shell/platform/linux/BUILD.gn
-+++ b/engine/src/flutter/shell/platform/linux/BUILD.gn
-@@ -107,7 +107,11 @@
+-  // Present the composited frame directly to the subsurface using its own EGL
+-  // context. This reads the engine's frame texture directly, as the subsurface
+-  // context shares resources with the engine.
+   if (width > 0 && height > 0) {
+-    fl_subsurface_egl_present(self->egl,
+-                              fl_framebuffer_get_texture_id(self->framebuffer),
+-                              width, height, fence);
++    fl_subsurface_egl_present(self->egl, present_texture, width, height, fence);
+   }
  
-   public_configs = [ ":disable_warnings" ]
+   g_mutex_unlock(&self->frame_mutex);
+@@ -433,9 +557,17 @@
+ static void fl_view_renderer_subsurface_dispose(GObject* object) {
+   FlViewRendererSubsurface* self = FL_VIEW_RENDERER_SUBSURFACE(object);
  
-+  libs = [ "wayland-client", "wayland-egl" ]
-   sources = [
-+    "aetheria_vsync.cc",
-+    "aetheria_wayland.cc",
-+    "presentation-time-protocol.c",
-     "fl_accessibility_channel.cc",
-     "fl_accessibility_handler.cc",
-     "fl_accessible_node.cc",
++  if (self->engine != nullptr) {
++    aetheria_engine_direct(self->engine, FALSE);
++  }
++  g_mutex_lock(&self->frame_mutex);
++  drop_subsurface_locked(self);
++  g_mutex_unlock(&self->frame_mutex);
++
+   g_clear_object(&self->engine);
+   g_clear_object(&self->task_runner);
+-  g_mutex_clear(&self->frame_mutex);
++  self->parent_toplevel = nullptr;
++  self->parent_map_handler_id = 0;
+ 
+   G_OBJECT_CLASS(fl_view_renderer_subsurface_parent_class)->dispose(object);
+ }
+@@ -450,6 +582,7 @@
+   // presenting.
+   g_clear_object(&self->compositor);
+   g_clear_object(&self->framebuffer);
++  g_mutex_clear(&self->frame_mutex);
+ 
+   G_OBJECT_CLASS(fl_view_renderer_subsurface_parent_class)->finalize(object);
+ }
+@@ -464,11 +597,14 @@
+   widget_class->realize = fl_view_renderer_subsurface_realize;
+   widget_class->unrealize = fl_view_renderer_subsurface_unrealize;
+   widget_class->map = fl_view_renderer_subsurface_map;
++  widget_class->unmap = fl_view_renderer_subsurface_unmap;
+   widget_class->draw = fl_view_renderer_subsurface_draw;
+   widget_class->size_allocate = fl_view_renderer_subsurface_size_allocate;
+ 
+   FlViewRendererClass* renderer_class = FL_VIEW_RENDERER_CLASS(klass);
+   renderer_class->present_layers = fl_view_renderer_subsurface_present_layers;
++  renderer_class->get_scale_factor =
++      fl_view_renderer_subsurface_get_scale_factor;
+ }
+ 
+ static void fl_view_renderer_subsurface_init(FlViewRendererSubsurface* self) {
+--- a/engine/src/flutter/shell/platform/linux/fl_wayland_display.cc
++++ b/engine/src/flutter/shell/platform/linux/fl_wayland_display.cc
+@@ -7,6 +7,10 @@
+ #include <gdk/gdkwayland.h>
+ #include <wayland-client.h>
+ 
++#include "fractional-scale-v1-client-protocol.h"
++#include "presentation-time-client-protocol.h"
++#include "viewporter-client-protocol.h"
++
+ // Key used to attach the #FlWaylandDisplay to the #GdkDisplay it was created
+ // for, so the Wayland globals are only bound once per display.
+ static const char* kWaylandDisplayKey = "fl-wayland-display";
+@@ -14,13 +18,26 @@
+ struct _FlWaylandDisplay {
+   GObject parent_instance;
+ 
++  struct wl_display* wl_display;
++
+   // Wayland globals used to create subsurfaces.
+   struct wl_compositor* compositor;
+   struct wl_subcompositor* subcompositor;
++  struct wp_viewporter* viewporter;
++  struct wp_fractional_scale_manager_v1* fractional_scale_manager;
++  struct wp_presentation* presentation;
+ };
+ 
+ G_DEFINE_TYPE(FlWaylandDisplay, fl_wayland_display, G_TYPE_OBJECT)
+ 
++static void presentation_clock_id(void* data,
++                                  struct wp_presentation* presentation,
++                                  uint32_t clk_id) {}
++
++static const struct wp_presentation_listener kPresentationListener = {
++    .clock_id = presentation_clock_id,
++};
++
+ // Wayland registry handling.
+ static void registry_global(void* data,
+                             struct wl_registry* registry,
+@@ -34,6 +51,19 @@
+   } else if (g_strcmp0(interface, wl_subcompositor_interface.name) == 0) {
+     self->subcompositor = static_cast<struct wl_subcompositor*>(
+         wl_registry_bind(registry, name, &wl_subcompositor_interface, 1));
++  } else if (g_strcmp0(interface, wp_viewporter_interface.name) == 0) {
++    self->viewporter = static_cast<struct wp_viewporter*>(
++        wl_registry_bind(registry, name, &wp_viewporter_interface, 1));
++  } else if (g_strcmp0(interface,
++                       wp_fractional_scale_manager_v1_interface.name) == 0) {
++    self->fractional_scale_manager =
++        static_cast<struct wp_fractional_scale_manager_v1*>(wl_registry_bind(
++            registry, name, &wp_fractional_scale_manager_v1_interface, 1));
++  } else if (g_strcmp0(interface, wp_presentation_interface.name) == 0) {
++    self->presentation = static_cast<struct wp_presentation*>(
++        wl_registry_bind(registry, name, &wp_presentation_interface, 1));
++    wp_presentation_add_listener(self->presentation, &kPresentationListener,
++                                 self);
+   }
+ }
+ 
+@@ -61,8 +91,13 @@
+ static void fl_wayland_display_dispose(GObject* object) {
+   FlWaylandDisplay* self = FL_WAYLAND_DISPLAY(object);
+ 
++  g_clear_pointer(&self->presentation, wp_presentation_destroy);
++  g_clear_pointer(&self->fractional_scale_manager,
++                  wp_fractional_scale_manager_v1_destroy);
++  g_clear_pointer(&self->viewporter, wp_viewporter_destroy);
+   g_clear_pointer(&self->subcompositor, wl_subcompositor_destroy);
+   g_clear_pointer(&self->compositor, wl_compositor_destroy);
++  self->wl_display = nullptr;
+ 
+   G_OBJECT_CLASS(fl_wayland_display_parent_class)->dispose(object);
+ }
+@@ -77,6 +112,7 @@
+   FlWaylandDisplay* self =
+       FL_WAYLAND_DISPLAY(g_object_new(fl_wayland_display_get_type(), nullptr));
+ 
++  self->wl_display = wl_display;
+   if (!bind_globals(self, wl_display)) {
+     g_warning("Required Wayland globals not available");
+     g_object_unref(self);
+@@ -112,8 +148,28 @@
+ FlSubsurface* fl_wayland_display_create_subsurface(
+     FlWaylandDisplay* self,
+     struct wl_surface* parent_surface) {
++  return fl_wayland_display_create_subsurface_full(self, parent_surface, FALSE);
++}
++
++FlSubsurface* fl_wayland_display_create_subsurface_full(
++    FlWaylandDisplay* self,
++    struct wl_surface* parent_surface,
++    gboolean desync) {
+   g_return_val_if_fail(FL_IS_WAYLAND_DISPLAY(self), nullptr);
+ 
+-  return fl_subsurface_new(self->compositor, self->subcompositor,
+-                           parent_surface);
++  return fl_subsurface_new_full(self->compositor, self->subcompositor,
++                                self->viewporter,
++                                self->fractional_scale_manager, parent_surface,
++                                desync);
++}
++
++struct wl_display* fl_wayland_display_get_wl_display(FlWaylandDisplay* self) {
++  g_return_val_if_fail(FL_IS_WAYLAND_DISPLAY(self), nullptr);
++  return self->wl_display;
++}
++
++struct wp_presentation* fl_wayland_display_get_presentation(
++    FlWaylandDisplay* self) {
++  g_return_val_if_fail(FL_IS_WAYLAND_DISPLAY(self), nullptr);
++  return self->presentation;
+ }
+--- a/engine/src/flutter/shell/platform/linux/fl_wayland_display.h
++++ b/engine/src/flutter/shell/platform/linux/fl_wayland_display.h
+@@ -10,6 +10,7 @@
+ #include "flutter/shell/platform/linux/fl_subsurface.h"
+ 
+ struct wl_display;
++struct wp_presentation;
+ 
+ G_BEGIN_DECLS
+ 
+@@ -68,6 +69,16 @@
+     FlWaylandDisplay* display,
+     struct wl_surface* parent_surface);
+ 
++FlSubsurface* fl_wayland_display_create_subsurface_full(
++    FlWaylandDisplay* display,
++    struct wl_surface* parent_surface,
++    gboolean desync);
++
++struct wl_display* fl_wayland_display_get_wl_display(FlWaylandDisplay* display);
++
++struct wp_presentation* fl_wayland_display_get_presentation(
++    FlWaylandDisplay* display);
++
+ G_END_DECLS
+ 
+ #endif  // FLUTTER_SHELL_PLATFORM_LINUX_FL_WAYLAND_DISPLAY_H_

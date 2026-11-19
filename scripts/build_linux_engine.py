@@ -10,10 +10,29 @@ import shutil
 import subprocess
 import tempfile
 
-REVISION = "5f77625673248ee5846fbcaf5d3e1a3878386fd7"
+REVISION = "371f77202a73e8dff57a8b3bff75bca55c090aee"
 ROOT = Path(__file__).resolve().parents[1]
 ENGINE = ROOT / "linux/engine"
-PATCHED = ["BUILD.gn", "fl_engine.cc", "fl_compositor_opengl.cc", "fl_view_renderer.cc"]
+PATCHED = [
+    "BUILD.gn",
+    "fl_compositor_opengl.cc",
+    "fl_engine.cc",
+    "fl_scrolling_manager.cc",
+    "fl_scrolling_manager.h",
+    "fl_subsurface.cc",
+    "fl_subsurface.h",
+    "fl_subsurface_egl.cc",
+    "fl_subsurface_egl.h",
+    "fl_touch_manager.cc",
+    "fl_touch_manager.h",
+    "fl_view.cc",
+    "fl_view_renderer.cc",
+    "fl_view_renderer.h",
+    "fl_view_renderer_subsurface.cc",
+    "fl_wayland_display.cc",
+    "fl_wayland_display.h",
+]
+PROTOCOLS = ("presentation-time", "fractional-scale-v1", "viewporter")
 RELATIVE = Path("engine/src/flutter/shell/platform/linux")
 
 
@@ -25,27 +44,40 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def generate_protocol(target):
-    header = target / "presentation-time-client-protocol.h"
-    run(["wayland-scanner", "client-header", ENGINE / "presentation-time.xml", header])
-    run(["wayland-scanner", "private-code", ENGINE / "presentation-time.xml",
-         target / "presentation-time-protocol.c"])
+def rewrite_wayland_118(text):
     # The engine's Debian Bullseye sysroot has Wayland 1.18. Keep generated
     # request wrappers compatible when the host scanner is 1.20 or newer.
-    text = header.read_text()
-    text = text.replace(
-        "wl_proxy_marshal_flags((struct wl_proxy *) wp_presentation,\n"
-        "\t\t\t WP_PRESENTATION_DESTROY, NULL, wl_proxy_get_version((struct wl_proxy *) wp_presentation), WL_MARSHAL_FLAG_DESTROY);",
-        "wl_proxy_marshal((struct wl_proxy *) wp_presentation, WP_PRESENTATION_DESTROY);\n"
-        "\twl_proxy_destroy((struct wl_proxy *) wp_presentation);")
-    text = text.replace(
-        "wl_proxy_marshal_flags((struct wl_proxy *) wp_presentation,\n"
-        "\t\t\t WP_PRESENTATION_FEEDBACK, &wp_presentation_feedback_interface, wl_proxy_get_version((struct wl_proxy *) wp_presentation), 0, surface, NULL);",
-        "wl_proxy_marshal_constructor_versioned((struct wl_proxy *) wp_presentation,\n"
-        "\t\t\t WP_PRESENTATION_FEEDBACK, &wp_presentation_feedback_interface, wl_proxy_get_version((struct wl_proxy *) wp_presentation), surface, NULL);")
+    text = re.sub(
+        r"wl_proxy_marshal_flags\(\(struct wl_proxy \*\) (\w+),\n\s+(\w+), NULL, "
+        r"wl_proxy_get_version\(\(struct wl_proxy \*\) \1\), WL_MARSHAL_FLAG_DESTROY\);",
+        r"wl_proxy_marshal((struct wl_proxy *) \1, \2);\n\twl_proxy_destroy((struct wl_proxy *) \1);",
+        text,
+    )
+    text = re.sub(
+        r"(\w+) = wl_proxy_marshal_flags\(\(struct wl_proxy \*\) (\w+),\n\s+(\w+), "
+        r"(&\w+), wl_proxy_get_version\(\(struct wl_proxy \*\) \2\), 0, ([^;]+)\);",
+        r"\1 = wl_proxy_marshal_constructor_versioned((struct wl_proxy *) \2,\n"
+        r"\t\t\t \3, \4, wl_proxy_get_version((struct wl_proxy *) \2), \5);",
+        text,
+    )
+    text = re.sub(
+        r"wl_proxy_marshal_flags\(\(struct wl_proxy \*\) (\w+),\n\s+(\w+), NULL, "
+        r"wl_proxy_get_version\(\(struct wl_proxy \*\) \1\), 0, ([^;]+)\);",
+        r"wl_proxy_marshal((struct wl_proxy *) \1, \2, \3);",
+        text,
+    )
     if "wl_proxy_marshal_flags" in text:
         raise RuntimeError("Unsupported wayland-scanner output; request wrappers need updating")
-    header.write_text(text)
+    return text
+
+
+def generate_protocols(target):
+    for name in PROTOCOLS:
+        header = target / f"{name}-client-protocol.h"
+        xml = ENGINE / f"{name}.xml"
+        run(["wayland-scanner", "client-header", xml, header])
+        run(["wayland-scanner", "private-code", xml, target / f"{name}-protocol.c"])
+        header.write_text(rewrite_wayland_118(header.read_text()))
 
 
 def main():
@@ -83,7 +115,7 @@ def main():
             shutil.copy2(staged / name, target / name)
     for path in ENGINE.glob("aetheria_*"):
         shutil.copy2(path, target / path.name)
-    generate_protocol(target)
+    generate_protocols(target)
     manifest.write_text(json.dumps({name: digest(target / name) for name in PATCHED}, indent=2))
     out = args.out_dir.resolve() if args.out_dir else source / "out" / f"host_{args.mode}"
     if not (out / "args.gn").exists():

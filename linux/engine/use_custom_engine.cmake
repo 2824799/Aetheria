@@ -1,7 +1,17 @@
 # Set the directory for this build only. Never modify the shared Flutter SDK.
+# If build/linux_engine/<mode> already exists for the current Flutter SDK
+# revision, pick it up automatically unless AETHERIA_LINUX_ENGINE_DIR=stock.
+string(TOLOWER "${CMAKE_BUILD_TYPE}" AETHERIA_RUNTIME_MODE)
+set(AETHERIA_LINUX_ENGINE_DIR "")
 if(DEFINED ENV{AETHERIA_LINUX_ENGINE_DIR} AND NOT "$ENV{AETHERIA_LINUX_ENGINE_DIR}" STREQUAL "")
-  file(TO_CMAKE_PATH "$ENV{AETHERIA_LINUX_ENGINE_DIR}" AETHERIA_LINUX_ENGINE_DIR)
-  string(TOLOWER "${CMAKE_BUILD_TYPE}" AETHERIA_RUNTIME_MODE)
+  if(NOT "$ENV{AETHERIA_LINUX_ENGINE_DIR}" STREQUAL "stock")
+    file(TO_CMAKE_PATH "$ENV{AETHERIA_LINUX_ENGINE_DIR}" AETHERIA_LINUX_ENGINE_DIR)
+  endif()
+elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../build/linux_engine/${AETHERIA_RUNTIME_MODE}/libflutter_linux_gtk.so")
+  file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../build/linux_engine" AETHERIA_LINUX_ENGINE_DIR)
+endif()
+
+if(NOT "${AETHERIA_LINUX_ENGINE_DIR}" STREQUAL "")
   set(AETHERIA_ENGINE_BUNDLE "${AETHERIA_LINUX_ENGINE_DIR}/${AETHERIA_RUNTIME_MODE}")
   foreach(name libflutter_linux_gtk.so engine.version)
     if(NOT EXISTS "${AETHERIA_ENGINE_BUNDLE}/${name}")
